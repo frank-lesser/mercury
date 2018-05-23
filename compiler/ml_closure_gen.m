@@ -144,16 +144,24 @@ ml_gen_closure(PredId, ProcId, Var, ArgVars, ArgModes, HowToConstruct, Context,
 
     % Put all the extra arguments of the closure together
     % Note that we need to box these arguments.
-    NumArgsRval = ml_unop(box(NumArgsType0), NumArgsRval0),
+    NumArgsRval = ml_box(NumArgsType0, NumArgsRval0),
     NumArgsType = mlds_generic_type,
-    WrapperFuncRval = ml_unop(box(WrapperFuncType0), WrapperFuncRval0),
+    WrapperFuncRval = ml_box(WrapperFuncType0, WrapperFuncRval0),
     WrapperFuncType = mlds_generic_type,
-    ClosureLayoutRval = ml_unop(box(ClosureLayoutType0), ClosureLayoutRval0),
+    ClosureLayoutRval = ml_box(ClosureLayoutType0, ClosureLayoutRval0),
     ClosureLayoutType = mlds_generic_type,
-    ExtraArgRvals = [ClosureLayoutRval, WrapperFuncRval, NumArgsRval],
-    ExtraArgTypes = [ClosureLayoutType, WrapperFuncType, NumArgsType],
+    ExtraArgRvalsTypes =
+        [rval_type_and_width(ClosureLayoutRval, ClosureLayoutType,
+            apw_full(arg_only_offset(0), cell_offset(0))),
+        rval_type_and_width(WrapperFuncRval, WrapperFuncType,
+            apw_full(arg_only_offset(1), cell_offset(1))),
+        rval_type_and_width(NumArgsRval, NumArgsType,
+            apw_full(arg_only_offset(2), cell_offset(2)))],
 
-    % The pointer will not be tagged (i.e. the tag will be zero).
+    % MaybeConsId = no means that the pointer will not be tagged
+    % (i.e. its primary tag bits will be zero).
+    % XXX Passing a real cons_id would simplify the code of ml_gen_new_object,
+    % even if we created a cons_id specifically for this purpose.
     MaybeConsId = no,
     MaybeConsName = no,
     PTag = 0,
@@ -161,7 +169,7 @@ ml_gen_closure(PredId, ProcId, Var, ArgVars, ArgModes, HowToConstruct, Context,
 
     % Generate a `new_object' statement (or static constant) for the closure.
     ml_gen_new_object(MaybeConsId, MaybeConsName, PTag, MaybeSTag,
-        Var, ExtraArgRvals, ExtraArgTypes, ArgVars, ArgModes, [],
+        Var, ExtraArgRvalsTypes, ArgVars, ArgModes, [],
         HowToConstruct, Context, Stmts, !Info).
 
     % Generate a value for the closure layout struct.
@@ -193,8 +201,7 @@ ml_gen_closure_layout(PredId, ProcId, Context,
 
         ml_stack_layout_construct_tvar_vector(ModuleInfo, mgcv_typevar_vector,
             Context, TVarLocnMap, TVarVectorRval, TVarVectorType, !GlobalData),
-        InitTVarVector =
-            init_obj(ml_unop(box(TVarVectorType), TVarVectorRval)),
+        InitTVarVector = init_obj(ml_box(TVarVectorType, TVarVectorRval)),
         Inits = [InitProcId, InitTVarVector | ClosureArgInits],
         % _ArgTypes = [ProcIdType, TVarVectorType | ClosureArgTypes],
 
@@ -247,7 +254,7 @@ ml_stack_layout_construct_closure_args(ModuleInfo, Target, ClosureArgs,
         ClosureArgs, ArgInitsAndTypes, !GlobalData),
     Length = list.length(ArgInitsAndTypes),
     LengthRval = ml_const(mlconst_int(Length)),
-    CastLengthRval = ml_unop(box(LengthType), LengthRval),
+    CastLengthRval = ml_box(LengthType, LengthRval),
     LengthType = mlds_native_int_type,
     LengthInitAndType = init_obj(CastLengthRval) - LengthType,
     ClosureArgInits = [LengthInitAndType | ArgInitsAndTypes].
@@ -271,7 +278,7 @@ ml_stack_layout_construct_closure_arg_rval(ModuleInfo, Target, ClosureArg,
         ExistQTvars, PseudoTypeInfo),
     ml_gen_pseudo_type_info(ModuleInfo, Target, PseudoTypeInfo,
         ArgRval, ArgType, !GlobalData),
-    CastArgRval = ml_unop(box(ArgType), ArgRval),
+    CastArgRval = ml_box(ArgType, ArgRval),
     ArgInit = init_obj(CastArgRval).
 
 :- pred ml_gen_maybe_pseudo_type_info_defn(module_info::in,
@@ -1046,7 +1053,7 @@ ml_gen_wrapper_arg_lvals(CopyOutWhen, Context, ArgNum,
         TopFunctorMode = top_out,
         % Handle output variables.
         ml_gen_info_get_module_info(!.Info, ModuleInfo),
-        IsDummy = check_dummy_type(ModuleInfo, Type),
+        IsDummy = is_type_a_dummy(ModuleInfo, Type),
         ( if
             (
                 CopyOutWhen = copy_out_only_last_arg,
@@ -1145,7 +1152,7 @@ ml_gen_closure_wrapper_gc_decls(ClosureKind, ClosureArgName, ClosureArgType,
         ClosureLayoutPtrGCInit =
             ml_stmt_atomic(
                 assign(ClosureLayoutPtrLval,
-                    ml_unop(box(ClosureLayoutType), ClosureLayoutRval)),
+                    ml_box(ClosureLayoutType, ClosureLayoutRval)),
                 Context),
         TypeParamsGCInitFragments = [
             target_code_output(TypeParamsLval),

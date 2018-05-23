@@ -214,10 +214,10 @@ rename_class_names_in_stmt(Renaming, !Stmt) :-
         list.map(rename_class_names_in_stmt(Renaming), SubStmts0, SubStmts),
         !:Stmt = ml_stmt_block(LocalVarDefns, FuncDefns, SubStmts, Context)
     ;
-        !.Stmt = ml_stmt_while(Kind, Rval0, SubStmt0, Context),
+        !.Stmt = ml_stmt_while(Kind, Rval0, SubStmt0, LoopLocalVars, Context),
         rename_class_names_in_rval(Renaming, Rval0, Rval),
         rename_class_names_in_stmt(Renaming, SubStmt0, SubStmt),
-        !:Stmt = ml_stmt_while(Kind, Rval, SubStmt, Context)
+        !:Stmt = ml_stmt_while(Kind, Rval, SubStmt, LoopLocalVars, Context)
     ;
         !.Stmt = ml_stmt_if_then_else(Rval0, Then0, MaybeElse0, Context),
         rename_class_names_in_rval(Renaming, Rval0, Rval),
@@ -323,13 +323,13 @@ rename_class_names_in_atomic(Renaming, !Stmt) :-
         !:Stmt = delete_object(Rval)
     ;
         !.Stmt = new_object(TargetLval0, MaybeTag, ExplicitSecTag, Type0,
-            MaybeSize, MaybeCtorName, Args0, ArgTypes0, MayUseAtomic, AllocId),
+            MaybeSize, MaybeCtorName, ArgRvalsTypes0, MayUseAtomic, AllocId),
         rename_class_names_in_lval(Renaming, TargetLval0, TargetLval),
         rename_class_names_in_type(Renaming, Type0, Type),
-        list.map(rename_class_names_in_rval(Renaming), Args0, Args),
-        list.map(rename_class_names_in_type(Renaming), ArgTypes0, ArgTypes),
+        list.map(rename_class_names_in_typed_rval(Renaming),
+            ArgRvalsTypes0, ArgRvalsTypes),
         !:Stmt = new_object(TargetLval, MaybeTag, ExplicitSecTag, Type,
-            MaybeSize, MaybeCtorName, Args, ArgTypes, MayUseAtomic, AllocId)
+            MaybeSize, MaybeCtorName, ArgRvalsTypes, MayUseAtomic, AllocId)
     ;
         !.Stmt = inline_target_code(Lang, Components0),
         (
@@ -394,6 +394,15 @@ rename_class_names_in_field_id(Renaming, !FieldId) :-
         !:FieldId = ml_field_named(Name, Type)
     ).
 
+:- pred rename_class_names_in_typed_rval(class_name_renaming::in,
+    mlds_typed_rval::in, mlds_typed_rval::out) is det.
+
+rename_class_names_in_typed_rval(Renaming, !TypedRval) :-
+    !.TypedRval = ml_typed_rval(Rval0, Type0),
+    rename_class_names_in_rval(Renaming, Rval0, Rval),
+    rename_class_names_in_type(Renaming, Type0, Type),
+    !:TypedRval = ml_typed_rval(Rval, Type).
+
 :- pred rename_class_names_in_rval(class_name_renaming::in,
     mlds_rval::in, mlds_rval::out) is det.
 
@@ -411,15 +420,29 @@ rename_class_names_in_rval(Renaming, !Rval) :-
         rename_class_names_in_rval_const(Renaming, RvalConst0, RvalConst),
         !:Rval = ml_const(RvalConst)
     ;
-        !.Rval = ml_unop(Op0, Rval0),
-        rename_class_names_in_unary_op(Renaming, Op0, Op),
-        rename_class_names_in_rval(Renaming, Rval0, Rval),
-        !:Rval = ml_unop(Op, Rval)
+        !.Rval = ml_box(Type0, SubRval0),
+        rename_class_names_in_type(Renaming, Type0, Type),
+        rename_class_names_in_rval(Renaming, SubRval0, SubRval),
+        !:Rval = ml_box(Type, SubRval)
     ;
-        !.Rval = ml_binop(Op, RvalA0, RvalB0),
-        rename_class_names_in_rval(Renaming, RvalA0, RvalA),
-        rename_class_names_in_rval(Renaming, RvalB0, RvalB),
-        !:Rval = ml_binop(Op, RvalA, RvalB)
+        !.Rval = ml_unbox(Type0, SubRval0),
+        rename_class_names_in_type(Renaming, Type0, Type),
+        rename_class_names_in_rval(Renaming, SubRval0, SubRval),
+        !:Rval = ml_unbox(Type, SubRval)
+    ;
+        !.Rval = ml_cast(Type0, SubRval0),
+        rename_class_names_in_type(Renaming, Type0, Type),
+        rename_class_names_in_rval(Renaming, SubRval0, SubRval),
+        !:Rval = ml_cast(Type, SubRval)
+    ;
+        !.Rval = ml_unop(Op, SubRval0),
+        rename_class_names_in_rval(Renaming, SubRval0, SubRval),
+        !:Rval = ml_unop(Op, SubRval)
+    ;
+        !.Rval = ml_binop(Op, SubRvalA0, SubRvalB0),
+        rename_class_names_in_rval(Renaming, SubRvalA0, SubRvalA),
+        rename_class_names_in_rval(Renaming, SubRvalB0, SubRvalB),
+        !:Rval = ml_binop(Op, SubRvalA, SubRvalB)
     ;
         !.Rval = ml_mem_addr(Lval0),
         rename_class_names_in_lval(Renaming, Lval0, Lval),
@@ -475,26 +498,6 @@ rename_class_names_in_rval_const(Renaming, !Const) :-
         ; !.Const = mlconst_data_addr_rtti(_, _)
         ; !.Const = mlconst_data_addr_tabling(_, _)
         )
-    ).
-
-:- pred rename_class_names_in_unary_op(class_name_renaming::in,
-    mlds_unary_op::in, mlds_unary_op::out) is det.
-
-rename_class_names_in_unary_op(Renaming, !Op) :-
-    (
-        !.Op = box(Type0),
-        rename_class_names_in_type(Renaming, Type0, Type),
-        !:Op = box(Type)
-    ;
-        !.Op = unbox(Type0),
-        rename_class_names_in_type(Renaming, Type0, Type),
-        !:Op = unbox(Type)
-    ;
-        !.Op = cast(Type0),
-        rename_class_names_in_type(Renaming, Type0, Type),
-        !:Op = cast(Type)
-    ;
-        !.Op = std_unop(_)
     ).
 
 :- pred rename_class_names_in_target_code_component(class_name_renaming::in,

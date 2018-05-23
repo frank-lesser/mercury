@@ -969,7 +969,7 @@ write_unify_rhs_2(Info, ModuleInfo, VarSet, InstVarSet, TypeQual, VarNamePrint,
             do_write_goal(Info, ModuleInfo, VarSet, TypeQual, VarNamePrint,
                 Indent1, "\n", Goal, !IO),
             write_indent(Indent, !IO),
-            io.write_string(")\n", !IO)
+            io.write_string(")", !IO)
         ;
             PredOrFunc = pf_function,
             (
@@ -1001,7 +1001,7 @@ write_unify_rhs_2(Info, ModuleInfo, VarSet, InstVarSet, TypeQual, VarNamePrint,
             do_write_goal(Info, ModuleInfo, VarSet, TypeQual, VarNamePrint,
                 Indent1, "\n", Goal, !IO),
             write_indent(Indent, !IO),
-            io.write_string(")\n", !IO)
+            io.write_string(")", !IO)
         ),
         ( if
             MaybeType = yes(Type),
@@ -1087,7 +1087,7 @@ write_unification(Info, ModuleInfo, ProgVarSet, InstVarSet, VarNamePrint,
                 TypeCtor = type_ctor(TypeCtorSymName, TypeCtorArity),
                 write_indent(Indent, !IO),
                 TypeCtorSymNameStr = sym_name_to_string(TypeCtorSymName),
-                io.format("%% cons_id type_ctor: %s/%d",
+                io.format("%% cons_id type_ctor: %s/%d\n",
                     [s(TypeCtorSymNameStr), i(TypeCtorArity)], !IO)
             else
                 true

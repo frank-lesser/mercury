@@ -45,7 +45,13 @@
     ;       hash_string3
     ;       hash_string4
     ;       hash_string5
-    ;       hash_string6.
+    ;       hash_string6
+    ;       dword_float_get_word0
+    ;       dword_float_get_word1
+    ;       dword_int64_get_word0
+    ;       dword_int64_get_word1
+    ;       dword_uint64_get_word0
+    ;       dword_uint64_get_word1.
 
 :- type binary_op
     --->    int_add(int_type)
@@ -110,8 +116,9 @@
     ;       float_gt
     ;       float_le
     ;       float_ge
-    ;       float_word_bits
     ;       float_from_dword
+    ;       int64_from_dword
+    ;       uint64_from_dword
 
     ;       pointer_equal_conservative
 
@@ -247,7 +254,7 @@ translate_builtin(FullyQualifiedModule, PredName, ProcId, Args, Code) :-
     else
         list.length(Args, Arity),
         string.format("unknown builtin %s/%d", [s(PredName), i(Arity)], Msg),
-        unexpected($module, $pred, Msg)
+        unexpected($pred, Msg)
     ).
 
 :- pred builtin_translation(string::in, string::in, int::in, list(T)::in,

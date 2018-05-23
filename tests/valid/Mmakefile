@@ -84,11 +84,14 @@ OTHER_PROGS = \
 	bug402 \
 	bug414 \
 	bug429 \
+	bug457 \
 	bug51 \
 	bug85 \
 	builtin_false \
 	call_failure \
 	common_struct_bug \
+	complete_int8_switch \
+	complete_uint8_switch \
 	compl_unify_bug \
 	complicated_unify \
 	constr_inst_syntax \

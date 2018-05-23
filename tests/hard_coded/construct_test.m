@@ -4,7 +4,8 @@
 %
 % Test case for construct, num_functors, type_of and get_functor.
 %
-% Author: trd
+% Original author: trd
+%
 
 :- module construct_test.
 :- interface.
@@ -69,315 +70,352 @@
 :- type exist_type
     --->    some [T] xyzzy(f21name :: T).
 
+    % By using nine non-constant functors, we are forcing packed8
+    % and packed 9 to share a primary tag even on 64 bit systems.
+    % packed_1 tests the secondary tag absent case, while packed_8
+    % tests the secondary tag present case in the construct predicate.
+:- type packed(T)
+    --->    packed_1(int8, uint8, dummy, dummy, int8, uint8, T)
+    ;       some [U] packed_2(dummy, U, int8, uint8, dummy, int8, uint8)
+    ;       packed_3(int)
+    ;       packed_4(int)
+    ;       packed_5(int)
+    ;       packed_6(int)
+    ;       packed_7(int)
+    ;       packed_8(T, dummy, int8, uint8, dummy, dummy, int8, uint8,
+                float, int)
+    ;       some [U] packed_9(T, dummy, U, int8, uint8, dummy, int8, uint8).
+
 %---------------------------------------------------------------------------%
 
-main -->
-    test_discriminated,
-    test_polymorphism,
-    test_builtins,
-    test_other,
-    test_construct.
+main(!IO) :-
+    io.write_string("------- TESTING TYPE DESCRIPTIONS -------\n", !IO),
+
+    describe_functors_in_du_types(!IO),
+    describe_functors_in_polymorphic_types(!IO),
+    describe_functors_in_builtin_types(!IO),
+    describe_functors_in_other_types(!IO),
+
+    io.write_string("\n------- TESTING CONSTRUCTION OF TERMS -------\n", !IO),
+    test_construction(!IO).
 
 %---------------------------------------------------------------------------%
 
-:- pred test_construct(io::di, io::uo) is det.
+:- pred describe_functors_in_du_types(io::di, io::uo) is det.
 
-test_construct -->
+describe_functors_in_du_types(!IO) :-
+    io.write_string("\nTESTING DISCRIMINATED UNIONS\n", !IO),
+
+    % Test enumerations.
+    describe_all_functors_of_type(two, !IO),
+    describe_all_functors_of_type(one, !IO),
+    describe_all_functors_of_type(three, !IO),
+
+    % Test simple tags.
+    describe_all_functors_of_type(apple([9, 5, 1]), !IO),
+    describe_all_functors_of_type(banana([three, one, two]), !IO),
+
+    % Test complicated tags.
+    describe_all_functors_of_type(zop(3.3, 2.03), !IO),
+    describe_all_functors_of_type(zip(3, 2), !IO),
+    describe_all_functors_of_type(zap(3, -2.111), !IO),
+
+    % Test complicated constants.
+    describe_all_functors_of_type(wombat, !IO),
+    describe_all_functors_of_type(foo, !IO).
+
+:- pred describe_functors_in_polymorphic_types(io::di, io::uo) is det.
+
+describe_functors_in_polymorphic_types(!IO) :-
+    io.write_string("\nTESTING POLYMORPHISM\n", !IO),
+    describe_all_functors_of_type(poly_three(3.33, 4, poly_one(9.11)), !IO),
+    describe_all_functors_of_type(poly_two(3) : poly(dummy, int), !IO),
+    describe_all_functors_of_type(poly_one([2399.3]) :
+        poly(list(float), dummy), !IO).
+
+:- pred describe_functors_in_builtin_types(io::di, io::uo) is det.
+
+describe_functors_in_builtin_types(!IO) :-
+    io.write_string("\nTESTING BUILTINS\n", !IO),
+
+    % Test strings.
+    describe_all_functors_of_type("", !IO),
+    describe_all_functors_of_type("Hello, world\n", !IO),
+    describe_all_functors_of_type("Foo%sFoo", !IO),
+    describe_all_functors_of_type("""", !IO),
+
+    % Test characters.
+    describe_all_functors_of_type('a', !IO),
+    describe_all_functors_of_type('&', !IO),
+
+    % Test floats.
+    describe_all_functors_of_type(3.14159, !IO),
+    describe_all_functors_of_type(11.28324983E-22, !IO),
+    describe_all_functors_of_type(22.3954899E22, !IO),
+
+    % Test integers.
+    describe_all_functors_of_type(-65, !IO),
+    describe_all_functors_of_type(4, !IO),
+
+    % Test unsigned integers.
+    describe_all_functors_of_type(42u, !IO),
+
+    % Test fixed size integers.
+    describe_all_functors_of_type(42i8, !IO),
+    describe_all_functors_of_type(42u8, !IO),
+    describe_all_functors_of_type(42i16, !IO),
+    describe_all_functors_of_type(42u16, !IO),
+    describe_all_functors_of_type(42i32, !IO),
+    describe_all_functors_of_type(42u32, !IO),
+    describe_all_functors_of_type(42i64, !IO),
+    describe_all_functors_of_type(42u64, !IO),
+
+    % Test univ.
+    % type_to_univ(["hi! I'm a univ!"], Univ),
+    % describe_all_functors_of_type(Univ, !IO),
+
+    % Test predicates.
+    describe_all_functors_of_type(newline, !IO),
+
+    % Test tuples.
+    describe_all_functors_of_type({1, "a", 'a', {4, 'd'}}, !IO),
+
+    % Test lists.
+    describe_all_functors_of_type([1, 2, 3, 4], !IO).
+
+:- pred describe_functors_in_other_types(io::di, io::uo) is det.
+
+describe_functors_in_other_types(!IO) :-
+    io.write_string("\nTESTING OTHER TYPES\n", !IO),
+
+    term.init_var_supply(VarSupply : var_supply(int)),
+    term.create_var(Var, VarSupply, NewVarSupply),
+    describe_all_functors_of_type(Var, !IO),
+    describe_all_functors_of_type(VarSupply, !IO),
+    describe_all_functors_of_type(NewVarSupply, !IO),
+
+    % Presently, at least, map is an equivalence and an abstract type.
+    % Note: testing abstract types is always going to have results
+    % that are dependent on the implementation. If someone changes
+    % the implementation, the results of this test can change.
+    map.init(Map : map(int, int)),
+    describe_all_functors_of_type(Map, !IO),
+
+    % A no tag type.
+    describe_all_functors_of_type(qwerty(4), !IO),
+
+    % A dummy type.
+    describe_all_functors_of_type(dummy, !IO),
+
+    % A functor with a single unboxed argument.
+    describe_all_functors_of_type(unboxed_arg(unboxed_struct(12, 34)), !IO),
+
+    % An existential type.
+    ExistVal = 'new xyzzy'(8),
+    describe_all_functors_of_type(ExistVal, !IO).
+
+%---------------------------------------------------------------------------%
+
+:- pred describe_all_functors_of_type(T::in, io::di, io::uo) is det.
+
+describe_all_functors_of_type(T, !IO) :-
+    io.nl(!IO),
+    TypeInfo = type_desc.type_of(T),
+    ( if NumFunctors = construct.num_functors(TypeInfo) then
+        io.format("#functors in this type = %d\n", [i(NumFunctors)], !IO),
+        describe_functors_of_type_loop(TypeInfo, 0, NumFunctors, !IO)
+    else
+        io.format("#functors in this type = %d\n", [i(0)], !IO)
+    ).
+
+:- pred describe_functors_of_type_loop(type_desc.type_desc::in,
+    int::in, int::in, io::di, io::uo) is det.
+
+describe_functors_of_type_loop(TypeInfo, Cur, NumFunctors, !IO) :-
+    ( if Cur >= NumFunctors then
+        true
+    else
+        describe_nth_functor_of_type(TypeInfo, Cur, !IO),
+        describe_functors_of_type_loop(TypeInfo, Cur + 1, NumFunctors, !IO)
+    ).
+
+:- pred describe_nth_functor_of_type(type_desc.type_desc::in, int::in,
+    io::di, io::uo) is det.
+
+describe_nth_functor_of_type(TypeInfo, N, !IO) :-
+    ( if
+        % Ordinal = construct.get_functor_ordinal(TypeInfo, N),
+        % Lex = construct.get_functor_lex(TypeInfo, Ordinal),
+        Lex = construct.get_functor_lex(TypeInfo, N),
+        Ordinal = construct.get_functor_ordinal(TypeInfo, Lex),
+        construct.get_functor_with_names(TypeInfo, Lex,
+            FunctorName, FunctorArity, _ArgTypesList, ArgMaybeNames)
+    then
+        ( if N = Ordinal then
+            ArgNames = list.map(name_or_underscore, ArgMaybeNames),
+            ArgNamesDesc = join_list(", ", ArgNames),
+            FunctorNA = string.format("%s/%d",
+                [s(FunctorName), i(FunctorArity)]),
+            io.format("%2d - %-14s lex: %2d [%s]\n",
+                [i(N), s(FunctorNA), i(Lex), s(ArgNamesDesc)], !IO)
+        else
+            io.format("N (%d) != Ordinal (%d)\n", [i(N), i(Ordinal)], !IO)
+        )
+    else
+        io.format("%d failed\n", [i(N)], !IO)
+    ).
+
+:- func name_or_underscore(maybe(string)) = string.
+
+name_or_underscore(MaybeName) = Str :-
+    (
+        MaybeName = yes(Name),
+        Str = Name
+    ;
+        MaybeName = no,
+        Str = "_"
+    ).
+
+%---------------------------------------------------------------------------%
+
+:- pred newline(io::di, io::uo) is det.
+
+newline(!IO) :-
+    io.nl( !IO).
+
+%---------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
+
+:- pred test_construction(io::di, io::uo) is det.
+
+test_construction(!IO) :-
     % Valid tests.
 
     % Enumerations:
 
-    test_construct_2(type_desc__type_of(one), "three", 0, []),
+    test_construct(type_desc.type_of(one),
+        "three", [], !IO),
 
-    { type_to_univ([1, 2, 3], NumList) },
-    test_construct_2(type_desc__type_of(apple([])), "apple", 1, [NumList]),
+    type_to_univ([1, 2, 3], NumList),
+    test_construct(type_desc.type_of(apple([])),
+        "apple", [NumList], !IO),
 
-    { type_to_univ([one, two, three], EnumList) },
-    test_construct_2(type_desc__type_of(apple([])), "banana", 1,
-        [EnumList]),
+    type_to_univ([one, two, three], EnumList),
+    test_construct(type_desc.type_of(apple([])),
+        "banana", [EnumList], !IO),
 
     % Discriminated union:
     % (Simple, complicated and complicated constant tags).
 
-    { type_to_univ(1, One) },
-    { type_to_univ(2.1, TwoPointOne) },
+    type_to_univ(1, One),
+    type_to_univ(2.1, TwoPointOne),
 
-    test_construct_2(type_desc__type_of(wombat), "foo", 0, []),
-    test_construct_2(type_desc__type_of(wombat), "bar", 1, [One]),
-    test_construct_2(type_desc__type_of(wombat), "bar", 2, [One, One]),
-    test_construct_2(type_desc__type_of(wombat), "qux", 1, [One]),
-    test_construct_2(type_desc__type_of(wombat), "quux", 1, [One]),
-    test_construct_2(type_desc__type_of(wombat), "quuux", 2, [One, One]),
-    test_construct_2(type_desc__type_of(wombat), "wombat", 0, []),
-    test_construct_2(type_desc__type_of(wombat), "zoom", 1, [One]),
-    test_construct_2(type_desc__type_of(wombat), "zap", 2,
-        [One, TwoPointOne]),
-    test_construct_2(type_desc__type_of(wombat), "zip", 2, [One, One]),
-    test_construct_2(type_desc__type_of(wombat), "zop", 2,
-        [TwoPointOne, TwoPointOne]),
+    test_construct(type_desc.type_of(wombat),
+        "foo", [], !IO),
+    test_construct(type_desc.type_of(wombat),
+        "bar", [One], !IO),
+    test_construct(type_desc.type_of(wombat),
+        "bar", [One, One], !IO),
+    test_construct(type_desc.type_of(wombat),
+        "qux", [One], !IO),
+    test_construct(type_desc.type_of(wombat),
+        "quux", [One], !IO),
+    test_construct(type_desc.type_of(wombat),
+        "quuux", [One, One], !IO),
+    test_construct(type_desc.type_of(wombat),
+        "wombat", [], !IO),
+    test_construct(type_desc.type_of(wombat),
+        "zoom", [One], !IO),
+    test_construct(type_desc.type_of(wombat),
+        "zap", [One, TwoPointOne], !IO),
+    test_construct(type_desc.type_of(wombat),
+        "zip", [One, One], !IO),
+    test_construct(type_desc.type_of(wombat),
+        "zop", [TwoPointOne, TwoPointOne], !IO),
 
-    % No-tag type:
-
-    test_construct_2(type_desc__type_of(qwerty(7)), "qwerty", 1, [One]),
+    % No-tag type.
+    test_construct(type_desc.type_of(qwerty(7)),
+        "qwerty", [One], !IO),
 
     % Functor with single unboxed argument.
+    type_to_univ(unboxed_struct(12, 34), UnboxedStruct),
+    test_construct(type_desc.type_of(_ : unboxed_arg),
+        "unboxed_arg", [UnboxedStruct], !IO),
 
-    { type_to_univ(unboxed_struct(12, 34), UnboxedStruct) },
-    test_construct_2(type_desc__type_of(_ : unboxed_arg), "unboxed_arg",
-        1, [UnboxedStruct]),
+    type_to_univ("goodbye", Bye),
 
-    { type_to_univ("goodbye", Bye) },
+    test_construct(type_desc.type_of(poly_four(3, "hello")),
+        "poly_one", [One], !IO),
+    test_construct(type_desc.type_of(poly_four(3, "hello")),
+        "poly_two", [Bye], !IO),
+    test_construct(type_desc.type_of(poly_four(3, "hello")),
+        "poly_four", [One, Bye], !IO),
+    test_construct(type_desc.type_of({1, "two", '3'}),
+        "{}", [univ(4), univ("five"), univ('6')], !IO),
 
-    test_construct_2(type_desc__type_of(poly_four(3, "hello")),
-        "poly_one", 1, [One]),
-    test_construct_2(type_desc__type_of(poly_four(3, "hello")),
-        "poly_two", 1, [Bye]),
-    test_construct_2(type_desc__type_of(poly_four(3, "hello")),
-        "poly_four", 2, [One, Bye]),
-    test_construct_2(type_desc__type_of({1, "two", '3'}), "{}", 3,
-        [univ(4), univ("five"), univ('6')]),
+    io.nl(!IO),
+    io.write_string("About to construct a tuple\n", !IO),
+    Tuple = construct.construct_tuple([NumList, EnumList, One, TwoPointOne]),
+    io.write(Tuple, !IO),
+    io.nl(!IO),
 
-    io__write_string("About to call construct_tuple\n"),
-    { Tuple = construct__construct_tuple(
-        [NumList, EnumList, One, TwoPointOne]) },
-    io__write_string("Constructed tuple: "),
-    io__write(Tuple),
-    io__nl.
+    Packed =
+        type_desc.type_of(packed_1(0i8, 0u8, dummy, dummy, 0i8, 0u8, "")),
 
-:- pred test_construct_2(type_desc__type_desc::in, string::in, int::in,
+    test_construct(Packed, "packed_1",
+        [univ(-11i8), univ(11u8), univ(dummy), univ(dummy),
+        univ(-127i8), univ(255u8), univ("abc")], !IO),
+    % We cannot yet construct terms with existentially typed arguments.
+%   test_construct(Packed, "packed_2",
+%       [univ(dummy), univ(-11i8), univ(-11i8), univ(11u8), univ(dummy),
+%       univ(-127i8), univ(255u8)], !IO),
+    test_construct(Packed, "packed_8",
+        [univ("def"), univ(dummy), univ(-11i8), univ(11u8),
+        univ(dummy), univ(dummy), univ(-127i8), univ(255u8),
+        univ(1234.567), univ(42)], !IO).
+    % We cannot yet construct terms with existentially typed arguments.
+%   test_construct(Packed, "packed_9",
+%       [univ("def"), univ(dummy), univ(1234.56), univ(-25i8), univ(140u8),
+%       univ(dummy), univ(-127i8), univ(255u8)], !IO).
+
+:- pred test_construct(type_desc.type_desc::in, string::in,
     list(univ)::in, io::di, io::uo) is det.
 
-test_construct_2(TypeInfo, FunctorName, Arity, Args) -->
-    { find_functor(TypeInfo, FunctorName, Arity, FunctorNumber) },
-    io__write_string("About to construct "),
-    io__write_string(FunctorName),
-    io__write_string("/"),
-    io__write_int(Arity),
-    newline,
-    (
-        { Constructed =
-            construct__construct(TypeInfo, FunctorNumber, Args) }
-    ->
-        io__write_string("Constructed: "),
-        io__print(Constructed),
-        newline
-    ;
-        io__write_string("Construction failed.\n")
+test_construct(TypeInfo, FunctorName, Args, !IO) :-
+    io.nl(!IO),
+    list.length(Args, Arity),
+    find_functor(TypeInfo, FunctorName, Arity, FunctorNumber),
+    io.format("About to construct %s/%d\n", [s(FunctorName), i(Arity)], !IO),
+    ( if Constructed = construct.construct(TypeInfo, FunctorNumber, Args) then
+        io.print(Constructed, !IO),
+        io.nl(!IO)
+    else
+        io.write_string("Construction failed.\n", !IO)
     ).
 
-:- pred find_functor(type_desc__type_desc::in, string::in, int::in, int::out)
+:- pred find_functor(type_desc.type_desc::in, string::in, int::in, int::out)
     is det.
 
 find_functor(TypeInfo, Functor, Arity, FunctorNumber) :-
-    ( N = construct__num_functors(TypeInfo) ->
-        find_functor2(TypeInfo, Functor, Arity, N, FunctorNumber)
-    ;
-        error("unable to find functor")
+    ( if N = construct.num_functors(TypeInfo) then
+        find_functor_loop(TypeInfo, Functor, Arity, N, FunctorNumber)
+    else
+        error("unable to find number of functors")
     ).
 
-:- pred find_functor2(type_desc__type_desc::in, string::in, int::in, int::in,
-    int::out) is det.
+:- pred find_functor_loop(type_desc.type_desc::in, string::in, int::in,
+    int::in, int::out) is det.
 
-find_functor2(TypeInfo, Functor, Arity, Num, FunctorNumber) :-
-    ( Num < 0 ->
+find_functor_loop(TypeInfo, Functor, Arity, Num, FunctorNumber) :-
+    ( if Num < 0 then
         error("unable to find functor")
-    ;
-        ( construct__get_functor(TypeInfo, Num, Functor, Arity, _) ->
+    else
+        ( if construct.get_functor(TypeInfo, Num, Functor, Arity, _) then
             FunctorNumber = Num
-        ;
-            find_functor2(TypeInfo, Functor, Arity, Num - 1,
+        else
+            find_functor_loop(TypeInfo, Functor, Arity, Num - 1,
                 FunctorNumber)
         )
     ).
 
 %---------------------------------------------------------------------------%
-
-:- pred test_all(T::in, io::di, io::uo) is det.
-
-test_all(T, !IO) :-
-    TypeInfo = type_desc__type_of(T),
-    ( N = construct__num_functors(TypeInfo) ->
-        io__write_int(N, !IO),
-        io__write_string(" functors in this type", !IO),
-        io__nl(!IO),
-        test_all_functors(TypeInfo, N, !IO),
-        io__nl(!IO)
-    ;
-        io__write_string("no functors in this type\n", !IO)
-    ).
-
-:- pred test_all_functors(type_desc__type_desc::in, int::in, io::di, io::uo)
-    is det.
-
-test_all_functors(TypeInfo, N, !IO) :-
-    ( N =< 0 ->
-        true
-    ;
-        test_nth_functor(TypeInfo, N - 1, !IO),
-        test_all_functors(TypeInfo, N - 1, !IO)
-    ).
-
-:- pred test_nth_functor(type_desc__type_desc::in, int::in, io::di, io::uo)
-    is det.
-
-test_nth_functor(TypeInfo, N, !IO) :-
-    io__write_int(N, !IO),
-    (
-        Ordinal = construct__get_functor_ordinal(TypeInfo, N),
-        Lex = construct__get_functor_lex(TypeInfo, Ordinal),
-        construct__get_functor_with_names(TypeInfo, N, Name, Arity,
-            _List, Names)
-    ->
-        io__write_string(" - ", !IO),
-        io__write_string(Name, !IO),
-        io__write_string("/", !IO),
-        io__write_int(Arity, !IO),
-        io__write_string(" [", !IO),
-        io__write_list(Names, ", ", print_maybe_name, !IO),
-        io__write_string("] ", !IO),
-        io__write_string("ordinal: ", !IO),
-        io__write_int(Ordinal, !IO),
-        io__write_string(" lex: ", !IO),
-        io__write_int(Lex, !IO),
-        io__nl(!IO)
-    ;
-        io__write_string(" failed ", !IO),
-        io__nl(!IO)
-    ).
-
-:- pred print_maybe_name(maybe(string)::in, io::di, io::uo) is det.
-
-print_maybe_name(MaybeName, !IO) :-
-    (
-        MaybeName = yes(FieldName),
-        io__write_string(FieldName, !IO)
-    ;
-        MaybeName = no,
-        io__write_string("_", !IO)
-    ).
-
-%---------------------------------------------------------------------------%
-
-:- pred test_discriminated(io::di, io::uo) is det.
-
-test_discriminated -->
-    io__write_string("TESTING DISCRIMINATED UNIONS\n"),
-
-        % test enumerations
-    test_all(two), newline,
-    test_all(one), newline,
-    test_all(three), newline,
-
-        % test simple tags
-    test_all(apple([9, 5, 1])), newline,
-    test_all(banana([three, one, two])), newline,
-
-        % test complicated tags
-    test_all(zop(3.3, 2.03)), newline,
-    test_all(zip(3, 2)), newline,
-    test_all(zap(3, -2.111)), newline,
-
-        % test complicated constant
-
-    test_all(wombat), newline,
-    test_all(foo), newline,
-
-    newline.
-
-:- pred test_polymorphism(io::di, io::uo) is det.
-
-test_polymorphism -->
-    io__write_string("TESTING POLYMORPHISM\n"),
-    test_all(poly_three(3.33, 4, poly_one(9.11))), newline,
-    test_all(poly_two(3)), newline,
-    test_all(poly_one([2399.3])), newline,
-
-    newline.
-
-:- pred test_builtins(io::di, io::uo) is det.
-
-test_builtins -->
-    io__write_string("TESTING BUILTINS\n"),
-
-    % test strings
-    test_all(""), newline,
-    test_all("Hello, world\n"), newline,
-    test_all("Foo%sFoo"), newline,
-    test_all(""""), newline,
-
-    % test characters
-    test_all('a'), newline,
-    test_all('&'), newline,
-
-    % test floats
-    test_all(3.14159), newline,
-    test_all(11.28324983E-22), newline,
-    test_all(22.3954899E22), newline,
-
-    % test integers
-    test_all(-65), newline,
-    test_all(4), newline,
-
-    % test unsigned integers
-    test_all(42u), newline,
-
-    % test fixed size integers.
-    test_all(42i8), newline,
-    test_all(42u8), newline,
-    test_all(42i16), newline,
-    test_all(42u16), newline,
-    test_all(42i32), newline,
-    test_all(42u32), newline,
-    test_all(42i64), newline,
-    test_all(42u64), newline,
-
-    % test univ.
-    % { type_to_univ(["hi! I'm a univ!"], Univ) },
-    % test_all(Univ), newline,
-
-    % test predicates
-    test_all(newline), newline,
-
-    % test tuples
-    test_all({1, "a", 'a', {4, 'd'}}), newline,
-
-    % test lists
-    test_all([1, 2, 3, 4]), newline,
-
-    newline.
-
-    % Note: testing abstract types is always going to have results
-    % that are dependent on the implementation. If someone changes
-    % the implementation, the results of this test can change.
-
-:- pred test_other(io::di, io::uo) is det.
-
-test_other -->
-    io__write_string("TESTING OTHER TYPES\n"),
-    { term__init_var_supply(VarSupply) },
-    { term__create_var(Var, VarSupply, NewVarSupply) },
-    test_all(Var), newline,
-    test_all(VarSupply), newline,
-    test_all(NewVarSupply), newline,
-
-    % presently, at least, map is an equivalence and an abstract type.
-    { map__init(Map) },
-    test_all(Map), newline,
-
-    % a no tag type
-    test_all(qwerty(4)), newline,
-
-    % a dummy type
-    test_all(dummy), newline,
-
-    % a functor with a single unboxed argument
-    test_all(unboxed_arg(unboxed_struct(12, 34))), newline,
-
-    % an existential type:
-    { ExistVal = 'new xyzzy'(8) },
-    test_all(ExistVal), newline.
-
-:- pred newline(io::di, io::uo) is det.
-
-newline -->
-    io__write_char('\n').

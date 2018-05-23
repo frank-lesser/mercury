@@ -251,7 +251,7 @@ generate_constants_for_lookup_switch(BranchStart, GetTag,
             Disjuncts = [],
             % Cases like this should have been filtered out by
             % filter_out_failing_cases.
-            unexpected($module, $pred, "disj([])")
+            unexpected($pred, "disj([])")
         ;
             Disjuncts = [FirstDisjunct | LaterDisjuncts],
             goal_is_conj_of_unify(ArmNonLocals, FirstDisjunct),
@@ -493,7 +493,7 @@ generate_several_soln_int_lookup_switch(IndexRval, EndLabel, StoreMap,
         !CI, !.CLD) :-
     % If there are no output variables, then how can the individual solutions
     % differ from each other?
-    expect(negate(unify(OutVars, [])), $module, $pred, "no OutVars"),
+    expect(negate(unify(OutVars, [])), $pred, "no OutVars"),
 
     % Now generate the static cells into which we do the lookups of the values
     % of the output variables, if there are any.
@@ -519,7 +519,7 @@ generate_several_soln_int_lookup_switch(IndexRval, EndLabel, StoreMap,
     then
         true
     else
-        unexpected($module, $pred, "bad FailCaseCount")
+        unexpected($pred, "bad FailCaseCount")
     ),
 
     MainRowTypes = [lt_int(int_type_int), lt_int(int_type_int) | OutTypes],
@@ -594,7 +594,7 @@ case_kind_to_string(kind_several_solns) = "kind_several_solns".
 
 generate_code_for_each_kind([], _, _, _, _, _, _, _, _, _, _, _, _,
         !MaybeEnd, _, !CI) :-
-    unexpected($module, $pred, "no kinds").
+    unexpected($pred, "no kinds").
 generate_code_for_each_kind([Kind | Kinds], NumPrevColumns,
         OutVars, ResumeVars, BranchStart, EndLabel, StoreMap, Liveness,
         AddTrailOps, BaseReg, CurSlot, MaxSlot, LaterVectorAddrRval,
@@ -948,12 +948,7 @@ generate_bit_vec_args([Word - Bits | Rest], Count, [Rval | Rvals]) :-
 %-----------------------------------------------------------------------------%
 
 default_value_for_type(lt_bool) = const(llconst_int(0)).
-default_value_for_type(lt_int_least8) = const(llconst_int(0)).
-default_value_for_type(lt_uint_least8) = const(llconst_int(0)).
-default_value_for_type(lt_int_least16) = const(llconst_int(0)).
-default_value_for_type(lt_uint_least16) = const(llconst_int(0)).
-default_value_for_type(lt_int_least32) = const(llconst_int(0)).
-default_value_for_type(lt_uint_least32) = const(llconst_int(0)).
+default_value_for_type(lt_int_least(_)) = const(llconst_int(0)).
 default_value_for_type(lt_int(int_type_int)) = const(llconst_int(0)).
 default_value_for_type(lt_int(int_type_uint)) = const(llconst_uint(0u)).
 default_value_for_type(lt_int(int_type_int8)) = const(llconst_int8(0i8)).

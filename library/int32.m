@@ -226,11 +226,45 @@
     %
 :- func \ (int32::in) = (int32::uo) is det.
 
+%---------------------------------------------------------------------------%
+
+    % num_zeros(I) = N:
+    % N is the number of zeros in the binary representation of I.
+    %
+:- func num_zeros(int32) = int.
+
+    % num_ones(I) = N:
+    % N is the number of ones in the binary representation of I.
+    %
+:- func num_ones(int32) = int.
+
+    % num_leading_zeros(I) = N:
+    % N is the number of leading zeros in the binary representation of I,
+    % starting at the most significant bit position.
+    % Note that num_leading_zeros(0i32) = 32.
+    %
+:- func num_leading_zeros(int32) = int.
+
+    % num_trailing_zeros(I) = N:
+    % N is the number of trailing zeros in the binary representation of I,
+    % starting at the least significant bit position.
+    % Note that num_trailing_zeros(0i32) = 32.
+    %
+:- func num_trailing_zeros(int32) = int.
+
     % reverse_bytes(A) = B:
-    % B is the value that results from reversing the bytes in the
+    % B is the value that results from reversing the bytes in the binary
     % representation of A.
     %
 :- func reverse_bytes(int32) = int32.
+
+    % reverse_bits(A) = B:
+    % B is the is value that results from reversing the bits in the binary
+    % representation of A.
+    %
+:- func reverse_bits(int32) = int32.
+
+%---------------------------------------------------------------------------%
 
 :- func min_int32 = int32.
 
@@ -246,10 +280,12 @@
 :- implementation.
 
 :- import_module exception.
+:- import_module int.
 :- import_module math.
 :- import_module require.
 :- import_module string.
 :- import_module uint.
+:- import_module uint32.
 
 %---------------------------------------------------------------------------%
 
@@ -515,6 +551,47 @@ odd(X) :-
 
 %---------------------------------------------------------------------------%
 
+num_zeros(I) = 32 - num_ones(I).
+
+num_ones(I32) = N :-
+    U32 = uint32.cast_from_int32(I32),
+    N = uint32.num_ones(U32).
+
+:- pragma foreign_proc("Java",
+    num_ones(U::in) = (N::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    N = java.lang.Integer.bitCount(U);
+").
+
+%---------------------------------------------------------------------------%
+
+num_leading_zeros(I32) = N :-
+    U32 = uint32.cast_from_int32(I32),
+    N = uint32.num_leading_zeros(U32).
+
+:- pragma foreign_proc("Java",
+    num_leading_zeros(U::in) = (N::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    N = java.lang.Integer.numberOfLeadingZeros(U);
+").
+
+%---------------------------------------------------------------------------%
+
+num_trailing_zeros(I32) = N :-
+    U32 = uint32.cast_from_int32(I32),
+    N = uint32.num_trailing_zeros(U32).
+
+:- pragma foreign_proc("Java",
+    num_trailing_zeros(U::in) = (N::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    N = java.lang.Integer.numberOfTrailingZeros(U);
+").
+
+%---------------------------------------------------------------------------%
+
 :- pragma foreign_proc("C",
     reverse_bytes(A::in) = (B::out),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail],
@@ -544,6 +621,20 @@ odd(X) :-
 :- pragma no_determinism_warning(reverse_bytes/1).
 reverse_bytes(_) = _ :-
     sorry($module, "int32.reverse_bytes/1 NYI for Erlang").
+
+%---------------------------------------------------------------------------%
+
+reverse_bits(I32) = RevI32 :-
+    U32 = uint32.cast_from_int32(I32),
+    RevU32 = uint32.reverse_bits(U32),
+    RevI32 = int32.cast_from_uint32(RevU32).
+
+:- pragma foreign_proc("Java",
+    reverse_bits(A::in) = (B::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    B = java.lang.Integer.reverse(A);
+").
 
 %---------------------------------------------------------------------------%
 

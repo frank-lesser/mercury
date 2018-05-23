@@ -159,8 +159,8 @@ output_java_mlds(ModuleInfo, MLDS, Succeeded, !IO) :-
 :- pred type_is_enum(mlds_type::in) is semidet.
 
 type_is_enum(Type) :-
-    Type = mercury_type(_, Builtin, _),
-    Builtin = ctor_cat_enum(_).
+    Type = mercury_type(_, _, CtorCat),
+    CtorCat = ctor_cat_enum(_).
 
     % Succeeds iff the Rval represents an enumeration object in the Java
     % backend. We need to check both Rvals that are variables and Rvals
@@ -719,14 +719,12 @@ output_exported_enums_for_java(Info, Indent, ExportedEnums, !IO) :-
     mlds_exported_enum::in, io::di, io::uo) is det.
 
 output_exported_enum_for_java(Info, Indent, ExportedEnum, !IO) :-
-    ExportedEnum = mlds_exported_enum(Lang, _, TypeCtor, ExportedConstants0),
+    ExportedEnum = mlds_exported_enum(Lang, _, TypeCtor, ExportedConstants),
     (
         Lang = lang_java,
         ml_gen_type_name(TypeCtor, ClassName, ClassArity),
         MLDS_Type =
             mlds_class_type(mlds_class_id(ClassName, ClassArity, mlds_enum)),
-        % We reverse the list so the constants are printed out in order.
-        list.reverse(ExportedConstants0, ExportedConstants),
         list.foldl(
             output_exported_enum_constant_for_java(Info, Indent, MLDS_Type),
             ExportedConstants, !IO)
@@ -1027,7 +1025,7 @@ generate_call_statement_for_addr(InputArgs, CodeAddr, Stmt) :-
 
     % Create a return statement that returns the result of the call to the
     % original method, boxed as a java.lang.Object.
-    ReturnRval = ml_unop(box(ReturnVarType), ml_lval(ReturnLval)),
+    ReturnRval = ml_box(ReturnVarType, ml_lval(ReturnLval)),
     ReturnStmt = ml_stmt_return([ReturnRval], Context),
 
     Stmt = ml_stmt_block([ReturnVarDefn], [], [CallStmt, ReturnStmt], Context).
@@ -1037,7 +1035,7 @@ generate_call_statement_for_addr(InputArgs, CodeAddr, Stmt) :-
 
 generate_call_method_nth_arg(Type, MethodArgVariable, CallArg) :-
     Rval = ml_lval(ml_local_var(MethodArgVariable, mlds_generic_type)),
-    CallArg = ml_unop(unbox(Type), Rval).
+    CallArg = ml_unbox(Type, Rval).
 
 :- pred generate_call_method_args_from_array(list(mlds_type)::in,
     mlds_local_var_name::in, int::in,
@@ -1050,7 +1048,7 @@ generate_call_method_args_from_array([Type | Types], ArrayVar, Counter,
     IndexRval = ml_const(mlconst_int(Counter)),
     ElemType = array_elem_scalar(scalar_elem_generic),
     Rval = ml_binop(array_index(ElemType), ArrayRval, IndexRval),
-    UnBoxedRval = ml_unop(unbox(Type), Rval),
+    UnBoxedRval = ml_unbox(Type, Rval),
     Args1 = Args0 ++ [UnBoxedRval],
     generate_call_method_args_from_array(Types, ArrayVar, Counter + 1,
         Args1, Args).
@@ -1859,7 +1857,7 @@ output_vector_cell_group_for_java(Info, Indent, TypeNum, CellGroup, !IO) :-
 
 get_java_type_initializer(Type) = Initializer :-
     (
-        Type = mercury_type(_, CtorCat, _),
+        Type = mercury_type(_, _, CtorCat),
         (
             ( CtorCat = ctor_cat_builtin(cat_builtin_int(_))
             ; CtorCat = ctor_cat_builtin(cat_builtin_float)
@@ -1982,7 +1980,7 @@ output_initializer_alloc_only_for_java(Info, Initializer, MaybeType, !IO) :-
         Initializer = init_struct(StructType, FieldInits),
         io.write_string("new ", !IO),
         ( if
-            StructType = mercury_type(_Type, CtorCat, _),
+            StructType = mercury_type(_, _, CtorCat),
             type_category_is_array(CtorCat) = is_array
         then
             Size = list.length(FieldInits),
@@ -2475,7 +2473,7 @@ output_type_for_java_dims(Info, MLDS_Type, ArrayDims0, !IO) :-
 
 type_to_string_for_java(Info, MLDS_Type, String, ArrayDims) :-
     (
-        MLDS_Type = mercury_type(Type, CtorCat, _),
+        MLDS_Type = mercury_type(Type, _, CtorCat),
         ( if
             % We need to handle type_info (etc.) types specially --
             % they get mapped to types in the runtime rather than
@@ -2506,7 +2504,7 @@ type_to_string_for_java(Info, MLDS_Type, String, ArrayDims) :-
         )
     ;
         MLDS_Type = mlds_mercury_array_type(ElementType),
-        ( if ElementType = mercury_type(_, ctor_cat_variable, _) then
+        ( if ElementType = mercury_type(_, _, ctor_cat_variable) then
             % We can't use `java.lang.Object []', since we want a generic type
             % that is capable of holding any kind of array, including e.g.
             % `int []'. Java doesn't have any equivalent of .NET's System.Array
@@ -2772,7 +2770,7 @@ type_is_array_for_java(Type) = IsArray :-
         IsArray = is_array
     else if Type = mlds_mercury_array_type(_) then
         IsArray = is_array
-    else if Type = mercury_type(_, CtorCat, _) then
+    else if Type = mercury_type(_, _, CtorCat) then
         IsArray = type_category_is_array(CtorCat)
     else if Type = mlds_rtti_type(RttiIdMaybeElement) then
         rtti_id_maybe_element_java_type(RttiIdMaybeElement,
@@ -2921,8 +2919,6 @@ output_access_for_java(_Info, Access, !IO) :-
     ;
         Access = func_private,
         io.write_string("private ", !IO)
-    ;
-        Access = func_local
     ).
 
 :- pred output_class_access_for_java(class_access::in, io::di, io::uo) is det.
@@ -3041,7 +3037,7 @@ output_statement_for_java(Info, Indent, FuncInfo, Stmt, ExitMethods, !IO) :-
         output_stmt_block_for_java(Info, Indent, FuncInfo, Stmt,
             ExitMethods, !IO)
     ;
-        Stmt = ml_stmt_while(_, _, _, _),
+        Stmt = ml_stmt_while(_, _, _, _, _),
         output_stmt_while_for_java(Info, Indent, FuncInfo, Stmt,
             ExitMethods, !IO)
     ;
@@ -3160,7 +3156,7 @@ output_stmt_block_for_java(Info, Indent, FuncInfo, Stmt, ExitMethods, !IO) :-
 :- pragma inline(output_stmt_while_for_java/7).
 
 output_stmt_while_for_java(Info, Indent, FuncInfo, Stmt, ExitMethods, !IO) :-
-    Stmt = ml_stmt_while(Kind, Cond, BodyStmt, Context),
+    Stmt = ml_stmt_while(Kind, Cond, BodyStmt, _LoopLocalVars, Context),
     scope_indent(BodyStmt, Indent, ScopeIndent),
     (
         Kind = may_loop_zero_times,
@@ -3718,9 +3714,8 @@ output_atomic_stmt_for_java(Info, Indent, AtomicStmt, Context, !IO) :-
         AtomicStmt = delete_object(_Lval),
         unexpected($pred, "delete_object not supported in Java.")
     ;
-        AtomicStmt = new_object(Target, _MaybeTag, ExplicitSecTag, Type,
-            _MaybeSize, MaybeCtorName, Args, ArgTypes, _MayUseAtomic,
-            _AllocId),
+        AtomicStmt = new_object(Target, _Ptag, ExplicitSecTag, Type,
+            _MaybeSize, MaybeCtorName, ArgRvalsTypes, _MayUseAtomic, _AllocId),
         (
             ExplicitSecTag = yes,
             unexpected($pred, "explicit secondary tag")
@@ -3738,7 +3733,7 @@ output_atomic_stmt_for_java(Info, Indent, AtomicStmt, Context, !IO) :-
         ( if
             MaybeCtorName = yes(QualifiedCtorId),
             not (
-                Type = mercury_type(MerType, CtorCat, _),
+                Type = mercury_type(MerType, _, CtorCat),
                 hand_defined_type_for_java(MerType, CtorCat, _, _)
             )
         then
@@ -3756,13 +3751,13 @@ output_atomic_stmt_for_java(Info, Indent, AtomicStmt, Context, !IO) :-
             % The new object will be an array, so we need to initialise it
             % using array literals syntax.
             io.write_string(" {", !IO),
-            output_init_args_for_java(Info, Args, ArgTypes, !IO),
+            output_init_args_for_java(Info, ArgRvalsTypes, !IO),
             io.write_string("};\n", !IO)
         ;
             IsArray = not_array,
             % Generate constructor arguments.
             io.write_string("(", !IO),
-            output_init_args_for_java(Info, Args, ArgTypes, !IO),
+            output_init_args_for_java(Info, ArgRvalsTypes, !IO),
             io.write_string(");\n", !IO)
         ),
         output_n_indents(Indent, !IO),
@@ -3840,22 +3835,19 @@ output_target_code_component_for_java(Info, TargetCode, !IO) :-
     % object's class constructor.
     %
 :- pred output_init_args_for_java(java_out_info::in,
-    list(mlds_rval)::in, list(mlds_type)::in, io::di, io::uo) is det.
+    list(mlds_typed_rval)::in, io::di, io::uo) is det.
 
-output_init_args_for_java(_, [], [], !IO).
-output_init_args_for_java(_, [_ | _], [], _, _) :-
-    unexpected($pred, "length mismatch.").
-output_init_args_for_java(_, [], [_ | _], _, _) :-
-    unexpected($pred, "length mismatch.").
-output_init_args_for_java(Info, [Arg | Args], [_ArgType | ArgTypes], !IO) :-
-    output_rval_for_java(Info, Arg, !IO),
+output_init_args_for_java(_, [], !IO).
+output_init_args_for_java(Info, [ArgRvalType | ArgRvalsTypes], !IO) :-
+    ArgRvalType = ml_typed_rval(ArgRval, _ArgType),
+    output_rval_for_java(Info, ArgRval, !IO),
     (
-        Args = []
+        ArgRvalsTypes = []
     ;
-        Args = [_ | _],
+        ArgRvalsTypes = [_ | _],
         io.write_string(", ", !IO)
     ),
-    output_init_args_for_java(Info, Args, ArgTypes, !IO).
+    output_init_args_for_java(Info, ArgRvalsTypes, !IO).
 
 %---------------------------------------------------------------------------%
 %
@@ -3978,8 +3970,17 @@ output_rval_for_java(Info, Rval, !IO) :-
         Rval = ml_const(Const),
         output_rval_const_for_java(Info, Const, !IO)
     ;
-        Rval = ml_unop(UnOp, RvalA),
-        output_unop_for_java(Info, UnOp, RvalA, !IO)
+        Rval = ml_cast(Type, SubRval),
+        output_cast_rval_for_java(Info, Type, SubRval, !IO)
+    ;
+        Rval = ml_box(Type, SubRval),
+        output_boxed_rval_for_java(Info, Type, SubRval, !IO)
+    ;
+        Rval = ml_unbox(Type, SubRval),
+        output_unboxed_rval_for_java(Info, Type, SubRval, !IO)
+    ;
+        Rval = ml_unop(Unop, SubRval),
+        output_unop_for_java(Info, Unop, SubRval, !IO)
     ;
         Rval = ml_binop(BinOp, RvalA, RvalB),
         output_binop_for_java(Info, BinOp, RvalA, RvalB, !IO)
@@ -4014,24 +4015,6 @@ output_rval_for_java(Info, Rval, !IO) :-
         io.write_string("this", !IO)
     ).
 
-:- pred output_unop_for_java(java_out_info::in, mlds_unary_op::in,
-    mlds_rval::in, io::di, io::uo) is det.
-
-output_unop_for_java(Info, Unop, Expr, !IO) :-
-    (
-        Unop = cast(Type),
-        output_cast_rval_for_java(Info, Type, Expr, !IO)
-    ;
-        Unop = box(Type),
-        output_boxed_rval_for_java(Info, Type, Expr, !IO)
-    ;
-        Unop = unbox(Type),
-        output_unboxed_rval_for_java(Info, Type, Expr, !IO)
-    ;
-        Unop = std_unop(StdUnop),
-        output_std_unop_for_java(Info, StdUnop, Expr, !IO)
-    ).
-
 :- pred output_cast_rval_for_java(java_out_info::in, mlds_type::in,
     mlds_rval::in, io::di, io::uo) is det.
 
@@ -4054,7 +4037,7 @@ output_cast_rval_for_java(Info, Type, Expr, !IO) :-
             io.write_string(")", !IO)
         )
     else if
-        ( Type = mercury_type(_, ctor_cat_system(cat_system_type_info), _)
+        ( Type = mercury_type(_, _, ctor_cat_system(cat_system_type_info))
         ; Type = mlds_type_info_type
         )
     then
@@ -4063,8 +4046,7 @@ output_cast_rval_for_java(Info, Type, Expr, !IO) :-
         % be rather difficult as the compiler doesn't keep track of where
         % type_ctor_infos are acting as type_infos properly.
         maybe_output_comment_for_java(Info, "cast", !IO),
-        io.write_string("jmercury.runtime.TypeInfo_Struct.maybe_new(",
-            !IO),
+        io.write_string("jmercury.runtime.TypeInfo_Struct.maybe_new(", !IO),
         output_rval_for_java(Info, Expr, !IO),
         io.write_string(")", !IO)
     else if
@@ -4156,7 +4138,7 @@ java_builtin_type(MLDS_Type, JavaUnboxedType, JavaBoxedType, UnboxMethod) :-
         JavaBoxedType = "java.lang.Double",
         UnboxMethod = "doubleValue"
     ;
-        MLDS_Type = mercury_type(MerType, TypeCtorCat, _),
+        MLDS_Type = mercury_type(MerType, _, TypeCtorCat),
         require_complete_switch [MerType] (
             MerType = builtin_type(BuiltinType),
             require_complete_switch [BuiltinType] (
@@ -4322,14 +4304,13 @@ java_primitive_foreign_language_type(ForeignLangType, PrimitiveType,
         DefaultValue = "'\\u0000'"
     ).
 
-:- pred output_std_unop_for_java(java_out_info::in, builtin_ops.unary_op::in,
+:- pred output_unop_for_java(java_out_info::in, builtin_ops.unary_op::in,
     mlds_rval::in, io::di, io::uo) is det.
 
-output_std_unop_for_java(Info, UnaryOp, Expr, !IO) :-
+output_unop_for_java(Info, UnaryOp, Expr, !IO) :-
     % For the Java back-end, there are no tags, so all the tagging operators
     % are no-ops, except for `tag', which always returns zero (a tag of zero
     % means there is no tag).
-    %
     (
         UnaryOp = tag,
         io.write_string("/* tag */  0", !IO)
@@ -4375,6 +4356,15 @@ output_std_unop_for_java(Info, UnaryOp, Expr, !IO) :-
         io.write_string("(", !IO),
         output_rval_for_java(Info, Expr, !IO),
         io.write_string("))", !IO)
+    ;
+        ( UnaryOp = dword_float_get_word0
+        ; UnaryOp = dword_float_get_word1
+        ; UnaryOp = dword_int64_get_word0
+        ; UnaryOp = dword_int64_get_word1
+        ; UnaryOp = dword_uint64_get_word0
+        ; UnaryOp = dword_uint64_get_word1
+        ),
+        unexpected($pred, "invalid unary operator")
     ).
 
 :- pred output_binop_for_java(java_out_info::in, binary_op::in, mlds_rval::in,
@@ -4507,8 +4497,9 @@ output_binop_for_java(Info, Op, X, Y, !IO) :-
         ; Op = float_gt
         ; Op = float_le
         ; Op = float_ge
-        ; Op = float_word_bits
         ; Op = float_from_dword
+        ; Op = int64_from_dword
+        ; Op = uint64_from_dword
         ; Op = compound_eq
         ; Op = compound_lt
         ; Op = int_lt(int_type_int8)
@@ -4567,7 +4558,6 @@ output_binop_for_java(Info, Op, X, Y, !IO) :-
         io.write_string(") ", !IO),
         io.write_string(RelOpStr, !IO),
         io.write_string(" 0)", !IO)
-
     ;
         ( Op = int_div(int_type_uint)
         ; Op = int_mod(int_type_uint)
@@ -4800,7 +4790,8 @@ output_binary_op_for_java(Op, !IO) :-
         ( Op = array_index(_)
         ; Op = body
         ; Op = float_from_dword
-        ; Op = float_word_bits
+        ; Op = int64_from_dword
+        ; Op = uint64_from_dword
         ; Op = offset_str_eq(_)
         ; Op = str_cmp
         ; Op = str_eq

@@ -9,7 +9,7 @@ MAYBE_J1 =
 
 #-----------------------------------------------------------------------------#
 
-ORDINARY_PROGS =	\
+ORDINARY_PROGS = \
 	abstract_eqv \
 	address_of_builtins \
 	agg \
@@ -23,6 +23,14 @@ ORDINARY_PROGS =	\
 	bigtest \
 	binary_stdin \
 	binary_stdout \
+	bit_twiddle_int16 \
+	bit_twiddle_int32 \
+	bit_twiddle_int64 \
+	bit_twiddle_int8 \
+	bit_twiddle_uint16 \
+	bit_twiddle_uint32 \
+	bit_twiddle_uint64 \
+	bit_twiddle_uint8 \
 	boyer \
 	brace \
 	bug103 \
@@ -31,6 +39,8 @@ ORDINARY_PROGS =	\
 	bug300 \
 	bug383 \
 	bug392 \
+	bug452 \
+	bug455_mod_a \
 	bug_pack_bits \
 	c89_neg_int \
 	c_write_string \
@@ -144,6 +154,7 @@ ORDINARY_PROGS =	\
 	functor_ho_inst_2 \
 	functor_ho_inst_excp \
 	functor_ho_inst_excp_2 \
+	functor_ho_inst_float_reg \
 	getopt_test \
 	ground_dd \
 	ground_terms \
@@ -171,11 +182,11 @@ ORDINARY_PROGS =	\
 	impure_prune \
 	initialise_decl \
 	inst_alias \
-	int_fold_up_down \
-	int_range_ops \
 	int16_from_bytes \
 	int32_from_bytes \
 	int64_from_bytes \
+	int_fold_up_down \
+	int_range_ops \
 	integer_int16_conv \
 	integer_int32_conv \
 	integer_int64_conv \
@@ -200,6 +211,8 @@ ORDINARY_PROGS =	\
 	lco_mday_bug_2 \
 	lco_no_inline \
 	lco_pack_args \
+	lco_pack_args_2 \
+	lco_pack_args_3 \
 	lexer_bigint \
 	lexer_ints \
 	lexer_zero \
@@ -247,8 +260,11 @@ ORDINARY_PROGS =	\
 	pack_args_copy \
 	pack_args_float \
 	pack_args_intermod1 \
+	pack_int32 \
+	packed_arg_partial_inst \
 	parse_number_from_io \
 	parse_number_from_string \
+	partial_inst_float \
 	ppc_bug \
 	pprint_test \
 	pprint_test2 \
@@ -384,6 +400,7 @@ ORDINARY_PROGS =	\
 	uint32_from_bytes \
 	uint32_switch_test \
 	uint64_from_bytes \
+	uint64_ground_term \
 	uint64_switch_test \
 	uint8_switch_test \
 	uint_switch_test \
@@ -540,7 +557,7 @@ ifeq "$(filter csharp% java% erlang%,$(GRADE))" ""
 		pragma_export \
 		runtime_opt \
 		target_mlobjs \
-        	weak_ptr
+		weak_ptr
 else
 	C_ONLY_PROGS =
 endif
@@ -597,8 +614,8 @@ CLOSURE_LAYOUT_PROGS = \
 #     optimizing.
 #
 # XXX var_not_found -- mode error in automatically generated unification
-#		predicate. This test uses partially instantiated modes,
-#		which are not yet fully supported.
+#     predicate. This test uses partially instantiated modes,
+#     which are not yet fully supported.
 #
 # XXX needs_init doesn't work yet in profiling grades.
 #
@@ -673,6 +690,7 @@ ifeq "$(findstring profdeep,$(GRADE))" ""
 		cmp_uint8 \
 		dir_test \
 		final_excp \
+		int8_static_data \
 		init_excp \
 		intermod_try_goal \
 		io_globals_deadlock \

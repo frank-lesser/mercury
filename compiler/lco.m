@@ -175,7 +175,6 @@
 :- import_module check_hlds.type_util.
 :- import_module hlds.arg_info.
 :- import_module hlds.goal_util.
-:- import_module hlds.hlds_code_util.
 :- import_module hlds.hlds_dependency_graph.
 :- import_module hlds.hlds_data.
 :- import_module hlds.hlds_goal.
@@ -428,14 +427,13 @@ lco_proc_if_permitted(LowerSCCVariants, SCC, CurProc,
         DefInThisModule = pred_status_defined_in_this_module(PredStatus),
         proc_info_get_inferred_determinism(ProcInfo0, Detism),
         ( if
-            ( DefInThisModule = no
-            ; not acceptable_detism_for_lco(Detism)
-            )
+            DefInThisModule = yes,
+            acceptable_detism_for_lco(Detism) = yes
         then
-            !:Permitted = lco_is_not_permitted_on_scc
-        else
             lco_proc(LowerSCCVariants, SCC, CurProc, PredInfo, ProcInfo0,
                 !ModuleInfo, !CurSCCVariants, !CurSCCUpdates, !:Permitted)
+        else
+            !:Permitted = lco_is_not_permitted_on_scc
         )
     ).
 
@@ -510,12 +508,16 @@ lco_proc(LowerSCCVariants, SCC, CurProc, PredInfo, ProcInfo0,
     % and procedures that cannot succeed at all should not be optimized
     % for time.
     %
-:- pred acceptable_detism_for_lco(determinism::in) is semidet.
+:- func acceptable_detism_for_lco(determinism) = bool.
 
-acceptable_detism_for_lco(detism_det).
-acceptable_detism_for_lco(detism_semi).
-acceptable_detism_for_lco(detism_cc_multi).
-acceptable_detism_for_lco(detism_cc_non).
+acceptable_detism_for_lco(detism_det) = yes.
+acceptable_detism_for_lco(detism_semi) = yes.
+acceptable_detism_for_lco(detism_cc_multi) = yes.
+acceptable_detism_for_lco(detism_cc_non) = yes.
+acceptable_detism_for_lco(detism_multi) = no.
+acceptable_detism_for_lco(detism_non) = no.
+acceptable_detism_for_lco(detism_failure) = no.
+acceptable_detism_for_lco(detism_erroneous) = no.
 
 %-----------------------------------------------------------------------------%
 %-----------------------------------------------------------------------------%
@@ -594,7 +596,7 @@ lco_in_goal(Goal0, Goal, !Info, ConstInfo) :-
     ;
         GoalExpr0 = shorthand(_),
         % These should have been expanded out by now.
-        unexpected($module, $pred, "shorthand")
+        unexpected($pred, "shorthand")
     ),
     Goal = hlds_goal(GoalExpr, GoalInfo).
 
@@ -638,8 +640,8 @@ lco_in_conj(Goals0, MaybeGoals, !Info, ConstInfo) :-
         list.foldl3(partition_dependent_goal(!.Info, ConstInfo), AfterGoals,
             [], RevAfterDependentGoals,
             [], RevAfterNonDependentGoals,
-            DelayForVars0, _DelayForVars),
-        list.foldl2(acceptable_construct_unification,
+            DelayForVars0, DelayForVars),
+        list.foldl2(acceptable_construct_unification(DelayForVars),
             RevAfterDependentGoals, bag.init, UnifyInputVars, !Info)
     then
         list.reverse(RevAfterDependentGoals, UnifyGoals),
@@ -691,7 +693,7 @@ divide_rev_conj(Info, ConstInfo, RevGoals0, !AfterGoals, RecGoal, RecOutArgs,
         else if
             potentially_moveable_goal(RevGoal)
         then
-            cons(RevGoal, !AfterGoals),
+            !:AfterGoals = [RevGoal | !.AfterGoals],
             divide_rev_conj(Info, ConstInfo, RevGoalsTail, !AfterGoals,
                 RecGoal, RecOutArgs, RevBeforeGoals)
         else
@@ -765,7 +767,7 @@ potentially_moveable_goal(Goal) :-
         fail
     ;
         GoalExpr = shorthand(_),
-        unexpected($module, $pred, "shorthand")
+        unexpected($pred, "shorthand")
     ).
 
     % Partition a goal which follows a recursive call goal into those goals
@@ -783,9 +785,9 @@ partition_dependent_goal(_Info, _ConstInfo, Goal,
     goal_vars(Goal, GoalVars),
     set_of_var.intersect(!.DelayForVars, GoalVars, Intersection),
     ( if set_of_var.is_empty(Intersection) then
-        cons(Goal, !RevNonDependentGoals)
+        !:RevNonDependentGoals = [Goal | !.RevNonDependentGoals]
     else
-        cons(Goal, !RevDependentGoals),
+        !:RevDependentGoals = [Goal | !.RevDependentGoals],
         % Expand the set of variables for which we must delay goals.
         InstmapDelta = goal_info_get_instmap_delta(GoalInfo),
         instmap_delta_changed_vars(InstmapDelta, ChangedVars),
@@ -794,32 +796,43 @@ partition_dependent_goal(_Info, _ConstInfo, Goal,
 
 %-----------------------------------------------------------------------------%
 
-:- pred acceptable_construct_unification(hlds_goal::in, bag(prog_var)::in,
-    bag(prog_var)::out, lco_info::in, lco_info::out) is semidet.
+:- pred acceptable_construct_unification(set_of_progvar::in, hlds_goal::in,
+    bag(prog_var)::in, bag(prog_var)::out, lco_info::in, lco_info::out)
+    is semidet.
 
-acceptable_construct_unification(Goal, !UnifyInputVars, !Info) :-
+acceptable_construct_unification(DelayForVars, Goal, !UnifyInputVars, !Info) :-
     Goal = hlds_goal(GoalExpr, _GoalInfo),
     GoalExpr = unify(_, _, _, Unification, _),
-    Unification = construct(ConstructedVar, ConsId, ConstructArgs,
+    Unification = construct(ConstructedVar, ConsId, ConstructArgVars,
         ArgModes, _, _, SubInfo),
     (
         SubInfo = no_construct_sub_info
     ;
-        SubInfo = construct_sub_info(no, _)
+        SubInfo = construct_sub_info(MaybeTakeAddrs, _),
+        MaybeTakeAddrs = no
     ),
     ModuleInfo = !.Info ^ lco_module_info,
     all_true(acceptable_construct_mode(ModuleInfo), ArgModes),
-    ConsTag = cons_id_to_tag(ModuleInfo, ConsId),
+    get_cons_repn_defn(ModuleInfo, ConsId, CtorRepn),
+    ConsTag = CtorRepn ^ cr_tag,
     % The code generator can't handle some kinds of tags. For example, it does
     % not make sense to take the address of the field of a function symbol of a
     % `notag' type. These are the kinds it CAN handle.
-    (
-        ConsTag = single_functor_tag
-    ;
-        ConsTag = unshared_tag(_)
-    ;
-        ConsTag = shared_remote_tag(_, _)
+    ( ConsTag = single_functor_tag
+    ; ConsTag = unshared_tag(_)
+    ; ConsTag = shared_remote_tag(_, _, _)
     ),
+    % If the construction unification has any existential constraints,
+    % then ConstructArgVars will have more elements than the number of
+    % arguments in ConsRepn ^ cr_args (the extra variables will be the
+    % type_infos and/or typeclass_infos providing information about
+    % those constraints). This will cause all_delayed_arg_vars_are_full_words
+    % to fail.
+    %
+    % We could work around that fact, but existentially constrained
+    % construction unifications are so rare that there is no point.
+    all_delayed_arg_vars_are_full_words(ConstructArgVars, CtorRepn ^ cr_args,
+        DelayForVars),
     require_det (
         trace [compiletime(flag("lco")), io(!IO)] (
             io.write_string("processing unification ", !IO),
@@ -827,7 +840,7 @@ acceptable_construct_unification(Goal, !UnifyInputVars, !Info) :-
             io.write_string(" <= ", !IO),
             io.write(ConsId, !IO),
             io.write_string("(", !IO),
-            io.write(ConstructArgs, !IO),
+            io.write(ConstructArgVars, !IO),
             io.write_string(")\n", !IO)
         ),
         trace [compiletime(flag("lco")), io(!IO)] (
@@ -836,7 +849,7 @@ acceptable_construct_unification(Goal, !UnifyInputVars, !Info) :-
             io.nl(!IO)
         ),
         bag.delete(ConstructedVar, !UnifyInputVars),
-        bag.insert_list(ConstructArgs, !UnifyInputVars),
+        bag.insert_list(ConstructArgVars, !UnifyInputVars),
         trace [compiletime(flag("lco")), io(!IO)] (
             io.write_string("updated UnifyInputVars: ", !IO),
             io.write(!.UnifyInputVars, !IO),
@@ -844,21 +857,58 @@ acceptable_construct_unification(Goal, !UnifyInputVars, !Info) :-
         )
     ).
 
+:- pred all_delayed_arg_vars_are_full_words(list(prog_var)::in,
+    list(constructor_arg_repn)::in, set_of_progvar::in) is semidet.
+
+all_delayed_arg_vars_are_full_words([], [], _).
+all_delayed_arg_vars_are_full_words([ArgVar | ArgVars], [ArgRepn | ArgRepns],
+        DelayForVars) :-
+    ArgWidth = ArgRepn ^ car_pos_width,
+    (
+        ArgWidth = apw_full(_, _)
+    ;
+        ArgWidth = apw_double(_, _, _),
+        % XXX I (zs) am not sure whether this works. Until I am,
+        % failing here plays things safe.
+        fail
+    ;
+        ( ArgWidth = apw_none_nowhere
+        ; ArgWidth = apw_none_shifted(_, _)
+        ),
+        % XXX We *could* allow lco to apply to fill in the values of
+        % dummy variables by passing a dummy pointer to some static
+        % variable we never read. However, it would be *far* simpler
+        % to just fill in the one possible value before the recursive call.
+        % XXX We don't do that yet either. Since code that fills in
+        % the value of a variable of a dummy type after recursive call
+        % is as rare as hen's teeth, this is not a great loss.
+        fail
+    ;
+        ( ArgWidth = apw_partial_first(_, _, _, _, _)
+        ; ArgWidth = apw_partial_shifted(_, _, _, _, _, _)
+        ),
+        % It is ok for the cell to have subword arguments (packed two or more
+        % into a single word) IF AND ONLY IF we don't try to take
+        % their addresses.
+        not set_of_var.member(DelayForVars, ArgVar)
+    ),
+    all_delayed_arg_vars_are_full_words(ArgVars, ArgRepns, DelayForVars).
+
 :- pred transform_call_and_unifies(hlds_goal::in, list(prog_var)::in,
     list(hlds_goal)::in, bag(prog_var)::in, maybe(list(hlds_goal))::out,
     lco_info::in, lco_info::out, lco_const_info::in) is det.
 
-transform_call_and_unifies(CallGoal, CallOutArgs, UnifyGoals, UnifyInputVars,
-        MaybeGoals, !Info, ConstInfo) :-
+transform_call_and_unifies(CallGoal, CallOutArgVars, UnifyGoals,
+        UnifyInputVars, MaybeGoals, !Info, ConstInfo) :-
     CallGoal = hlds_goal(CallGoalExpr, CallGoalInfo),
     ModuleInfo = !.Info ^ lco_module_info,
     ProcInfo = ConstInfo ^ lci_cur_proc_proc,
     proc_info_get_vartypes(ProcInfo, VarTypes),
     ( if
-        CallGoalExpr = plain_call(PredId, ProcId, Args, Builtin, UnifyContext,
-            SymName),
+        CallGoalExpr = plain_call(PredId, ProcId, ArgVars, Builtin,
+            UnifyContext, SymName),
         CurrProcOutArgs = ConstInfo ^ lci_cur_proc_outputs,
-        assoc_list.from_corresponding_lists(CallOutArgs, CurrProcOutArgs,
+        assoc_list.from_corresponding_lists(CallOutArgVars, CurrProcOutArgs,
             CallHeadPairs),
         find_args_to_pass_by_addr(ConstInfo, UnifyInputVars, CallHeadPairs,
             1, Mismatches, UpdatedCallOutArgs, map.init, Subst, !Info),
@@ -910,7 +960,7 @@ transform_call_and_unifies(CallGoal, CallOutArgs, UnifyGoals, UnifyInputVars,
     then
         module_info_proc_info(ModuleInfo, PredId, ProcId, CalleeProcInfo),
         proc_info_get_argmodes(CalleeProcInfo, CalleeModes),
-        update_call_args(ModuleInfo, VarTypes, CalleeModes, Args,
+        update_call_args(ModuleInfo, VarTypes, CalleeModes, ArgVars,
             UpdatedCallOutArgs, UpdatedArgs),
         VariantPredProcId = proc(VariantPredId, VariantProcId),
         UpdatedGoalExpr = plain_call(VariantPredId, VariantProcId,
@@ -968,37 +1018,37 @@ transform_call_and_unifies(CallGoal, CallOutArgs, UnifyGoals, UnifyInputVars,
 :- pred update_call_args(module_info::in, vartypes::in, list(mer_mode)::in,
     list(prog_var)::in, list(prog_var)::in, list(prog_var)::out) is det.
 
-update_call_args(_ModuleInfo, _VarTypes, [], [], UpdatedCallOutArgs, []) :-
-    expect(unify(UpdatedCallOutArgs, []), $module, $pred,
+update_call_args(_ModuleInfo, _VarTypes, [], [], UpdatedCallOutArgVars, []) :-
+    expect(unify(UpdatedCallOutArgVars, []), $pred,
         "updating nonexistent arg").
 update_call_args(_ModuleInfo, _VarTypes, [], [_ | _], _, _) :-
-    unexpected($module, $pred, "mismatched lists").
+    unexpected($pred, "mismatched lists").
 update_call_args(_ModuleInfo, _VarTypes, [_ | _], [], _, _) :-
-    unexpected($module, $pred, "mismatched lists").
+    unexpected($pred, "mismatched lists").
 update_call_args(ModuleInfo, VarTypes, [CalleeMode | CalleeModes],
-        [Arg | Args], !.UpdatedCallOutArgs, !:UpdatedArgs) :-
-    lookup_var_type(VarTypes, Arg, CalleeType),
+        [ArgVar | ArgVars], !.UpdatedCallOutArgVars, !:UpdatedArgVars) :-
+    lookup_var_type(VarTypes, ArgVar, CalleeType),
     mode_to_top_functor_mode(ModuleInfo, CalleeMode, CalleeType,
         TopFunctorMode),
     (
         TopFunctorMode = top_in,
-        update_call_args(ModuleInfo, VarTypes, CalleeModes, Args,
-            !.UpdatedCallOutArgs, !:UpdatedArgs),
-        !:UpdatedArgs = [Arg | !.UpdatedArgs]
+        update_call_args(ModuleInfo, VarTypes, CalleeModes, ArgVars,
+            !.UpdatedCallOutArgVars, !:UpdatedArgVars),
+        !:UpdatedArgVars = [ArgVar | !.UpdatedArgVars]
     ;
         TopFunctorMode = top_out,
         (
-            !.UpdatedCallOutArgs = [UpdatedArg | !:UpdatedCallOutArgs]
+            !.UpdatedCallOutArgVars = [UpdatedArgVar | !:UpdatedCallOutArgVars]
         ;
-            !.UpdatedCallOutArgs = [],
-            unexpected($module, $pred, "no UpdatedCallOutArgs")
+            !.UpdatedCallOutArgVars = [],
+            unexpected($pred, "no UpdatedCallOutArgs")
         ),
-        update_call_args(ModuleInfo, VarTypes, CalleeModes, Args,
-            !.UpdatedCallOutArgs, !:UpdatedArgs),
-        !:UpdatedArgs = [UpdatedArg | !.UpdatedArgs]
+        update_call_args(ModuleInfo, VarTypes, CalleeModes, ArgVars,
+            !.UpdatedCallOutArgVars, !:UpdatedArgVars),
+        !:UpdatedArgVars = [UpdatedArgVar | !.UpdatedArgVars]
     ;
         TopFunctorMode = top_unused,
-        unexpected($module, $pred, "top_unused")
+        unexpected($pred, "top_unused")
     ).
 
 %-----------------------------------------------------------------------------%
@@ -1009,9 +1059,9 @@ update_call_args(ModuleInfo, VarTypes, [CalleeMode | CalleeModes],
 
 classify_proc_call_args(_ModuleInfo, _VarTypes, [], [], [], [], []).
 classify_proc_call_args(_ModuleInfo, _VarTypes, [], [_ | _], _, _, _) :-
-    unexpected($module, $pred, "mismatched lists").
+    unexpected($pred, "mismatched lists").
 classify_proc_call_args(_ModuleInfo, _VarTypes, [_ | _], [], _, _, _) :-
-    unexpected($module, $pred, "mismatched lists").
+    unexpected($pred, "mismatched lists").
 classify_proc_call_args(ModuleInfo, VarTypes, [Arg | Args],
         [CalleeMode | CalleeModes], !:InArgs, !:OutArgs, !:UnusedArgs) :-
     classify_proc_call_args(ModuleInfo, VarTypes, Args, CalleeModes,
@@ -1275,16 +1325,15 @@ update_construct(ConstInfo, Subst, Goal0, Goal, !AddrVarFieldIds, !Info) :-
             % variables in the unification from there, not from Unification.
             (
                 RHS0 = rhs_var(_),
-                unexpected($module, $pred, "var RHS")
+                unexpected($pred, "var RHS")
             ;
                 RHS0 = rhs_functor(RHSConsId, IsExistConstr, RHSVars0),
-                expect(unify(ConsId, RHSConsId), $module,
-                    "update_construct: cons_id mismatch"),
+                expect(unify(ConsId, RHSConsId), $pred, "cons_id mismatch"),
                 rename_var_list(need_not_rename, Subst, RHSVars0, RHSVars),
                 RHS = rhs_functor(RHSConsId, IsExistConstr, RHSVars)
             ;
                 RHS0 = rhs_lambda_goal(_, _, _, _, _, _, _, _, _),
-                unexpected($module, $pred, "lambda RHS")
+                unexpected($pred, "lambda RHS")
             ),
             GoalExpr = unify(LHS, RHS, Mode, Unification, UnifyContext),
 
@@ -1295,7 +1344,7 @@ update_construct(ConstInfo, Subst, Goal0, Goal, !AddrVarFieldIds, !Info) :-
             Goal = hlds_goal(GoalExpr, GoalInfo)
         )
     else
-        unexpected($module, $pred, "not construct")
+        unexpected($pred, "not construct")
     ).
 
 :- pred update_construct_args(map(prog_var, prog_var)::in, bool::in,
@@ -1406,12 +1455,11 @@ lco_transform_variant_proc(VariantMap, AddrOutArgs, ProcInfo,
 
 make_addr_vars([], [], [], [], AddrOutArgs, _, _, [],
         !VarSet, !VarTypes) :-
-    expect(unify(AddrOutArgs, []), $module,
-        "make_addr_vars: AddrOutArgs != []").
+    expect(unify(AddrOutArgs, []), $pred, "AddrOutArgs != []").
 make_addr_vars([], [_ | _], _, _, _, _, _, _, !VarSet, !VarTypes) :-
-    unexpected($module, $pred, "mismatched lists").
+    unexpected($pred, "mismatched lists").
 make_addr_vars([_ | _], [], _, _, _, _, _, _, !VarSet, !VarTypes) :-
-    unexpected($module, $pred, "mismatched lists").
+    unexpected($pred, "mismatched lists").
 make_addr_vars([HeadVar0 | HeadVars0], [Mode0 | Modes0],
         [HeadVar | HeadVars], [Mode | Modes], !.AddrOutArgs,
         NextOutArgNum, ModuleInfo, VarToAddr, !VarSet, !VarTypes) :-
@@ -1464,7 +1512,7 @@ make_addr_vars([HeadVar0 | HeadVars0], [Mode0 | Modes0],
         )
     ;
         TopFunctorMode = top_unused,
-        unexpected($module, $pred, "top_unused")
+        unexpected($pred, "top_unused")
     ).
 
 :- pred lco_transform_variant_goal(module_info::in, variant_map::in,
@@ -1484,7 +1532,7 @@ lco_transform_variant_goal(ModuleInfo, VariantMap, VarToAddr, InstMap0,
             GoalInfo = GoalInfo0
         ;
             ConjType = parallel_conj,
-            unexpected($module, $pred, "parallel_conj")
+            unexpected($pred, "parallel_conj")
         )
     ;
         GoalExpr0 = disj(Goals0),
@@ -1570,7 +1618,7 @@ lco_transform_variant_goal(ModuleInfo, VariantMap, VarToAddr, InstMap0,
     ;
         GoalExpr0 = shorthand(_),
         % These should have been expanded out by now.
-        unexpected($module, $pred, "shorthand")
+        unexpected($pred, "shorthand")
     ),
     (
         Changed = yes,

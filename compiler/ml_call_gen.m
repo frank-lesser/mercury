@@ -88,7 +88,6 @@
 :- import_module mdbcomp.prim_data.
 :- import_module mdbcomp.sym_name.
 :- import_module ml_backend.ml_code_util.
-:- import_module ml_backend.ml_optimize.
 :- import_module parse_tree.prog_data_foreign.
 
 :- import_module assoc_list.
@@ -177,7 +176,7 @@ ml_gen_main_generic_call(GenericCall, ArgVars, ArgModes, Determinism, Context,
         FuncLval = ml_field(yes(0), ml_lval(ClosureLval), FieldId,
             mlds_generic_type, ClosureArgType),
         FuncType = mlds_func_type(Params),
-        FuncRval = ml_unop(unbox(FuncType), ml_lval(FuncLval))
+        FuncRval = ml_unbox(FuncType, ml_lval(FuncLval))
     ;
         GenericCall = class_method(TypeClassInfoVar, MethodNum,
             _ClassId, _PredName),
@@ -200,7 +199,7 @@ ml_gen_main_generic_call(GenericCall, ArgVars, ArgModes, Determinism, Context,
         FuncLval = ml_field(yes(0), ml_lval(BaseTypeclassInfoLval),
             MethodFieldId, mlds_generic_type, mlds_generic_type),
         FuncType = mlds_func_type(Params),
-        FuncRval = ml_unop(unbox(FuncType), ml_lval(FuncLval))
+        FuncRval = ml_unbox(FuncType, ml_lval(FuncLval))
     ),
 
     % Assign the function address rval to a new local variable. This makes
@@ -228,7 +227,7 @@ ml_gen_main_generic_call(GenericCall, ArgVars, ArgModes, Determinism, Context,
     ml_gen_args(PredOrFunc, CodeModel, Context, input_and_output_params,
         BoxedArgTypes, ArgModes, CallerArgs, InputRvals, OutputLvalsTypes,
         ConvArgLocalVarDefns, ConvOutputStmts, !Info),
-    ClosureRval = ml_unop(unbox(ClosureArgType), ml_lval(ClosureLval)),
+    ClosureRval = ml_unbox(ClosureArgType, ml_lval(ClosureLval)),
 
     ( if
         ConvArgLocalVarDefns = [],
@@ -292,7 +291,7 @@ ml_gen_cast(Context, ArgVars, LocalVarDefns, FuncDefns, Stmts, !Info) :-
         ArgTypes = [SrcType, DestType]
     then
         ml_gen_info_get_module_info(!.Info, ModuleInfo),
-        IsDummy = check_dummy_type(ModuleInfo, DestType),
+        IsDummy = is_type_a_dummy(ModuleInfo, DestType),
         (
             IsDummy = is_dummy_type,
             Stmts = []
@@ -479,6 +478,101 @@ ml_gen_plain_tail_call(CalleePredProcId, CodeModel, Context, ArgVars, Features,
             Context, CallerArgs, ntrcr_program, Features,
             LocalVarDefns, FuncDefns, Stmts, !Info)
     ).
+
+    % Assign the given list of rvals (the actual parameter) to the given list
+    % of mlds_arguments (the formal parameter). This is used as part of tail
+    % recursion optimization (see above).
+    %
+    % For each actual parameter that differs from its corresponding formal
+    % parameter, we declare a temporary variable to hold the next value
+    % of the formal parameter, and assign it the value of the actual parameter.
+    % Once this has been done for all parameters, we then assign each formal
+    % parameter its next value. The code we generate looks like this:
+    %
+    %   % These are returned in TempDefns.
+    %   SomeType new_value_of_arg1;
+    %   SomeType new_value_of_arg3;
+    %   SomeType new_value_of_arg3;
+    %
+    %   % These are returned in InitStmts.
+    %   new_value_of_arg1 = <the new value of parameter 1>
+    %   new_value_of_arg2 = <the new value of parameter 2>
+    %   new_value_of_arg3 = <the new value of parameter 3>
+    %
+    %   % These are returned in AssignStmts.
+    %   arg1 = new_value_of_arg1;
+    %   arg2 = new_value_of_arg2;
+    %   arg3 = new_value_of_arg3;
+    %
+    % The temporaries are needed for tail calls such as
+    %
+    % p(In1, In2, ...) :-
+    %   ...
+    %   p(In2, In1, ...).
+    %
+    % We don't want to assign In1 to In2 (in the second parameter position)
+    % after we have already clobbered the value of In1 by assigning it In2
+    % (when processing the first parameter position).
+    %
+    % This predicate doesn't pay attention to the gc statement field
+    % inside the mlds_arguments it is given; it needs only the variable name
+    % and type fields.
+    %
+:- pred tail_rec_call_assign_input_args(mlds_module_name::in, prog_context::in,
+    list(mlds_argument)::in, list(mlds_rval)::in,
+    list(mlds_stmt)::out, list(mlds_stmt)::out,
+    list(mlds_local_var_defn)::out) is det.
+
+tail_rec_call_assign_input_args(_, _, [], [], [], [], []).
+tail_rec_call_assign_input_args(_, _, [_|_], [], [], [], []) :-
+    unexpected($pred, "length mismatch").
+tail_rec_call_assign_input_args(_, _, [], [_|_], [], [], []) :-
+    unexpected($pred, "length mismatch").
+tail_rec_call_assign_input_args(ModuleName, Context,
+        [Arg | Args], [ArgRval | ArgRvals],
+        !:InitStmts, !:AssignStmts, !:TempDefns) :-
+    tail_rec_call_assign_input_args(ModuleName, Context, Args, ArgRvals,
+        !:InitStmts, !:AssignStmts, !:TempDefns),
+
+    Arg = mlds_argument(VarName, Type, _ArgGCStmt),
+    % Don't bother assigning a variable to itself.
+    ( if ArgRval = ml_lval(ml_local_var(VarName, _VarType)) then
+        true
+    else
+        ( if VarName = lvn_prog_var(VarNameStr, VarNum) then
+            NextValueName = lvn_prog_var_next_value(VarNameStr, VarNum)
+        else
+            % This should not happen; the head variables of a procedure
+            % should all be lvn_prog_vars, even the ones representing
+            % the typeinfos and typeclassinfos added by the compiler.
+            % However, better safe than sorry.
+            VarNameStr = ml_local_var_name_to_string(VarName),
+            NextValueName =
+                lvn_comp_var(lvnc_non_prog_var_next_value(VarNameStr))
+        ),
+        % Note that we have to use an assignment rather than an initializer
+        % to initialize the temp, because this pass comes before
+        % ml_elem_nested.m, and ml_elim_nested.m doesn't handle code
+        % containing initializers.
+        % XXX We should teach it to handle them.
+        NextValueInitStmt = ml_stmt_atomic(
+            assign(ml_local_var(NextValueName, Type), ArgRval),
+            Context),
+        !:InitStmts = [NextValueInitStmt | !.InitStmts],
+        AssignStmt = ml_stmt_atomic(
+            assign(
+                ml_local_var(VarName, Type),
+                ml_lval(ml_local_var(NextValueName, Type))),
+            Context),
+        !:AssignStmts = [AssignStmt | !.AssignStmts],
+        % We don't need to trace the temporary variables for GC, since they
+        % are not live across a call or a heap allocation.
+        TempDefn = ml_gen_mlds_var_decl_init(NextValueName, Type,
+            no_initializer, gc_no_stmt, Context),
+        !:TempDefns = [TempDefn | !.TempDefns]
+    ).
+
+%---------------------------------------------------------------------------%
 
 ml_gen_plain_non_tail_call(CalleePredProcId, CodeModel, Context, CallerArgs,
         NonTailCallReason, Features, LocalVarDefns, FuncDefns, Stmts, !Info) :-
@@ -813,7 +907,7 @@ ml_gen_builtin(PredId, ProcId, ArgVars, CodeModel, Context,
                 % introduced for types such as io.state.
                 Lval = ml_local_var(_VarName, VarType),
                 VarType = mercury_type(ProgDataType, _, _),
-                check_dummy_type(ModuleInfo, ProgDataType) = is_dummy_type
+                is_type_a_dummy(ModuleInfo, ProgDataType) = is_dummy_type
             then
                 Stmts = []
             else
@@ -877,7 +971,7 @@ ml_gen_simple_expr(int64_const(Int64)) = ml_const(mlconst_int64(Int64)).
 ml_gen_simple_expr(uint64_const(UInt64)) = ml_const(mlconst_uint64(UInt64)).
 ml_gen_simple_expr(float_const(Float)) = ml_const(mlconst_float(Float)).
 ml_gen_simple_expr(unary(Op, Expr)) =
-    ml_unop(std_unop(Op), ml_gen_simple_expr(Expr)).
+    ml_unop(Op, ml_gen_simple_expr(Expr)).
 ml_gen_simple_expr(binary(Op, ExprA, ExprB)) =
     ml_binop(Op, ml_gen_simple_expr(ExprA), ml_gen_simple_expr(ExprB)).
 
@@ -924,9 +1018,12 @@ may_rval_yield_dangling_stack_ref(Rval) = MayYieldDanglingStackRef :-
         Rval = ml_const(Const),
         MayYieldDanglingStackRef = may_const_yield_dangling_stack_ref(Const)
     ;
-        Rval = ml_unop(_Op, SubRval),
-        MayYieldDanglingStackRef =
-            may_rval_yield_dangling_stack_ref(SubRval)
+        ( Rval = ml_box(_Type, SubRval)
+        ; Rval = ml_unbox(_Type, SubRval)
+        ; Rval = ml_cast(_Type, SubRval)
+        ; Rval = ml_unop(_Op, SubRval)
+        ),
+        MayYieldDanglingStackRef = may_rval_yield_dangling_stack_ref(SubRval)
     ;
         Rval = ml_binop(_Op, SubRvalA, SubRvalB),
         MayYieldDanglingStackRefA =

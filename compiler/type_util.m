@@ -2,6 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %-----------------------------------------------------------------------------%
 % Copyright (C) 1994-2012 The University of Melbourne.
+% Copyright (C) 2014-2018 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %-----------------------------------------------------------------------------%
@@ -161,7 +162,20 @@
     % NOTE: changes here may require changes to
     % `constructor_list_represents_dummy_argument_type'.
     %
-:- func check_dummy_type(module_info, mer_type) = is_dummy_type.
+:- func is_type_a_dummy(module_info, mer_type) = is_dummy_type.
+
+:- type is_either_dummy_type
+    --->    at_least_one_is_dummy_type
+    ;       neither_is_dummy_type.
+
+    % Return at_least_one_is_dummy_type if *either* of the two types
+    % is a dummy type.
+    %
+    % Usually used to check the "dummyness" of both the type of an argument
+    % in both the caller and the callee of a call.
+    %
+:- func is_either_type_a_dummy(module_info, mer_type, mer_type) =
+    is_either_dummy_type.
 
     % A test for types that are defined in Mercury, but whose definitions
     % are `lies', i.e. they are not sufficiently accurate for RTTI
@@ -213,13 +227,13 @@
 :- pred type_constructors(module_info::in, mer_type::in,
     list(constructor)::out) is semidet.
 
-    % Given a type on which it is possible to have a complete switch,
-    % return the number of alternatives. (It is possible to have a complete
-    % switch on any du type and on the builtin type character. It is not
-    % feasible to have a complete switch on the builtin types integer,
-    % float, and string. One cannot have a switch on an abstract type,
-    % and equivalence types will have been expanded out by the time
-    % we consider switches.)
+    % Given a type on which it is possible to have a complete switch, return
+    % the number of alternatives. (It is possible to have a complete switch on
+    % any du type, on the builtin type character and on the builtin fixed size
+    % integer types. It is not feasible to have a complete switch on the
+    % builtin types int, uint, float, and string. One cannot have a switch on
+    % an abstract type, and equivalence types will have been expanded out by
+    % the time we consider switches.)
     %
 :- pred switch_type_num_functors(module_info::in, mer_type::in, int::out)
     is semidet.
@@ -310,10 +324,6 @@
     %
 :- pred type_is_no_tag_type(module_info::in, mer_type::in, sym_name::out,
     mer_type::out) is semidet.
-
-    % Check whether a type is float or a type equivalent to float.
-    %
-:- pred type_is_float_eqv(module_info::in, mer_type::in) is semidet.
 
     % cons_id_adjusted_arity(ModuleInfo, Type, ConsId):
     %
@@ -775,13 +785,32 @@ type_is_existq_type(ModuleInfo, Type) :-
         Constructor ^ cons_maybe_exist = exist_constraints(_)
     ).
 
-check_dummy_type(ModuleInfo, Type) =
-    check_dummy_type_2(ModuleInfo, Type, []).
+is_type_a_dummy(ModuleInfo, Type) = IsDummy :-
+    module_info_get_type_table(ModuleInfo, TypeTable),
+    IsDummy = is_type_a_dummy_loop(TypeTable, Type, []).
 
-:- func check_dummy_type_2(module_info, mer_type, list(mer_type))
+is_either_type_a_dummy(ModuleInfo, TypeA, TypeB) = IsDummy :-
+    module_info_get_type_table(ModuleInfo, TypeTable),
+    IsDummyA = is_type_a_dummy_loop(TypeTable, TypeA, []),
+    (
+        IsDummyA = is_dummy_type,
+        IsDummy = at_least_one_is_dummy_type
+    ;
+        IsDummyA = is_not_dummy_type,
+        IsDummyB = is_type_a_dummy_loop(TypeTable, TypeB, []),
+        (
+            IsDummyB = is_dummy_type,
+            IsDummy = at_least_one_is_dummy_type
+        ;
+            IsDummyB = is_not_dummy_type,
+            IsDummy = neither_is_dummy_type
+        )
+    ).
+
+:- func is_type_a_dummy_loop(type_table, mer_type, list(mer_type))
     = is_dummy_type.
 
-check_dummy_type_2(ModuleInfo, Type, CoveredTypes) = IsDummy :-
+is_type_a_dummy_loop(TypeTable, Type, CoveredTypes) = IsDummy :-
     % Since the sizes of types in any given program is bounded, this test
     % will ensure termination.
     ( if list.member(Type, CoveredTypes) then
@@ -790,13 +819,12 @@ check_dummy_type_2(ModuleInfo, Type, CoveredTypes) = IsDummy :-
     else if type_to_ctor_and_args(Type, TypeCtor, ArgTypes) then
         % Keep this in sync with is_dummy_argument_type_with_constructors
         % above.
-        IsBuiltinDummy = check_builtin_dummy_type_ctor(TypeCtor),
+        IsBuiltinDummy = is_type_ctor_a_builtin_dummy(TypeCtor),
         (
             IsBuiltinDummy = is_builtin_dummy_type_ctor,
             IsDummy = is_dummy_type
         ;
             IsBuiltinDummy = is_not_builtin_dummy_type_ctor,
-            module_info_get_type_table(ModuleInfo, TypeTable),
             % This can fail for some builtin type constructors such as func,
             % pred, and tuple, none of which are dummy types.
             ( if search_type_ctor_defn(TypeTable, TypeCtor, TypeDefn) then
@@ -820,15 +848,15 @@ check_dummy_type_2(ModuleInfo, Type, CoveredTypes) = IsDummy :-
                         ),
                         IsDummy = is_not_dummy_type
                     ;
-                        DuTypeKind = du_type_kind_notag(_, SingleArgTypeInDefn
-                            , _),
+                        DuTypeKind = du_type_kind_notag(_, SingleArgTypeInDefn,
+                            _),
                         get_type_defn_tparams(TypeDefn, TypeParams),
                         map.from_corresponding_lists(TypeParams, ArgTypes,
                             Subst),
                         apply_subst_to_type(Subst, SingleArgTypeInDefn,
                             SingleArgType),
-                        IsDummy = check_dummy_type_2(ModuleInfo, SingleArgType,
-                            [Type | CoveredTypes])
+                        IsDummy = is_type_a_dummy_loop(TypeTable,
+                            SingleArgType, [Type | CoveredTypes])
                     )
                 ;
                     ( TypeBody = hlds_eqv_type(_)
@@ -1237,12 +1265,28 @@ substitute_type_args_ctor_args(Subst, [Arg0 | Args0], [Arg | Args]) :-
 
 switch_type_num_functors(ModuleInfo, Type, NumFunctors) :-
     type_to_ctor(Type, TypeCtor),
-    ( if TypeCtor = type_ctor(unqualified("character"), 0) then
+    ( if
+        TypeCtor = type_ctor(unqualified("character"), 0)
+    then
         module_info_get_globals(ModuleInfo, Globals),
         globals.get_target(Globals, Target),
         target_char_range(Target, MinChar, MaxChar),
         NumFunctors = MaxChar - MinChar + 1
-    else if type_ctor_is_tuple(TypeCtor) then
+    else if
+        % It's not worth bothering with the 32- and 64-bit integer types here
+        % -- a complete switch on any of those types would be so large that it
+        % would overwhelm the compiler anyway.
+        TypeCtor = type_ctor(unqualified(IntType), 0),
+        ( IntType = "int8", NumFunctors0 = 256
+        ; IntType = "uint8", NumFunctors0 = 256
+        ; IntType = "int16", NumFunctors0 = 65536
+        ; IntType = "uint16", NumFunctors0 = 65536
+        )
+    then
+        NumFunctors = NumFunctors0
+    else if
+        type_ctor_is_tuple(TypeCtor)
+    then
         NumFunctors = 1
     else
         module_info_get_type_table(ModuleInfo, TypeTable),
@@ -1294,7 +1338,7 @@ get_cons_id_arg_types_2(EQVarAction, ModuleInfo, VarType, ConsId, ArgTypes) :-
                 % XXX handle _ExistConstraints
                 (
                     EQVarAction = abort_on_exist_qvar,
-                    unexpected($module, $pred, "existentially typed cons_id")
+                    unexpected($pred, "existentially typed cons_id")
                 ;
                     EQVarAction = fail_on_exist_qvar,
                     fail
@@ -1343,7 +1387,7 @@ get_cons_defn_det(ModuleInfo, TypeCtor, ConsId, ConsDefn) :-
     ( if get_cons_defn(ModuleInfo, TypeCtor, ConsId, ConsDefnPrime) then
         ConsDefn = ConsDefnPrime
     else
-        unexpected($module, $pred, "get_cons_defn failed")
+        unexpected($pred, "get_cons_defn failed")
     ).
 
 get_cons_repn_defn(ModuleInfo, ConsId, ConsIdConsRepn) :-
@@ -1353,7 +1397,7 @@ get_cons_repn_defn(ModuleInfo, ConsId, ConsIdConsRepn) :-
     get_type_defn_body(TypeDefn, TypeBody),
     TypeBody = hlds_du_type(_, _, MaybeRepn, _),
     MaybeRepn = yes(Repn),
-    Repn = du_type_repn(_ConsTagMap, _ConsRepns, ConsRepnMap, _, _, _),
+    Repn = du_type_repn(_, ConsRepnMap, _, _, _),
     ConsName = unqualify_name(ConsSymName),
     map.search(ConsRepnMap, ConsName, MatchingConsRepns),
     MatchingConsRepns = one_or_more(HeadConsRepn, TailConsRepns),
@@ -1378,7 +1422,7 @@ get_cons_repn_defn_det(ModuleInfo, ConsId, ConsRepnDefn) :-
     ( if get_cons_repn_defn(ModuleInfo, ConsId, ConsRepnDefnPrime) then
         ConsRepnDefn = ConsRepnDefnPrime
     else
-        unexpected($module, $pred, "get_cons_repn_defn failed")
+        unexpected($pred, "get_cons_repn_defn failed")
     ).
 
 get_existq_cons_defn(ModuleInfo, VarType, ConsId, CtorDefn) :-
@@ -1424,17 +1468,6 @@ type_is_no_tag_type(ModuleInfo, Type, Ctor, ArgType) :-
 
 %-----------------------------------------------------------------------------%
 
-type_is_float_eqv(ModuleInfo, Type) :-
-    (
-        Type = float_type
-    ;
-        type_to_type_defn_body(ModuleInfo, Type, TypeBody),
-        TypeBody = hlds_eqv_type(EqvType),
-        type_is_float_eqv(ModuleInfo, EqvType)
-    ).
-
-%-----------------------------------------------------------------------------%
-
 cons_id_adjusted_arity(ModuleInfo, Type, ConsId) = AdjustedArity :-
     % Figure out the arity of this constructor, _including_ any type-infos
     % or typeclass-infos inserted for existential data types.
@@ -1444,14 +1477,19 @@ cons_id_adjusted_arity(ModuleInfo, Type, ConsId) = AdjustedArity :-
             _ArgTypes, _ResultType),
         (
             MaybeExistConstraints = exist_constraints(ExistConstraints),
-            ExistConstraints =
-                cons_exist_constraints(ExistQTVars, Constraints),
+            ExistConstraints = cons_exist_constraints(ExistQTVars, Constraints,
+                UnconstrainedExistQTVarsEC, _ConstrainedExistQTVars),
             list.length(Constraints, NumTypeClassInfos),
+            list.length(UnconstrainedExistQTVarsEC,
+                NumUnconstrainedExistQTVarsEC),
             constraint_list_get_tvars(Constraints, ConstrainedTVars),
             list.delete_elems(ExistQTVars, ConstrainedTVars,
                 UnconstrainedExistQTVars),
             list.length(UnconstrainedExistQTVars, NumTypeInfos),
-            AdjustedArity = ConsArity + NumTypeClassInfos + NumTypeInfos
+            AdjustedArity = NumTypeInfos + NumTypeClassInfos + ConsArity,
+            % XXX ARG_PACK Sanity check.
+            expect(unify(NumTypeInfos, NumUnconstrainedExistQTVarsEC), $pred,
+                "NumTypeInfos != NumUnconstrainedExistQTVars")
         ;
             MaybeExistConstraints = no_exist_constraints,
             AdjustedArity = ConsArity
@@ -1464,7 +1502,7 @@ cons_id_adjusted_arity(ModuleInfo, Type, ConsId) = AdjustedArity :-
 
 type_not_stored_in_region(Type, ModuleInfo) :-
     ( type_is_atomic(ModuleInfo, Type)
-    ; check_dummy_type(ModuleInfo, Type) = is_dummy_type
+    ; is_type_a_dummy(ModuleInfo, Type) = is_dummy_type
     ; Type = type_info_type
     ; Type = type_ctor_info_type
     ; type_is_var(Type)

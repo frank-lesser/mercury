@@ -224,11 +224,45 @@
     %
 :- func \ (int16::in) = (int16::uo) is det.
 
+%---------------------------------------------------------------------------%
+
+    % num_zeros(I) = N:
+    % N is the number of zeros in the binary representation of I.
+    %
+:- func num_zeros(int16) = int.
+
+    % num_ones(I) = N:
+    % N is the number of ones in the binary representation of I.
+    %
+:- func num_ones(int16) = int.
+
+    % num_leading_zeros(I) = N:
+    % N is the number of leading zeros in the binary representation of I,
+    % starting at the most significant bit position.
+    % Note that num_leading_zeros(0i16) = 16.
+    %
+:- func num_leading_zeros(int16) = int.
+
+    % num_trailing_zeros(I) = N:
+    % N is the number of trailing zeros in the binary representation of I,
+    % starting at the least significant bit position.
+    % Note that num_trailing_zeros(0i16) = 16.
+    %
+:- func num_trailing_zeros(int16) = int.
+
     % reverse_bytes(A) = B:
-    % B is the value that results from reversing the bytes in the
+    % B is the value that results from reversing the bytes in the binary
     % representation of A.
     %
 :- func reverse_bytes(int16) = int16.
+
+    % reverse_bits(A) = B:
+    % B is the is value that results from reversing the bits in the binary
+    % representation of A.
+    %
+:- func reverse_bits(int16) = int16.
+
+%---------------------------------------------------------------------------%
 
 :- func min_int16 = int16.
 
@@ -249,6 +283,7 @@
 :- import_module require.
 :- import_module string.
 :- import_module uint.
+:- import_module uint16.
 
 %---------------------------------------------------------------------------%
 
@@ -478,9 +513,21 @@ odd(X) :-
 
 %---------------------------------------------------------------------------%
 
-min_int16 = -32_768_i16.
+num_zeros(U) = 16 - num_ones(U).
 
-max_int16 = 32_767_i16.
+num_ones(I16) = N :-
+    U16 = uint16.cast_from_int16(I16),
+    N = uint16.num_ones(U16).
+
+%---------------------------------------------------------------------------%
+
+num_leading_zeros(I16) = N :-
+    U16 = uint16.cast_from_int16(I16),
+    N = uint16.num_leading_zeros(U16).
+
+num_trailing_zeros(I16) = N :-
+    U16 = uint16.cast_from_int16(I16),
+    N = uint16.num_trailing_zeros(U16).
 
 %---------------------------------------------------------------------------%
 
@@ -508,6 +555,27 @@ max_int16 = 32_767_i16.
 :- pragma no_determinism_warning(reverse_bytes/1).
 reverse_bytes(_) = _ :-
     sorry($module, "int16.reverse_bytes/1 NYI for Erlang").
+
+%---------------------------------------------------------------------------%
+
+reverse_bits(I16) = RevI16 :-
+    U16 = uint16.cast_from_int16(I16),
+    RevU16 = uint16.reverse_bits(U16),
+    RevI16 = int16.cast_from_uint16(RevU16).
+
+:- pragma foreign_proc("Java",
+    reverse_bits(A::in) = (B::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    B = (short) (java.lang.Integer.reverse(A << 16) & 0xffff);
+").
+
+
+%---------------------------------------------------------------------------%
+
+min_int16 = -32_768_i16.
+
+max_int16 = 32_767_i16.
 
 %---------------------------------------------------------------------------%
 

@@ -121,7 +121,7 @@
             % For these types, we don't need any tags. We just store a pointer
             % to the argument vector.
 
-    ;       unshared_tag(tag_bits)
+    ;       unshared_tag(ptag)
             % This is for constants or functors which can be distinguished
             % with just a primary tag. An "unshared" tag is one which fits
             % on the bottom of a pointer (i.e. two bits for 32-bit
@@ -129,7 +129,7 @@
             % used for just one functor. For constants we store a tagged zero,
             % for functors we store a tagged pointer to the argument vector.
 
-    ;       direct_arg_tag(tag_bits)
+    ;       direct_arg_tag(ptag)
             % This is for functors which can be distinguished with just a
             % primary tag. The primary tag says which of the type's functors
             % (which must have arity 1) this word represents. However, the
@@ -137,7 +137,7 @@
             % it IS the value of that argument, which must be an untagged
             % pointer to a cell.
 
-    ;       shared_remote_tag(tag_bits, int)
+    ;       shared_remote_tag(ptag, sectag, sectag_added_by)
             % This is for functors or constants which require more than just
             % a primary tag. In this case, we use both a primary and a
             % secondary tag. Several functors share the primary tag and are
@@ -146,11 +146,16 @@
             % then in this case there is an argument vector of size 1 which
             % just holds the secondary tag.)
 
-    ;       shared_local_tag(tag_bits, int)
+    ;       shared_local_tag(ptag, sectag)
             % This is for constants which require more than a two-bit tag.
             % In this case, we use both a primary and a secondary tag,
             % but this time the secondary tag is stored in the rest of the
             % main word rather than in the first word of the argument vector.
+
+    ;       dummy_tag
+            % This is for constants that are the only function symbol in their
+            % type. Such function symbols contain no information, and thus
+            % do not need to be represented at all.
 
     ;       no_tag.
             % This is for types with a single functor of arity one. In this
@@ -177,30 +182,30 @@
     ;       int_tag_int64(int64)
     ;       int_tag_uint64(uint64).
 
-    % The type `tag_bits' holds a primary tag value.
+    % The type `ptag' holds a primary tag value.
     % It consists of 2 bits on 32 bit machines and 3 bits on 64 bit machines.
     %
-:- type tag_bits == int.
+:- type ptag == int.
+
+:- type sectag == int.
+
+:- type sectag_added_by
+    --->    sectag_added_by_unify
+    ;       sectag_added_by_constructor.
 
     % Return the primary tag, if any, for a cons_tag.
     % A return value of `no' means the primary tag is unknown.
     % A return value of `yes(N)' means the primary tag is N.
     % (`yes(0)' also corresponds to the case where there no primary tag.)
     %
-:- func get_primary_tag(cons_tag) = maybe(int).
+:- func get_maybe_primary_tag(cons_tag) = maybe(ptag).
 
     % Return the secondary tag, if any, for a cons_tag.
     % A return value of `no' means there is no secondary tag.
     %
-:- func get_secondary_tag(cons_tag) = maybe(int).
+:- func get_maybe_secondary_tag(cons_tag) = maybe(sectag).
 
 %---------------------%
-
-    % The cons_id_to_tag_map type maps each the fully qualified cons_id
-    % of each constructor in a discriminated union type to the cons_tag
-    % that represents that cons_id.
-    %
-:- type cons_id_to_tag_map == map(cons_id, cons_tag).
 
     % A cons_id together with its tag.
     %
@@ -215,7 +220,7 @@
 
 :- implementation.
 
-get_primary_tag(Tag) = MaybePrimaryTag :-
+get_maybe_primary_tag(Tag) = MaybePrimaryTag :-
     (
         % In some of the cases where we return `no' here,
         % it would probably be OK to return `yes(0)'.
@@ -226,6 +231,7 @@ get_primary_tag(Tag) = MaybePrimaryTag :-
         ; Tag = foreign_tag(_, _)
         ; Tag = closure_tag(_, _, _)
         ; Tag = no_tag
+        ; Tag = dummy_tag
         ; Tag = type_ctor_info_tag(_, _, _)
         ; Tag = base_typeclass_info_tag(_, _, _)
         ; Tag = type_info_const_tag(_)
@@ -237,20 +243,20 @@ get_primary_tag(Tag) = MaybePrimaryTag :-
         MaybePrimaryTag = no
     ;
         Tag = ground_term_const_tag(_, SubTag),
-        MaybePrimaryTag = get_primary_tag(SubTag)
+        MaybePrimaryTag = get_maybe_primary_tag(SubTag)
     ;
         Tag = single_functor_tag,
         MaybePrimaryTag = yes(0)
     ;
         ( Tag = unshared_tag(PrimaryTag)
         ; Tag = direct_arg_tag(PrimaryTag)
-        ; Tag = shared_remote_tag(PrimaryTag, _SecondaryTag)
+        ; Tag = shared_remote_tag(PrimaryTag, _SecondaryTag, _)
         ; Tag = shared_local_tag(PrimaryTag, _SecondaryTag)
         ),
         MaybePrimaryTag = yes(PrimaryTag)
     ).
 
-get_secondary_tag(Tag) = MaybeSecondaryTag :-
+get_maybe_secondary_tag(Tag) = MaybeSecondaryTag :-
     (
         ( Tag = int_tag(_)
         ; Tag = float_tag(_)
@@ -265,6 +271,7 @@ get_secondary_tag(Tag) = MaybeSecondaryTag :-
         ; Tag = deep_profiling_proc_layout_tag(_, _)
         ; Tag = table_io_entry_tag(_, _)
         ; Tag = no_tag
+        ; Tag = dummy_tag
         ; Tag = unshared_tag(_PrimaryTag)
         ; Tag = direct_arg_tag(_PrimaryTag)
         ; Tag = single_functor_tag
@@ -272,9 +279,9 @@ get_secondary_tag(Tag) = MaybeSecondaryTag :-
         MaybeSecondaryTag = no
     ;
         Tag = ground_term_const_tag(_, SubTag),
-        MaybeSecondaryTag = get_secondary_tag(SubTag)
+        MaybeSecondaryTag = get_maybe_secondary_tag(SubTag)
     ;
-        ( Tag = shared_remote_tag(_PrimaryTag, SecondaryTag)
+        ( Tag = shared_remote_tag(_PrimaryTag, SecondaryTag, _)
         ; Tag = shared_local_tag(_PrimaryTag, SecondaryTag)
         ),
         MaybeSecondaryTag = yes(SecondaryTag)
@@ -1024,16 +1031,6 @@ set_type_defn_prev_errors(X, !Defn) :-
 
 :- type du_type_repn
     --->    du_type_repn(
-                % This table maps the constructors of the type (in their
-                % cons_id form) to the tags that represent them.
-                % XXX TYPE_REPN This field should be used only during
-                % the pass that decides the layout of du types; it should
-                % not stored here. The tag used for each constructor
-                % can be found using the du_ctor_map field, which also
-                % returns other information that is typically needed
-                % at the same time.
-                dur_cons_id_to_tag_map      :: cons_id_to_tag_map,
-
                 % This field contains the same constructors as the
                 % du_type_ctors field of the hlds_du_type functor,
                 % but in a form in which has representation information
@@ -1096,16 +1093,11 @@ set_type_defn_prev_errors(X, !Defn) :-
                 car_type            :: mer_type,
 
                 % XXX TYPE_REPN
-                % Consider either adding a new field that specifies
-                % the offset of this argument in the heap cell,
-                % or including that information in the arg_width type.
-                %
-                % XXX TYPE_REPN
                 % Later, we should be able to store arguments next to
                 % the primary tag, if all the arguments fit there
                 % (which means we don't need to use those bits
                 % as a heap pointer).
-                car_width           :: arg_width,
+                car_pos_width       :: arg_pos_width,
                 car_context         :: prog_context
             ).
 

@@ -588,8 +588,8 @@ typedef enum {
     MR_DEFINE_BUILTIN_ENUM_CONST(MR_TYPECTOR_REP_NOTAG_GROUND_USEREQ),
     MR_DEFINE_BUILTIN_ENUM_CONST(MR_TYPECTOR_REP_EQUIV_GROUND),
     MR_DEFINE_BUILTIN_ENUM_CONST(MR_TYPECTOR_REP_TUPLE),
-    MR_DEFINE_BUILTIN_ENUM_CONST(MR_TYPECTOR_REP_RESERVED_ADDR),
-    MR_DEFINE_BUILTIN_ENUM_CONST(MR_TYPECTOR_REP_RESERVED_ADDR_USEREQ),
+    MR_DEFINE_BUILTIN_ENUM_CONST(MR_TYPECTOR_REP_UNUSED1),
+    MR_DEFINE_BUILTIN_ENUM_CONST(MR_TYPECTOR_REP_UNUSED2),
     MR_DEFINE_BUILTIN_ENUM_CONST(MR_TYPECTOR_REP_TYPECTORINFO),
     MR_DEFINE_BUILTIN_ENUM_CONST(MR_TYPECTOR_REP_BASETYPECLASSINFO),
     MR_DEFINE_BUILTIN_ENUM_CONST(MR_TYPECTOR_REP_TYPEDESC),
@@ -852,15 +852,78 @@ typedef enum {
 } MR_Sectag_Locn;
 
 typedef struct {
-    MR_int_least16_t        MR_arg_offset; // not including extra args
+    MR_int_least16_t        MR_arg_offset;
+    // The MR_arg_offset is the offset of this argument *from the
+    // part of the cell containing the arguments*; it is *not* measured
+    // from the start of the cell itself. The difference is that the
+    // arguments may be preceded by a remote secondary tag, and by
+    // type_infos and/or typeclass_infos added by polymorphism.m.
+    // XXX The runtime mostly wants the offset from the start of the cell,
+    // so we should consider changing this. However, any such change
+    // would require a nontrivial bootstrapping sequence.
     MR_int_least8_t         MR_arg_shift;
     MR_int_least8_t         MR_arg_bits;
-    // If MR_arg_bits is zero then the argument occupies the entire word.
-    // If MR_arg_bits is -1 then the argument is a double-precision floating
-    // point value occupying two words. Otherwise MR_arg_bits is non-zero and
-    // gives the number of bits used by the argument. Storing the bit-mask
-    // would be more useful, but would not be as compact.
-
+    // If MR_arg_bits is 0, then the argument occupies the entire word
+    // at the offset given by MR_arg_offset within the term's memory cell.
+    // In this case, which is the usual case, MR_arg_shift is not relevant.
+    //
+    // Nonzero values of MR_arg_bits mean that the size of the argument
+    // is not the same as the size of one word. These nonzero values
+    // fall into two categories: positive and negative.
+    //
+    // A strictly positive value of MR_arg_bits means that the argument
+    // is a value of an enum type packed into a word with other sub-word-sized
+    // arguments. To get the value of this argument, shift the word at
+    // the offset given by MR_arg_offset by MR_arg_shift bits to the right
+    // and mask off the bottom MR_arg_bits bits.
+    //
+    // The strictly negative values of MR_arg_bits fall into three
+    // subcategories.
+    //
+    // The first subcategory is for arguments that take two full words,
+    // which will be the ones at the offsets indicated by MR_arg_offset
+    // and MR_arg_offset+1.
+    //
+    // MR_arg_bits = -1 says the argument is a double-precision float.
+    // MR_arg_bits = -2 says the argument is a value of type int64.
+    // MR_arg_bits = -3 says the argument is a value of type uint64.
+    //
+    // The second subcategory is for sub-word-sized integers. For these,
+    // the value MR_arg_shift specifies where they are in the word
+    // indicated by MR_arg_offset (the same way it does for enum values),
+    // and the number of bits the argument occupies is given by the type.
+    //
+    // MR_arg_bits = -4 says the argument is a value of type int8.
+    // MR_arg_bits = -5 says the argument is a value of type uint8.
+    // MR_arg_bits = -6 says the argument is a value of type int16.
+    // MR_arg_bits = -7 says the argument is a value of type uint16.
+    // MR_arg_bits = -8 says the argument is a value of type int32.
+    // MR_arg_bits = -9 says the argument is a value of type uint32.
+    //
+    // The third subcategories contains just one code value. If MR_arg_bits
+    // is -10, then the argument is a dummy and occupies no bits at all.
+    //
+    // MR_arg_bits may not take any negative value except the ones listed
+    // above.
+    //
+    // This code is known to the following files in the Mercury implementation.
+    // If it is changed, they must all be modified accordingly.
+    //
+    //      compiler/rtti_out.m
+    //      compiler/rtti_to_mlds.m
+    //      library/construct.m
+    //      runtime/mercury_deconstruct.c
+    //      runtime/mercury_deep_copy_body.h
+    //      runtime/mercury_type_info.c
+    //
+    // Note that code that wants to mask off the selected bits of a word
+    // in a term's memory cell typically wants the mask to use. We store
+    // only the number of bits, which requires the mask to be constructed
+    // on the fly. We could store the mask here as well, but that would
+    // push the size of this structure above 32 bits. We could store
+    // the mask *instead* of the number of bits, but then we would need
+    // some other mechanism for encoding the above special values, which
+    // would probably also require extra space.
 } MR_DuArgLocn;
 
 // This type describes the subtype constraints on the arguments of a functor.
@@ -954,16 +1017,6 @@ typedef const MR_NotagFunctorDesc           *MR_NotagFunctorDescPtr;
 
 ////////////////////////////////////////////////////////////////////////////
 
-typedef struct {
-    MR_ConstString      MR_ra_functor_name;
-    MR_int_least32_t    MR_ra_functor_ordinal;
-    MR_ReservedAddr     MR_ra_functor_reserved_addr;
-} MR_ReservedAddrFunctorDesc;
-
-typedef const MR_ReservedAddrFunctorDesc    *MR_ReservedAddrFunctorDescPtr;
-
-////////////////////////////////////////////////////////////////////////////
-
 // This type describes the function symbols that share the same primary tag.
 // The sharers field gives their number, and thus also the size
 // of the array of pointers to functor descriptors pointed to by the
@@ -1033,38 +1086,6 @@ typedef MR_NotagFunctorDesc *MR_NotagTypeLayout;
 
 ////////////////////////////////////////////////////////////////////////////
 
-// This type is used to describe the representation of discriminated unions
-// where one or more constants in the discriminated union are represented
-// using reserved addresses.
-//
-// The MR_ra_num_res_numeric_addrs field contains the number of different
-// reserved numeric addresses. The actual numeric addresses reserved will
-// range from 0 (NULL) to one less than the value of this field.
-//
-// The MR_ra_num_res_symbolic_addrs field contains the number of different
-// reserved symbolic addresses, and the MR_ra_res_symbolic_addrs field
-// contains their values.
-//
-// The MR_ra_constants field points to a vector of descriptors for the
-// functors represented by reserved addresses. The descriptors of the functors
-// with numeric addresses precede those with symbolic addresses. The length of
-// the two parts of the vector are given by the values of the first two fields.
-//
-// The MR_ra_other_functors field describes all the functors in the type that
-// are not represented using reserved addresses.
-
-typedef struct {
-    MR_int_least16_t                    MR_ra_num_res_numeric_addrs;
-    MR_int_least16_t                    MR_ra_num_res_symbolic_addrs;
-    const void * const                  *MR_ra_res_symbolic_addrs;
-    MR_ReservedAddrFunctorDescPtr const *MR_ra_constants;
-    MR_DuTypeLayout                     MR_ra_other_functors;
-} MR_ReservedAddrTypeDesc;
-
-typedef MR_ReservedAddrTypeDesc *MR_ReservedAddrTypeLayout;
-
-////////////////////////////////////////////////////////////////////////////
-
 // This type describes the identity of the type that an equivalence type
 // is equivalent to, and hence its layout.
 //
@@ -1093,8 +1114,8 @@ typedef MR_PseudoTypeInfo   MR_EquivLayout;
 ////////////////////////////////////////////////////////////////////////////
 
 // This type describes the layout in any kind of discriminated union
-// type: du, enum, foreign_enum, notag, or reserved_addr.
-// In an equivalence type, it gives the identity of the equivalent-to type.
+// type: du, enum, foreign_enum, or notag. In an equivalence type,
+// it gives the identity of the equivalent-to type.
 //
 // The layout_init alternative is used only for static initializers,
 // because ANSI C89 does not allow you to say which member of a union
@@ -1107,37 +1128,20 @@ typedef union {
     MR_EnumTypeLayout           MR_layout_enum;
     MR_ForeignEnumTypeLayout    MR_layout_foreign_enum;
     MR_NotagTypeLayout          MR_layout_notag;
-    MR_ReservedAddrTypeLayout   MR_layout_reserved_addr;
     MR_EquivLayout              MR_layout_equiv;
 } MR_TypeLayout;
 
 ////////////////////////////////////////////////////////////////////////////
 
-typedef union {
-    MR_DuFunctorDesc            *MR_maybe_res_du_ptr;
-    MR_ReservedAddrFunctorDesc  *MR_maybe_res_res_ptr;
-} MR_MaybeResFunctorDescPtr;
-
-typedef struct {
-    MR_ConstString              MR_maybe_res_name;
-    MR_Integer                  MR_maybe_res_arity;
-    MR_bool                     MR_maybe_res_is_res;
-    MR_MaybeResFunctorDescPtr   MR_maybe_res_ptr;
-} MR_MaybeResAddrFunctorDesc;
-
-#define MR_maybe_res_du         MR_maybe_res_ptr.MR_maybe_res_du_ptr
-#define MR_maybe_res_res        MR_maybe_res_ptr.MR_maybe_res_res_ptr
-
 // This type describes the function symbols in any kind of discriminated union
-// type: du, reserved_addr, enum, foreign_enum, and notag.
+// type: du, enum, foreign_enum, and notag.
 //
 // The pointer in the union points to either an array of pointers to functor
-// descriptors (for du, enum and foreign enum types), to an array of functor
-// descriptors (for reserved_addr types) or to a single functor descriptor
-// (for notag types). There is one functor descriptor for each function symbol,
-// and thus the size of the array is given by the num_functors field of the
-// type_ctor_info. Arrays are ordered on the name of the function symbol,
-// and then on arity.
+// descriptors (for du, enum and foreign enum types) or to a single functor
+// descriptor (for notag types). There is one functor descriptor
+// for each function symbol, and thus the size of the array is given by
+// the num_functors field of the type_ctor_info. Arrays are ordered
+// on the name of the function symbol, and then on arity.
 //
 // The intention is that if you have a function symbol you want to represent,
 // you can do binary search on the array for the symbol name and arity.
@@ -1148,7 +1152,6 @@ typedef struct {
 typedef union {
     const void                  *MR_functors_init;
     MR_DuFunctorDesc            **MR_functors_du;
-    MR_MaybeResAddrFunctorDesc  *MR_functors_res;
     MR_EnumFunctorDesc          **MR_functors_enum;
     MR_ForeignEnumFunctorDesc   **MR_functors_foreign_enum;
     MR_NotagFunctorDesc         *MR_functors_notag;
@@ -1228,8 +1231,7 @@ struct MR_TypeCtorInfo_Struct {
 // variable: at moment, this means functions, predicates and tuples.
 //
 // The kind of du flag is set for all discriminated union types, even if
-// their representation is specialized (as enumerations, notag types, reserved
-// address types etc).
+// their representation is specialized (as enumerations, notag types etc).
 //
 // The dummy flag must be set for type constructors whose values are not
 // actually passed around.

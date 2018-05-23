@@ -2,6 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1997-2008, 2010-2012 The University of Melbourne.
+% Copyright (C) 2013-2018 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %---------------------------------------------------------------------------%
@@ -57,11 +58,19 @@
 :- import_module bool.
 :- import_module float.
 :- import_module int.
+:- import_module int8.
+:- import_module int16.
+:- import_module int32.
+:- import_module int64.
 :- import_module maybe.
 :- import_module pair.
 :- import_module string.
 :- import_module term.
 :- import_module uint.
+:- import_module uint8.
+:- import_module uint16.
+:- import_module uint32.
+:- import_module uint64.
 
 %---------------------------------------------------------------------------%
 
@@ -251,6 +260,9 @@ evaluate_det_call_int_2(Globals, ProcName, ModeNum, X, Y,
         ProcName = "\\",
         ModeNum = 0,
         X ^ arg_inst = bound(_, _, [bound_functor(int_const(XVal), [])]),
+        globals.lookup_bool_option(Globals, pregenerated_dist, no),
+        target_bits_per_int(Globals, TargetBitsPerInt),
+        TargetBitsPerInt = bits_per_int(int.bits_per_int),
         OutputArg = Y,
         OutputArgVal = \ XVal
     ;
@@ -292,12 +304,15 @@ evaluate_det_call_int_2(Globals, ProcName, ModeNum, X, Y,
     arg_hlds_info::in, arg_hlds_info::in, arg_hlds_info::out, cons_id::out)
     is semidet.
 
-evaluate_det_call_uint_2(_Globals, ProcName, ModeNum, X, Y,
+evaluate_det_call_uint_2(Globals, ProcName, ModeNum, X, Y,
         OutputArg, uint_const(OutputArgVal)) :-
     (
         ProcName = "\\",
         ModeNum = 0,
         X ^ arg_inst = bound(_, _, [bound_functor(uint_const(XVal), [])]),
+        globals.lookup_bool_option(Globals, pregenerated_dist, no),
+        target_bits_per_uint(Globals, TargetBitsPerUInt),
+        TargetBitsPerUInt = bits_per_uint(uint.bits_per_uint),
         OutputArg = Y,
         OutputArgVal = \ XVal
     ).
@@ -538,6 +553,20 @@ evaluate_det_call_int_3(Globals, ProcName, ModeNum, X, Y, Z,
         Y ^ arg_inst = bound(_, _, [bound_functor(int_const(YVal), [])]),
         OutputArg = Z,
         OutputArgVal = xor(XVal, YVal)
+    ;
+        ProcName = "xor",
+        ModeNum = 1,
+        X ^ arg_inst = bound(_, _, [bound_functor(int_const(XVal), [])]),
+        Z ^ arg_inst = bound(_, _, [bound_functor(int_const(ZVal), [])]),
+        OutputArg = Y,
+        OutputArgVal = xor(XVal, ZVal)
+    ;
+        ProcName = "xor",
+        ModeNum = 2,
+        Y ^ arg_inst = bound(_, _, [bound_functor(int_const(YVal), [])]),
+        Z ^ arg_inst = bound(_, _, [bound_functor(int_const(ZVal), [])]),
+        OutputArg = X,
+        OutputArgVal = xor(YVal, ZVal)
     ).
 
 :- pred evaluate_det_call_uint_3(globals::in, string::in, int::in,
@@ -706,6 +735,20 @@ evaluate_det_call_uint_3(Globals, ProcName, ModeNum, X, Y, Z,
         Y ^ arg_inst = bound(_, _, [bound_functor(uint_const(YVal), [])]),
         OutputArg = Z,
         OutputArgVal = xor(XVal, YVal)
+    ;
+        ProcName = "xor",
+        ModeNum = 1,
+        X ^ arg_inst = bound(_, _, [bound_functor(uint_const(XVal), [])]),
+        Z ^ arg_inst = bound(_, _, [bound_functor(uint_const(ZVal), [])]),
+        OutputArg = Y,
+        OutputArgVal = xor(XVal, ZVal)
+    ;
+        ProcName = "xor",
+        ModeNum = 2,
+        Y ^ arg_inst = bound(_, _, [bound_functor(uint_const(YVal), [])]),
+        Z ^ arg_inst = bound(_, _, [bound_functor(uint_const(ZVal), [])]),
+        OutputArg = X,
+        OutputArgVal = xor(YVal, ZVal)
     ).
 
 :- pred evaluate_det_call_float_3(globals::in, string::in, int::in,
@@ -827,6 +870,162 @@ evaluate_test("int", ">=", 0, Args, Result) :-
         Result = no
     ).
 
+    % 8-bit signed integer comparison.
+
+evaluate_test("int8", "<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int8_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int8_const(YVal), [])]),
+    ( if XVal < YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int8", "=<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int8_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int8_const(YVal), [])]),
+    ( if XVal =< YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int8", ">", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int8_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int8_const(YVal), [])]),
+    ( if XVal > YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int8", ">=", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int8_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int8_const(YVal), [])]),
+    ( if XVal >= YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+
+    % 16-bit signed integer comparison.
+
+evaluate_test("int16", "<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int16_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int16_const(YVal), [])]),
+    ( if XVal < YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int16", "=<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int16_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int16_const(YVal), [])]),
+    ( if XVal =< YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int16", ">", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int16_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int16_const(YVal), [])]),
+    ( if XVal > YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int16", ">=", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int16_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int16_const(YVal), [])]),
+    ( if XVal >= YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+
+    % 32-bit signed integer comparison.
+
+evaluate_test("int32", "<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int32_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int32_const(YVal), [])]),
+    ( if XVal < YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int32", "=<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int32_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int32_const(YVal), [])]),
+    ( if XVal =< YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int32", ">", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int32_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int32_const(YVal), [])]),
+    ( if XVal > YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int32", ">=", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int32_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int32_const(YVal), [])]),
+    ( if XVal >= YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+
+    % 64-bit signed integer comparison.
+
+evaluate_test("int64", "<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int64_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int64_const(YVal), [])]),
+    ( if XVal < YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int64", "=<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int64_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int64_const(YVal), [])]),
+    ( if XVal =< YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int64", ">", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int64_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int64_const(YVal), [])]),
+    ( if XVal > YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("int64", ">=", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(int64_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(int64_const(YVal), [])]),
+    ( if XVal >= YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+
     % Unsigned integer comparisons.
 
 evaluate_test("uint", "<", 0, Args, Result) :-
@@ -860,6 +1059,162 @@ evaluate_test("uint", ">=", 0, Args, Result) :-
     Args = [X, Y],
     X ^ arg_inst = bound(_, _, [bound_functor(uint_const(XVal), [])]),
     Y ^ arg_inst = bound(_, _, [bound_functor(uint_const(YVal), [])]),
+    ( if XVal >= YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+
+    % 8-bit unsigned integer comparisons.
+
+evaluate_test("uint8", "<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint8_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint8_const(YVal), [])]),
+    ( if XVal < YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint8", "=<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint8_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint8_const(YVal), [])]),
+    ( if XVal =< YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint8", ">", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint8_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint8_const(YVal), [])]),
+    ( if XVal > YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint8", ">=", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint8_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint8_const(YVal), [])]),
+    ( if XVal >= YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+
+    % 16-bit unsigned integer comparisons.
+
+evaluate_test("uint16", "<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint16_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint16_const(YVal), [])]),
+    ( if XVal < YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint16", "=<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint16_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint16_const(YVal), [])]),
+    ( if XVal =< YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint16", ">", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint16_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint16_const(YVal), [])]),
+    ( if XVal > YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint16", ">=", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint16_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint16_const(YVal), [])]),
+    ( if XVal >= YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+
+    % 32-bit unsigned integer comparisons.
+
+evaluate_test("uint32", "<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint32_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint32_const(YVal), [])]),
+    ( if XVal < YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint32", "=<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint32_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint32_const(YVal), [])]),
+    ( if XVal =< YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint32", ">", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint32_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint32_const(YVal), [])]),
+    ( if XVal > YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint32", ">=", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint32_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint32_const(YVal), [])]),
+    ( if XVal >= YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+
+    % 64-bit unsigned integer comparisons.
+
+evaluate_test("uint64", "<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint64_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint64_const(YVal), [])]),
+    ( if XVal < YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint64", "=<", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint64_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint64_const(YVal), [])]),
+    ( if XVal =< YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint64", ">", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint64_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint64_const(YVal), [])]),
+    ( if XVal > YVal then
+        Result = yes
+    else
+        Result = no
+    ).
+evaluate_test("uint64", ">=", 0, Args, Result) :-
+    Args = [X, Y],
+    X ^ arg_inst = bound(_, _, [bound_functor(uint64_const(XVal), [])]),
+    Y ^ arg_inst = bound(_, _, [bound_functor(uint64_const(YVal), [])]),
     ( if XVal >= YVal then
         Result = yes
     else

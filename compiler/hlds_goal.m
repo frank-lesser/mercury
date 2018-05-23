@@ -1014,8 +1014,9 @@
 
     % Information on how to construct the cell for a construction unification.
     % The `construct_statically' alternative is set by the mark_static_terms.m
-    % pass, and is currently only used for the MLDS back-end (for the LLDS
-    % back-end, the same optimization is handled by var_locn.m).
+    % pass, and is used for the MLDS back-end. For the LLDS back-end, the same
+    % optimization is handled by var_locn.m but mark_static_terms.m may be run
+    % to support the loop invariant hoisting pass.
     %
 :- type how_to_construct
     --->    construct_statically
@@ -1407,6 +1408,21 @@
             % transformation to do the job of quantification as well,
             % we simply make it mark the unifications it creates, and get
             % the singleton warning code to respect it.
+            %
+            % On the other hand, see the next feature.
+
+    ;       feature_state_var_copy
+            % This goal is one of the unifications mentioned in the comment
+            % immediately above. A post-pass in the state variable
+            % transformation deletes unification goals with this feature
+            % if the variable on the LHS (which should be the variable
+            % representing the updated version of the state variable)
+            % if not used in later code.
+            %
+            % This allows us to report at least some places where the
+            % new version of a state variable is a singleton variable
+            % (which in practice virtually always means that it is computed,
+            % but never used).
 
     ;       feature_duplicated_for_switch
             % This goal was created by switch detection by duplicating
@@ -1640,6 +1656,8 @@
 
 :- pred goal_info_add_feature(goal_feature::in,
     hlds_goal_info::in, hlds_goal_info::out) is det.
+:- pred goal_info_add_features(list(goal_feature)::in,
+    hlds_goal_info::in, hlds_goal_info::out) is det.
 :- pred goal_info_remove_feature(goal_feature::in,
     hlds_goal_info::in, hlds_goal_info::out) is det.
 :- pred goal_info_has_feature(hlds_goal_info::in, goal_feature::in) is semidet.
@@ -1653,10 +1671,12 @@
 :- pred goal_set_context(term.context::in, hlds_goal::in, hlds_goal::out)
     is det.
 
-:- pred goal_add_feature(goal_feature::in, hlds_goal::in, hlds_goal::out)
-    is det.
-:- pred goal_remove_feature(goal_feature::in, hlds_goal::in, hlds_goal::out)
-    is det.
+:- pred goal_add_feature(goal_feature::in,
+    hlds_goal::in, hlds_goal::out) is det.
+:- pred goal_add_features(list(goal_feature)::in,
+    hlds_goal::in, hlds_goal::out) is det.
+:- pred goal_remove_feature(goal_feature::in,
+    hlds_goal::in, hlds_goal::out) is det.
 :- pred goal_has_feature(hlds_goal::in, goal_feature::in) is semidet.
 
 %-----------------------------------------------------------------------------%
@@ -1828,7 +1848,7 @@ make_foreign_args(Vars, NamesModesBoxes, Types, Args) :-
     then
         Args = []
     else
-        unexpected($module, $pred, "unmatched lists")
+        unexpected($pred, "unmatched lists")
     ).
 
 %-----------------------------------------------------------------------------%
@@ -2138,7 +2158,7 @@ goal_info_get_rbmm(GoalInfo) = RBMM :-
         MaybeRBMM = yes(RBMM)
     ;
         MaybeRBMM = no,
-        unexpected($module, $pred, "Requesting unavailable RBMM information.")
+        unexpected($pred, "Requesting unavailable RBMM information.")
     ).
 
 goal_info_get_occurring_vars(GoalInfo, OccurringVars) :-
@@ -2367,7 +2387,7 @@ goal_info_get_lfu(GoalInfo) = LFU :-
         MaybeLFU = yes(LFU)
     ;
         MaybeLFU = no,
-        unexpected($module, $pred,
+        unexpected($pred,
             "Requesting LFU information while CTGC field not set.")
     ).
 
@@ -2377,7 +2397,7 @@ goal_info_get_lbu(GoalInfo) = LBU :-
         MaybeLBU = yes(LBU)
     ;
         MaybeLBU = no,
-        unexpected($module, $pred,
+        unexpected($pred,
             "Requesting LBU information while CTGC field not set.")
     ).
 
@@ -2387,7 +2407,7 @@ goal_info_get_reuse(GoalInfo) = Reuse :-
         MaybeReuse = yes(Reuse)
     ;
         MaybeReuse = no,
-        unexpected($module, $pred,
+        unexpected($pred,
             "Requesting reuse information while CTGC field not set.")
     ).
 
@@ -2430,14 +2450,19 @@ goal_info_get_goal_purity(GoalInfo, Purity, ContainsTraceGoal) :-
         ContainsTraceGoal = contains_no_trace_goal
     ).
 
-goal_info_add_feature(Feature, !GoalInfo) :-
+goal_info_add_feature(NewFeature, !GoalInfo) :-
     Features0 = goal_info_get_features(!.GoalInfo),
-    set.insert(Feature, Features0, Features),
+    set.insert(NewFeature, Features0, Features),
     goal_info_set_features(Features, !GoalInfo).
 
-goal_info_remove_feature(Feature, !GoalInfo) :-
+goal_info_add_features(NewFeatures, !GoalInfo) :-
     Features0 = goal_info_get_features(!.GoalInfo),
-    ( if set.remove(Feature, Features0, Features) then
+    set.insert_list(NewFeatures, Features0, Features),
+    goal_info_set_features(Features, !GoalInfo).
+
+goal_info_remove_feature(OldFeature, !GoalInfo) :-
+    Features0 = goal_info_get_features(!.GoalInfo),
+    ( if set.remove(OldFeature, Features0, Features) then
         goal_info_set_features(Features, !GoalInfo)
     else
         % !.GoalInfo did not have Feature, so there is no need to allocate
@@ -2469,14 +2494,19 @@ goal_set_context(Context, Goal0, Goal) :-
     goal_info_set_context(Context, GoalInfo0, GoalInfo),
     Goal = hlds_goal(GoalExpr, GoalInfo).
 
-goal_add_feature(Feature, Goal0, Goal) :-
+goal_add_feature(NewFeature, Goal0, Goal) :-
     Goal0 = hlds_goal(GoalExpr, GoalInfo0),
-    goal_info_add_feature(Feature, GoalInfo0, GoalInfo),
+    goal_info_add_feature(NewFeature, GoalInfo0, GoalInfo),
     Goal = hlds_goal(GoalExpr, GoalInfo).
 
-goal_remove_feature(Feature, Goal0, Goal) :-
+goal_add_features(NewFeatures, Goal0, Goal) :-
     Goal0 = hlds_goal(GoalExpr, GoalInfo0),
-    goal_info_remove_feature(Feature, GoalInfo0, GoalInfo),
+    goal_info_add_features(NewFeatures, GoalInfo0, GoalInfo),
+    Goal = hlds_goal(GoalExpr, GoalInfo).
+
+goal_remove_feature(OldFeature, Goal0, Goal) :-
+    Goal0 = hlds_goal(GoalExpr, GoalInfo0),
+    goal_info_remove_feature(OldFeature, GoalInfo0, GoalInfo),
     Goal = hlds_goal(GoalExpr, GoalInfo).
 
 goal_has_feature(hlds_goal(_GoalExpr, GoalInfo), Feature) :-

@@ -143,7 +143,22 @@
 
 %---------------------------------------------------------------------------%
 
+:- func project_mlds_argument_name(mlds_argument) = mlds_local_var_name.
+
+%---------------------------------------------------------------------------%
+
 :- func mlds_maybe_aux_func_id_to_suffix(mlds_maybe_aux_func_id) = string.
+
+%---------------------------------------------------------------------------%
+
+:- func mlds_int_type_int8 = mlds_type.
+:- func mlds_int_type_uint8 = mlds_type.
+:- func mlds_int_type_int16 = mlds_type.
+:- func mlds_int_type_uint16 = mlds_type.
+:- func mlds_int_type_int32 = mlds_type.
+:- func mlds_int_type_uint32 = mlds_type.
+:- func mlds_int_type_int = mlds_type.
+:- func mlds_int_type_uint = mlds_type.
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
@@ -154,6 +169,7 @@
 :- import_module hlds.hlds_data.
 :- import_module mdbcomp.
 :- import_module mdbcomp.prim_data.
+:- import_module parse_tree.prog_type.
 
 :- import_module int.
 :- import_module solutions.
@@ -221,7 +237,7 @@ stmt_contains_statement(Stmt, SubStmt) :-
         Stmt = ml_stmt_block(_LocalVarDefns, _FuncDefns, Stmts, _Context),
         statements_contains_statement(Stmts, SubStmt)
     ;
-        Stmt = ml_stmt_while(_Kind, _Rval, BodyStmt, _Context),
+        Stmt = ml_stmt_while(_Kind, _Rval, BodyStmt, _LoopLocalVars, _Context),
         statement_is_or_contains_statement(BodyStmt, SubStmt)
     ;
         Stmt = ml_stmt_if_then_else(_Cond, ThenStmt, MaybeElseStmt, _Context),
@@ -319,7 +335,8 @@ statement_contains_var(Stmt, SearchVarName) = ContainsVar :-
             )
         )
     ;
-        Stmt = ml_stmt_while(_Kind, Rval, BodyStmt, _Context),
+        Stmt = ml_stmt_while(_Kind, Rval, BodyStmt, _LoopLocalVars, _Context),
+        % _LoopLocalVars should contain a variable only if BodyStmt does too.
         RvalContainsVar = rval_contains_var(Rval, SearchVarName),
         (
             RvalContainsVar = yes,
@@ -468,7 +485,7 @@ atomic_stmt_contains_var(AtomicStmt, SearchVarName) = ContainsVar :-
         ContainsVar = rval_contains_var(Rval, SearchVarName)
     ;
         AtomicStmt = new_object(Target, _MaybeTag, _ExplicitSecTag, _Type,
-            _MaybeSize, _MaybeCtorName, Args, _ArgTypes, _MayUseAtomic,
+            _MaybeSize, _MaybeCtorName, ArgRvalsTypes, _MayUseAtomic,
             _AllocId),
         TargetContainsVar = lval_contains_var(Target, SearchVarName),
         (
@@ -476,7 +493,8 @@ atomic_stmt_contains_var(AtomicStmt, SearchVarName) = ContainsVar :-
             ContainsVar = yes
         ;
             TargetContainsVar = no,
-            ContainsVar = rvals_contains_var(Args, SearchVarName)
+            ContainsVar = typed_rvals_contains_var(ArgRvalsTypes,
+                SearchVarName)
         )
     ;
         AtomicStmt = gc_check,
@@ -668,6 +686,7 @@ function_defn_contains_var(FuncDefn, SearchVarName) = ContainsVar :-
 
 % initializer_contains_var:
 % initializers_contains_var:
+% typed_rvals_contains_var:
 % rvals_contains_var:
 % maybe_rval_contains_var:
 % rval_contains_var:
@@ -708,6 +727,22 @@ initializers_contains_var([Initializer | Initializers], SearchVarName) =
     ;
         InitializerContainsVar = no,
         ContainsVar = initializers_contains_var(Initializers, SearchVarName)
+    ).
+
+:- func typed_rvals_contains_var(list(mlds_typed_rval), mlds_local_var_name)
+    = bool.
+
+typed_rvals_contains_var([], _SearchVarName) = no.
+typed_rvals_contains_var([TypedRval | TypedRvals], SearchVarName)
+        = ContainsVar :-
+    TypedRval = ml_typed_rval(Rval, _Type),
+    RvalContainsVar = rval_contains_var(Rval, SearchVarName),
+    (
+        RvalContainsVar = yes,
+        ContainsVar = yes
+    ;
+        RvalContainsVar = no,
+        ContainsVar = typed_rvals_contains_var(TypedRvals, SearchVarName)
     ).
 
 rvals_contains_var([], _SearchVarName) = no.
@@ -771,7 +806,11 @@ rval_contains_var(Rval, SearchVarName) = ContainsVar :-
             ContainsVar = no
         )
     ;
-        Rval = ml_unop(_Op, RvalA),
+        ( Rval = ml_box(_Type, RvalA)
+        ; Rval = ml_unbox(_Type, RvalA)
+        ; Rval = ml_cast(_Type, RvalA)
+        ; Rval = ml_unop(_Op, RvalA)
+        ),
         ContainsVar = rval_contains_var(RvalA, SearchVarName)
     ;
         Rval = ml_binop(_Op, RvalA, RvalB),
@@ -838,7 +877,7 @@ gen_init_bool(yes) = init_obj(ml_const(mlconst_true)).
 gen_init_int(Int) = init_obj(ml_const(mlconst_int(Int))).
 
 gen_init_boxed_int(Int) =
-    init_obj(ml_unop(box(mlds_native_int_type), ml_const(mlconst_int(Int)))).
+    init_obj(ml_box(mlds_native_int_type, ml_const(mlconst_int(Int)))).
 
 gen_init_string(String) = init_obj(ml_const(mlconst_string(String))).
 
@@ -861,7 +900,7 @@ wrap_init_obj(Rval) = init_obj(Rval).
 
 get_mlds_stmt_context(Stmt) = Context :-
     ( Stmt = ml_stmt_block(_, _, _, Context)
-    ; Stmt = ml_stmt_while(_, _, _, Context)
+    ; Stmt = ml_stmt_while(_, _, _, _, Context)
     ; Stmt = ml_stmt_if_then_else(_, _, _, Context)
     ; Stmt = ml_stmt_switch(_, _, _, _, _, Context)
     ; Stmt = ml_stmt_label(_, Context)
@@ -873,6 +912,10 @@ get_mlds_stmt_context(Stmt) = Context :-
     ; Stmt = ml_stmt_call(_, _, _, _, _, Context)
     ; Stmt = ml_stmt_atomic(_, Context)
     ).
+
+%---------------------------------------------------------------------------%
+
+project_mlds_argument_name(mlds_argument(LocalVarName, _, _)) = LocalVarName.
 
 %---------------------------------------------------------------------------%
 
@@ -897,6 +940,40 @@ mlds_maybe_aux_func_id_to_suffix(MaybeAux) = Suffix :-
         MaybeAux = gc_trace_for_proc_aux_func(SeqNum),
         Suffix = string.format("_%d", [i(10001 + SeqNum)])
     ).
+
+%---------------------------------------------------------------------------%
+
+mlds_int_type_int8 =
+    mercury_type(builtin_type(builtin_type_int(int_type_int8)), no,
+        ctor_cat_builtin(cat_builtin_int(int_type_int8))).
+
+mlds_int_type_uint8 =
+    mercury_type(builtin_type(builtin_type_int(int_type_uint8)), no,
+        ctor_cat_builtin(cat_builtin_int(int_type_uint8))).
+
+mlds_int_type_int16 =
+    mercury_type(builtin_type(builtin_type_int(int_type_int16)), no,
+        ctor_cat_builtin(cat_builtin_int(int_type_int16))).
+
+mlds_int_type_uint16 =
+    mercury_type(builtin_type(builtin_type_int(int_type_uint16)), no,
+        ctor_cat_builtin(cat_builtin_int(int_type_uint16))).
+
+mlds_int_type_int32 =
+    mercury_type(builtin_type(builtin_type_int(int_type_int32)), no,
+        ctor_cat_builtin(cat_builtin_int(int_type_int32))).
+
+mlds_int_type_uint32 =
+    mercury_type(builtin_type(builtin_type_int(int_type_uint32)), no,
+        ctor_cat_builtin(cat_builtin_int(int_type_uint32))).
+
+mlds_int_type_int =
+    mercury_type(builtin_type(builtin_type_int(int_type_int)), no,
+        ctor_cat_builtin(cat_builtin_int(int_type_int))).
+
+mlds_int_type_uint =
+    mercury_type(builtin_type(builtin_type_int(int_type_uint)), no,
+        ctor_cat_builtin(cat_builtin_int(int_type_uint))).
 
 %---------------------------------------------------------------------------%
 :- end_module ml_backend.ml_util.

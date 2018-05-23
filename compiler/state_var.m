@@ -83,7 +83,7 @@
     % vars match the mapping we decided on when processing the head.
     %
 :- pred svar_finish_clause_body(prog_context::in, map(svar, prog_var)::in,
-    list(hlds_goal)::in, hlds_goal::out,
+    hlds_goal::in, hlds_goal::in, hlds_goal::out,
     svar_state::in, svar_state::in, svar_store::in,
     list(error_spec)::out, list(error_spec)::out) is det.
 
@@ -295,10 +295,12 @@
 
 :- implementation.
 
+:- import_module hlds.goal_util.
 :- import_module hlds.make_goal.
 :- import_module libs.options.
 :- import_module mdbcomp.goal_path.
 :- import_module parse_tree.prog_util.
+:- import_module parse_tree.set_of_var.
 
 :- import_module assoc_list.
 :- import_module bool.
@@ -529,10 +531,10 @@ svar_prepare_head_term(Term0, Term, !FinalMap, !State, !VarSet, !Specs) :-
                     StatusMap = StatusMap0
                 ;
                     OldStatus = status_unknown_updated(_),
-                    unexpected($module, $pred, "status_unknown_updated for !.")
+                    unexpected($pred, "status_unknown_updated for !.")
                 ;
                     OldStatus = status_known_updated(_, _),
-                    unexpected($module, $pred, "status_known_updated for !.")
+                    unexpected($pred, "status_known_updated for !.")
                 ;
                     OldStatus = status_known_ro(_, _, _),
                     % This can happen if the context outside a lambda
@@ -575,10 +577,10 @@ svar_prepare_head_term(Term0, Term, !FinalMap, !State, !VarSet, !Specs) :-
                     StatusMap = StatusMap0
                 ;
                     OldStatus = status_unknown_updated(_),
-                    unexpected($module, $pred, "status_unknown_updated for !:")
+                    unexpected($pred, "status_unknown_updated for !:")
                 ;
                     OldStatus = status_known_updated(_, _),
-                    unexpected($module, $pred, "status_known_updated for !:")
+                    unexpected($pred, "status_known_updated for !:")
                 ;
                     OldStatus = status_known_ro(_, _, _),
                     % This can happen if the context outside a lambda
@@ -660,10 +662,10 @@ make_svars_read_only(ROC, Context, [SVar - CurStatus | CurTail], LambdaList) :-
 % Handle the end of processing a clause or lambda expression.
 %
 
-svar_finish_clause_body(Context, FinalMap, Goals0, Goal,
-        InitialSVarState, FinalSVarState, !.SVarStore,
+svar_finish_clause_body(Context, FinalMap, HeadGoal0, BodyGoal0,
+        Goal, InitialSVarState, FinalSVarState, !.SVarStore,
         WarningSpecs, ErrorSpecs) :-
-    svar_finish_body(Context, FinalMap, Goals0, Goal1,
+    svar_finish_body(Context, FinalMap, [HeadGoal0, BodyGoal0], Goal1,
         InitialSVarState, FinalSVarState, !SVarStore),
     !.SVarStore = svar_store(_, DelayedRenamings, Specs),
     list.filter(severity_is_error, Specs, ErrorSpecs, WarningSpecs),
@@ -689,7 +691,73 @@ svar_finish_clause_body(Context, FinalMap, Goals0, Goal,
             )
         ),
         incremental_rename_vars_in_goal(map.init, DelayedRenamings,
-            Goal1, Goal)
+            Goal1, Goal2),
+
+        % Suppose we have a goal such as this:
+        %
+        %   ( if p(..., !.S, !:S) then
+        %       <then_part>
+        %   else
+        %       <else_part>
+        %   )
+        %
+        % and that !:S is not referred to anywhere in the clause
+        % (not in then_part, not in else_part, not in the following code).
+        %
+        % In this form, warn_singletons can generate a warning about !:S
+        % being a singleton. However, the state variable transformation
+        % transforms it to code like this:
+        %
+        %   ( if p(..., STATE_VARIABLE_S_5, STATE_VARIABLE_S_6) then
+        %       <then_part>, STATE_VARIABLE_S_7 = STATE_VARIABLE_S_6
+        %   else
+        %       <else_part>, STATE_VARIABLE_S_7 = STATE_VARIABLE_S_5
+        %   )
+        %
+        % and marks both assignments to STATE_VARIABLE_S_7 as not being
+        % subject to singleton warnings.
+        %
+        % We don't actually *want* to generate warnings about the assignments
+        % to STATE_VARIABLE_S_7, because the problem not in those assignments
+        % or in the if-then-else arms that contain them. Instead, it is
+        % in the condition, However, with this version of the code,
+        % the occurrence of STATE_VARIABLE_S_6 in the condition is *not*
+        % a singleton.
+        %
+        % To allow us to generate a warning about !:S in the condition,
+        % we delete all copy unifications inserted by the state variable
+        % transformation that assign to a variable that is not referred to
+        % either in the code that follows the assignment, or in the head.
+        % (The head contains the output arguments, which will live
+        % beyond the lifetime of anything in the clause body.)
+        %
+        % To find which variables occur after a copy goal, we have
+        % delete_unneeded_copy_goals do a backwards traversal of the clause
+        % body, keeping track of all the variables it has seen.
+        %
+        % To find which variables occur in the head, we use the call to
+        % goal_vars below. The variables in HeadGoal0 contain not just
+        % the head_vars of the clause, but also the state variable instances
+        % any of them are unified with. (This includes the input arguments
+        % as well as the output arguments, but the clause body won't contain
+        % any assignments to either the input arguments or the state variable
+        % instances they are unified with, so including them in SeenLater0
+        % is harmless. As it happens, we have to include them because we
+        % don't know which arguments are input and which are output,
+        % a distinction that in any case may be mode-dependent.)
+        %
+        % We cannot count on the definitions of those state var instances
+        % being before any of the occurrences of the head vars they are
+        % unified with. For example, if a fact contains an !S argument pair,
+        % the call to svar_finish_body above will put the unification of
+        % the state var instances representing !.S and !:S *after*
+        % HeadGoal0. If we initialized SeenLater0 to just the head_vars
+        % of the clause, this unification would assign to a variable
+        % that is *not* in SeenLater0, and would thus be eliminated,
+        % which would be a bug.
+        goal_vars(HeadGoal0, HeadGoal0Vars),
+        SeenLater0 = HeadGoal0Vars,
+        delete_unneeded_copy_goals(Goal2, Goal, SeenLater0, _SeenLater)
     ).
 
 svar_finish_lambda_body(Context, FinalMap, Goals0, Goal,
@@ -795,12 +863,12 @@ svar_find_final_renames_and_copy_goals([Head | Tail],
         % The clause head already refers to the final version.
     ;
         FinalStatus = status_known_ro(_, _, _),
-        unexpected($module, $pred, "readonly status")
+        unexpected($pred, "readonly status")
     ;
         ( FinalStatus = status_known_updated(_, _)
         ; FinalStatus = status_unknown_updated(_)
         ),
-        unexpected($module, $pred, "updated status")
+        unexpected($pred, "updated status")
     ),
     svar_find_final_renames_and_copy_goals(Tail,
         InitialStatusMap, FinalStatusMap, !FinalSVarSubn, !CopyGoals).
@@ -960,7 +1028,7 @@ get_disjuncts_with_empty_states([], !RevDisjuncts).
 get_disjuncts_with_empty_states([GoalState | GoalStates], !RevDisjuncts) :-
     GoalState = hlds_goal_svar_state(Goal, State),
     StatusMapAfterGoal = State ^ state_status_map,
-    expect(map.is_empty(StatusMapAfterGoal), $module,
+    expect(map.is_empty(StatusMapAfterGoal), $pred,
         "map after goal not empty"),
     !:RevDisjuncts = [Goal | !.RevDisjuncts],
     get_disjuncts_with_empty_states(GoalStates, !RevDisjuncts).
@@ -1092,7 +1160,7 @@ handle_arm_updated_state_vars([Change | Changes], StatusMapBefore,
                 ; AfterAllArmsStatus = status_unknown
                 ; AfterAllArmsStatus = status_unknown_updated(_)
                 ),
-                unexpected($module, $pred,
+                unexpected($pred,
                     "AfterAllArmsStatus != status_known (Before == After)")
             )
         ;
@@ -1110,7 +1178,7 @@ handle_arm_updated_state_vars([Change | Changes], StatusMapBefore,
             % then any reference to !:StateVar should refer to the already
             % known updated prog_var, and thus AfterAllArmsStatus should be
             % the same as StatusBefore, which means we shouldn't get here.
-            unexpected($module, $pred, "BeforeStatus is updated")
+            unexpected($pred, "BeforeStatus is updated")
         )
     else
         (
@@ -1130,21 +1198,21 @@ handle_arm_updated_state_vars([Change | Changes], StatusMapBefore,
                 ; AfterAllArmsStatus = status_unknown
                 ; AfterAllArmsStatus = status_unknown_updated(_)
                 ),
-                unexpected($module, $pred,
+                unexpected($pred,
                     "AfterAllArmsStatus != status_known (Before != After)")
             )
         ;
             AfterArmStatus = status_known_ro(_, _, _),
-            unexpected($module, $pred, "AfterArmStatus = status_known_ro")
+            unexpected($pred, "AfterArmStatus = status_known_ro")
         ;
             AfterArmStatus = status_known_updated(_, _),
-            unexpected($module, $pred, "AfterArmStatus = status_known_updated")
+            unexpected($pred, "AfterArmStatus = status_known_updated")
         ;
             AfterArmStatus = status_unknown,
-            unexpected($module, $pred, "AfterArmStatus = status_unknown")
+            unexpected($pred, "AfterArmStatus = status_unknown")
         ;
             AfterArmStatus = status_unknown_updated(_),
-            unexpected($module, $pred, "AfterArmStatus = status_unknown")
+            unexpected($pred, "AfterArmStatus = status_unknown")
         )
     ).
 
@@ -1171,7 +1239,8 @@ make_copy_goal(FromVar, ToVar, CopyGoal) :-
 
     create_pure_atomic_complicated_unification(ToVar, rhs_var(FromVar),
         term.context_init, umc_implicit("state variable"), [], CopyGoal0),
-    goal_add_feature(feature_dont_warn_singleton, CopyGoal0, CopyGoal).
+    goal_add_features([feature_dont_warn_singleton, feature_state_var_copy],
+        CopyGoal0, CopyGoal).
 
 %-----------------------------------------------------------------------------%
 %
@@ -1287,7 +1356,7 @@ handle_state_vars_in_ite(LocKind, QuantStateVars, [SVar | SVars],
     map.lookup(StatusMapAfterElse, SVar, StatusAfterElse),
 
     ( if list.member(SVar, QuantStateVars) then
-        expect(unify(StatusBefore, StatusAfterThen), $module,
+        expect(unify(StatusBefore, StatusAfterThen), $pred,
             "state var shadowed in if-then-else is nevertheless updated"),
         % SVar is quantified in the if-then-else. That means that Cond and Then
         % may update a state variable with the same name as SVar, but this
@@ -1407,7 +1476,7 @@ handle_state_var_in_ite(LocKind, SVar, StatusBefore,
                     % This can happen if LocKind = loc_inside_atomic_goal,
                     % but any reference to !:SVar in the else case should
                     % have just returned the new progvar for SVar.
-                    unexpected($module, $pred, "updated before (case 2)")
+                    unexpected($pred, "updated before (case 2)")
                 )
             )
         else
@@ -1446,7 +1515,7 @@ handle_state_var_in_ite(LocKind, SVar, StatusBefore,
                     % This can happen if LocKind = loc_inside_atomic_goal,
                     % but any reference to !:SVar in the then case should
                     % have just returned the new progvar for SVar.
-                    unexpected($module, $pred, "updated before (case 3)")
+                    unexpected($pred, "updated before (case 3)")
                 )
             else
                 % Case 4.
@@ -1507,7 +1576,7 @@ handle_state_var_in_ite(LocKind, SVar, StatusBefore,
                     % This can happen if LocKind = loc_inside_atomic_goal,
                     % but any reference to !:SVar in the condition should
                     % have just returned the new progvar for SVar.
-                    unexpected($module, $pred, "updated before (case 5)")
+                    unexpected($pred, "updated before (case 5)")
                 )
             else
                 % Case 6.
@@ -1556,7 +1625,7 @@ handle_state_var_in_ite(LocKind, SVar, StatusBefore,
                     % but any reference to !:SVar in the condition and
                     % then case should have just returned the new progvar
                     % for SVar.
-                    unexpected($module, $pred, "updated before (case 7)")
+                    unexpected($pred, "updated before (case 7)")
                 )
             else
                 % Case 8.
@@ -1622,7 +1691,7 @@ svar_start_outer_atomic_scope(Context, OuterStateVar, OuterDIVar, OuterUOVar,
             ),
             % This status should exist in a status map only when we are in the
             % middle of processing an atomic goal.
-            unexpected($module, $pred, "status updated")
+            unexpected($pred, "status updated")
         )
     else
         report_non_visible_state_var("", Context, !.VarSet, OuterStateVar,
@@ -1678,7 +1747,7 @@ svar_finish_inner_atomic_scope(_Context, InnerScopeInfo,
         ; Status = status_known_ro(_, _, _)
         ; Status = status_known_updated(_, _)
         ),
-        unexpected($module, $pred, "status != known")
+        unexpected($pred, "status != known")
     ),
     !:State = StateBefore.
 
@@ -1796,7 +1865,7 @@ svar_get_current_progvar(LocKind, Status) = ProgVar :-
             ; Status = status_unknown
             ; Status = status_unknown_updated(_)
             ),
-            unexpected($module, $pred, "Status not known")
+            unexpected($pred, "Status not known")
         )
     ;
         LocKind = loc_inside_atomic_goal,
@@ -1810,7 +1879,7 @@ svar_get_current_progvar(LocKind, Status) = ProgVar :-
             ( Status = status_known_ro(_, _, _)
             ; Status = status_unknown
             ),
-            unexpected($module, $pred, "Status not known or updated")
+            unexpected($pred, "Status not known or updated")
         )
     ).
 
@@ -1901,6 +1970,218 @@ add_conjunct_delayed_renames(DelayedRenamingToAdd, Goal0, Goal,
         map.det_insert(GoalId, DelayedRenamingToAdd, !DelayedRenamingMap),
         Goal = hlds_goal(GoalExpr, GoalInfo)
     ).
+
+%-----------------------------------------------------------------------------%
+%
+% A post-pass to delete unneeded copy unifications. Such unifications
+% can hide singleton variable problems.
+%
+
+:- pred delete_unneeded_copy_goals(hlds_goal::in, hlds_goal::out,
+    set_of_progvar::in, set_of_progvar::out) is det.
+
+delete_unneeded_copy_goals(Goal0, Goal, SeenAfter, SeenBefore) :-
+    Goal0 = hlds_goal(GoalExpr0, GoalInfo),
+    (
+        GoalExpr0 = unify(LHSVar, _, _, _, _),
+        goal_vars(Goal0, GoalVars0),
+        ( if
+            goal_info_has_feature(GoalInfo, feature_state_var_copy),
+            not set_of_var.member(SeenAfter, LHSVar)
+        then
+            Goal = hlds_goal(true_goal_expr, GoalInfo),
+            SeenBefore = SeenAfter
+        else
+            set_of_var.union(GoalVars0, SeenAfter, SeenBefore),
+            Goal = Goal0
+        )
+    ;
+        ( GoalExpr0 = plain_call(_, _, _, _, _, _)
+        ; GoalExpr0 = generic_call(_, _, _, _, _)
+        ; GoalExpr0 = call_foreign_proc(_, _, _, _, _, _, _)
+        ),
+        goal_vars(Goal0, GoalVars0),
+        set_of_var.union(GoalVars0, SeenAfter, SeenBefore),
+        Goal = Goal0
+    ;
+        GoalExpr0 = conj(ConjKind, Conjuncts0),
+        % Processing Conjuncts0 without reversing it would lead to recursion
+        % as deep as Conjuncts0 is long. Since Conjuncts0 can be very long,
+        % we prefer to pay the price of reversing and unreversing the list
+        % to achieve tail recursion.
+        list.reverse(Conjuncts0, RevConjuncts0),
+        delete_unneeded_copy_goals_rev_conj(RevConjuncts0, RevConjuncts,
+            SeenAfter, SeenBefore),
+        list.reverse(RevConjuncts, Conjuncts),
+        GoalExpr = conj(ConjKind, Conjuncts),
+        Goal = hlds_goal(GoalExpr, GoalInfo)
+    ;
+        GoalExpr0 = disj(Disjuncts0),
+        delete_unneeded_copy_goals_disj(Disjuncts0, Disjuncts,
+            SeenAfter, SeenBefores),
+        GoalExpr = disj(Disjuncts),
+        set_of_var.union_list(SeenBefores, SeenBefore),
+        Goal = hlds_goal(GoalExpr, GoalInfo)
+    ;
+        GoalExpr0 = switch(SwitchVar, CanFail, Cases0),
+        % Switches should not exist at this point in the compilation process,
+        % but it is simple enough to prepare here for the eventuality that
+        % this may change in the future.
+        delete_unneeded_copy_goals_switch(Cases0, Cases,
+            SeenAfter, SeenBefores),
+        GoalExpr = switch(SwitchVar, CanFail, Cases),
+        set_of_var.union_list(SeenBefores, SeenBefore0),
+        set_of_var.insert(SwitchVar, SeenBefore0, SeenBefore),
+        Goal = hlds_goal(GoalExpr, GoalInfo)
+    ;
+        GoalExpr0 = if_then_else(ITEVars, Cond0, Then0, Else0),
+        delete_unneeded_copy_goals(Else0, Else, SeenAfter, SeenBeforeElse),
+        delete_unneeded_copy_goals(Then0, Then, SeenAfter, SeenAfterThen),
+        delete_unneeded_copy_goals(Cond0, Cond, SeenAfterThen, SeenBeforeCond),
+        GoalExpr = if_then_else(ITEVars, Cond, Then, Else),
+        set_of_var.union(SeenBeforeCond, SeenBeforeElse, SeenBefore0),
+        set_of_var.insert_list(ITEVars, SeenBefore0, SeenBefore),
+        Goal = hlds_goal(GoalExpr, GoalInfo)
+    ;
+        GoalExpr0 = negation(SubGoal0),
+        delete_unneeded_copy_goals(SubGoal0, SubGoal, SeenAfter, SeenBefore),
+        GoalExpr = negation(SubGoal),
+        Goal = hlds_goal(GoalExpr, GoalInfo)
+    ;
+        GoalExpr0 = scope(Reason, SubGoal0),
+        (
+            Reason = from_ground_term(TermVar, _Kind),
+            % There won't be any feature_state_var_copy goals inside SubGoal0.
+            SubGoal = SubGoal0,
+            % None of the variables in SubGoal can occur in the rest of the
+            % procedure body, with the exception of TermVar.
+            set_of_var.insert(TermVar, SeenAfter, SeenBefore)
+        ;
+            ( Reason = require_complete_switch(ScopeVar)
+            ; Reason = require_switch_arms_detism(ScopeVar, _Detism)
+            ),
+            delete_unneeded_copy_goals(SubGoal0, SubGoal,
+                SeenAfter, SeenBefore0),
+            set_of_var.insert(ScopeVar, SeenBefore0, SeenBefore)
+        ;
+            Reason = loop_control(LCVar, LCSVar, _UseParentStack),
+            delete_unneeded_copy_goals(SubGoal0, SubGoal,
+                SeenAfter, SeenBefore0),
+            set_of_var.insert_list([LCVar, LCSVar], SeenBefore0, SeenBefore)
+        ;
+            ( Reason = exist_quant(ScopeVars)
+            ; Reason = promise_solutions(ScopeVars, _PromiseKind)
+            ; Reason = trace_goal(_Comp, _Run, _MaybeIO, _Mutables, ScopeVars)
+            ),
+            delete_unneeded_copy_goals(SubGoal0, SubGoal,
+                SeenAfter, SeenBefore0),
+            set_of_var.insert_list(ScopeVars, SeenBefore0, SeenBefore)
+        ;
+            ( Reason = disable_warnings(_, _)
+            ; Reason = promise_purity(_)
+            ; Reason = require_detism(_)
+            ; Reason = commit(_)
+            ; Reason = barrier(_)
+            ),
+            delete_unneeded_copy_goals(SubGoal0, SubGoal,
+                SeenAfter, SeenBefore)
+        ),
+        GoalExpr = scope(Reason, SubGoal),
+        Goal = hlds_goal(GoalExpr, GoalInfo)
+    ;
+        GoalExpr0 = shorthand(ShortHand0),
+        (
+            ShortHand0 = atomic_goal(AtomicType,
+                atomic_interface_vars(OuterInitVar, OuterFinalVar),
+                atomic_interface_vars(InnerInitVar, InnerFinalVar),
+                MaybeOutputVars, MainGoal0, OrElseGoals0, OrElseInners),
+            expect(unify(OrElseInners, []), $pred, "OrElseInners != []"),
+            Disjuncts0 = [MainGoal0 | OrElseGoals0],
+            delete_unneeded_copy_goals_disj(Disjuncts0, Disjuncts,
+                SeenAfter, SeenBefores),
+            (
+                Disjuncts = [],
+                unexpected($pred, "Disjuncts = []")
+            ;
+                Disjuncts = [MainGoal | OrElseGoals]
+            ),
+            ShortHand = atomic_goal(AtomicType,
+                atomic_interface_vars(OuterInitVar, OuterFinalVar),
+                atomic_interface_vars(InnerInitVar, InnerFinalVar),
+                MaybeOutputVars, MainGoal, OrElseGoals, OrElseInners),
+            set_of_var.union_list(SeenBefores, SeenBefore0),
+            set_of_var.insert_list([OuterInitVar, OuterFinalVar,
+                InnerInitVar, InnerFinalVar], SeenBefore0, SeenBefore1),
+            (
+                MaybeOutputVars = no,
+                SeenBefore = SeenBefore1
+            ;
+                MaybeOutputVars = yes(OutputVars),
+                set_of_var.insert_list(OutputVars, SeenBefore1, SeenBefore)
+            )
+        ;
+            ShortHand0 = try_goal(MaybeIOStateVars, ResultVar, SubGoal0),
+            delete_unneeded_copy_goals(SubGoal0, SubGoal,
+                SeenAfter, SeenBefore0),
+            set_of_var.insert(ResultVar, SeenBefore0, SeenBefore1),
+            (
+                MaybeIOStateVars = no,
+                SeenBefore = SeenBefore1
+            ;
+                MaybeIOStateVars = yes(try_io_state_vars(InitVar, FinalVar)),
+                set_of_var.insert(InitVar, SeenBefore1, SeenBefore2),
+                set_of_var.insert(FinalVar, SeenBefore2, SeenBefore)
+            ),
+            ShortHand = try_goal(MaybeIOStateVars, ResultVar, SubGoal)
+        ;
+            ShortHand0 = bi_implication(LeftGoal0, RightGoal0),
+            delete_unneeded_copy_goals(LeftGoal0, LeftGoal,
+                SeenAfter, SeenBeforeLeft),
+            delete_unneeded_copy_goals(RightGoal0, RightGoal,
+                SeenAfter, SeenBeforeRight),
+            set_of_var.union(SeenBeforeLeft, SeenBeforeRight, SeenBefore),
+            ShortHand = bi_implication(LeftGoal, RightGoal)
+        ),
+        GoalExpr = shorthand(ShortHand),
+        Goal = hlds_goal(GoalExpr, GoalInfo)
+    ).
+
+:- pred delete_unneeded_copy_goals_rev_conj(
+    list(hlds_goal)::in, list(hlds_goal)::out,
+    set_of_progvar::in, set_of_progvar::out) is det.
+
+delete_unneeded_copy_goals_rev_conj([], [], SeenAfter, SeenBefore) :-
+    SeenBefore = SeenAfter.
+delete_unneeded_copy_goals_rev_conj(
+        [RevConjunct0 | RevConjuncts0], [RevConjunct | RevConjuncts],
+        SeenAfter, SeenBefore) :-
+    delete_unneeded_copy_goals(RevConjunct0, RevConjunct,
+        SeenAfter, SeenBetween),
+    delete_unneeded_copy_goals_rev_conj(RevConjuncts0, RevConjuncts,
+        SeenBetween, SeenBefore).
+
+:- pred delete_unneeded_copy_goals_disj(
+    list(hlds_goal)::in, list(hlds_goal)::out,
+    set_of_progvar::in, list(set_of_progvar)::out) is det.
+
+delete_unneeded_copy_goals_disj([], [], _, []).
+delete_unneeded_copy_goals_disj(
+        [Disjunct0 | Disjuncts0], [Disjunct | Disjuncts],
+        SeenAfter, [SeenBefore | SeenBefores]) :-
+    delete_unneeded_copy_goals(Disjunct0, Disjunct, SeenAfter, SeenBefore),
+    delete_unneeded_copy_goals_disj(Disjuncts0, Disjuncts,
+        SeenAfter, SeenBefores).
+
+:- pred delete_unneeded_copy_goals_switch(list(case)::in, list(case)::out,
+    set_of_progvar::in, list(set_of_progvar)::out) is det.
+
+delete_unneeded_copy_goals_switch([], [], _, []).
+delete_unneeded_copy_goals_switch([Case0 | Cases0], [Case | Cases],
+        SeenAfter, [SeenBefore | SeenBefores]) :-
+    Case0 = case(MainConsId, OtherConsIds, Goal0),
+    delete_unneeded_copy_goals(Goal0, Goal, SeenAfter, SeenBefore),
+    Case = case(MainConsId, OtherConsIds, Goal),
+    delete_unneeded_copy_goals_switch(Cases0, Cases, SeenAfter, SeenBefores).
 
 %-----------------------------------------------------------------------------%
 %

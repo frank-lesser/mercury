@@ -2,6 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2000-2012 The University of Melbourne.
+% Copyright (C) 2013-2018 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %---------------------------------------------------------------------------%
@@ -43,8 +44,8 @@
 
 :- type var_locn_info.
 
-    % init_var_locn_state(Arguments, Liveness, VarSet, VarTypes, FloatRegType,
-    %   StackSlots, FollowVars, VarLocnInfo):
+    % init_var_locn_state(ModuleInfo, Arguments, Liveness, VarSet, VarTypes,
+    %   FloatRegType, StackSlots, FollowVars, VarLocnInfo):
     %
     % Produces an initial state of the VarLocnInfo given
     % an association list of variables and lvalues. The initial
@@ -60,9 +61,9 @@
     % follow_vars set; such sets give guidance as to what lvals
     % (if any) each variable will be needed in next.
     %
-:- pred init_var_locn_state(assoc_list(prog_var, lval)::in, set_of_progvar::in,
-    prog_varset::in, vartypes::in, reg_type::in, stack_slots::in,
-    abs_follow_vars::in, var_locn_info::out) is det.
+:- pred init_var_locn_state(module_info::in, assoc_list(prog_var, lval)::in,
+    set_of_progvar::in, prog_varset::in, vartypes::in, reg_type::in,
+    stack_slots::in, abs_follow_vars::in, var_locn_info::out) is det.
 
     % reinit_var_locn_state(VarLocs, !VarLocnInfo):
     %
@@ -194,7 +195,7 @@
     % updates the state of !VarLocnInfo accordingly.  Var must previously have
     % been assigned the constant expression mkword_hole(Ptag).
     %
-:- pred var_locn_reassign_mkword_hole_var(prog_var::in, tag::in, rval::in,
+:- pred var_locn_reassign_mkword_hole_var(prog_var::in, ptag::in, rval::in,
     llds_code::out, var_locn_info::in, var_locn_info::out) is det.
 
     % var_locn_assign_cell_to_var(ModuleInfo, ExprnOpts, Var,
@@ -214,7 +215,7 @@
     % obvious conflict.) Label can be used in the generated code if necessary.
     %
 :- pred var_locn_assign_cell_to_var(module_info::in, exprn_opts::in,
-    prog_var::in, bool::in, tag::in, list(cell_arg)::in,
+    prog_var::in, bool::in, ptag::in, list(cell_arg)::in,
     how_to_construct::in, maybe(term_size_value)::in,
     maybe(alloc_site_id)::in, may_use_atomic_alloc::in, label::in,
     llds_code::out, static_cell_info::in, static_cell_info::out,
@@ -354,6 +355,11 @@
 :- pred var_locn_materialize_vars_in_lval(module_info::in, lval::in, lval::out,
     llds_code::out, var_locn_info::in, var_locn_info::out) is det.
 
+    % The equivalent of var_locn_materialize_vars_in_lval for rvals.
+    %
+:- pred var_locn_materialize_vars_in_rval(module_info::in, rval::in, rval::out,
+    llds_code::out, var_locn_info::in, var_locn_info::out) is det.
+
     % var_locn_get_var_locations(VarLocnInfo, Locations):
     %
     % Returns a map from each live variable that occurs in VarLocnInfo
@@ -421,176 +427,6 @@
 :- import_module string.
 :- import_module term.
 :- import_module varset.
-
-%----------------------------------------------------------------------------%
-
-:- type dead_or_alive
-    --->    doa_dead
-    ;       doa_alive.
-
-    % The state of a variable can be one of three kinds: const, cached
-    % and general.
-    %
-    % 1 The value of the variable is a known constant. In this case,
-    %   the const_rval field will be yes, and the expr_rval field
-    %   will be no. Both the empty set and nonempty sets are valid
-    %   for the locs field. It will start out empty, will become
-    %   nonempty if the variable is placed in some lval, and may
-    %   become empty again if that lval is later overwritten.
-    %
-    % 2 The value of the variable is not stored anywhere, but its
-    %   definition (an expression involving other variables) is cached.
-    %   In this case, the const_rval field will be no, and the locs
-    %   field will contain the empty set, but the expr_rval field
-    %   will be yes. The variables referred to in the expr_rval field
-    %   will include this variable in their using_vars sets, which
-    %   protects them from deletion from the code generator state until
-    %   the using variable is produced or placed in an lval. When that
-    %   happens, the using variable's state will be transformed to the
-    %   general, third kind, releasing this variable's hold on the
-    %   variables contained in its expr_rval field.
-    %
-    % 3 The value of the variable is not a constant, nor is the
-    %   variable cached. The locs field will be nonempty, and both
-    %   const_rval and expr_rval will be no.
-
-:- type var_state
-    --->    var_state(
-                % Must not contain any rval of the form var(_).
-                locs            :: set(lval),
-
-                % Must not contain any rval of the form var(_);
-                % must be constant.
-                const_rval      :: maybe(rval),
-
-                % Will contain var(_), must not contain lvals.
-                expr_rval       :: maybe(rval),
-
-                % The set of vars whose expr_rval field refers to this var.
-                using_vars      :: set_of_progvar,
-
-                % A dead variable should be removed from var_state_map
-                % when its using_vars field becomes empty.
-                dead_or_alive   :: dead_or_alive
-            ).
-
-:- type var_state_map   ==  map(prog_var, var_state).
-
-    % The loc_var_map maps each root lval (register or stack slot)
-    % to the set of variables that depend on that location,
-    % either because they are stored there or because the location
-    % contains a part of the pointer chain that leads to their address.
-    % In concrete terms, this means the set of variables whose var_state's
-    % locs field includes an lval that contains that root lval.
-    %
-    % If a root lval stack slot is unused, then it will either not appear
-    % in the var_loc_map or it will be mapped to an empty set. Allowing
-    % unused root lvals to be mapped to the empty set, and not requiring
-    % their deletion from the map, makes it simpler to manipulate
-    % loc_var_maps using higher-order code.
-
-:- type loc_var_map ==  map(lval, set_of_progvar).
-
-:- type var_locn_info
-    --->    var_locn_info(
-                % The varset and vartypes from the proc_info.
-                % XXX These fields are redundant; they are also stored
-                % in the code_info.
-                vli_varset          :: prog_varset,
-                vli_vartypes        :: vartypes,
-
-                % The register type to use for float vars.
-                vli_float_reg_type  :: reg_type,
-
-                % Maps each var to its stack slot, if it has one.
-                vli_stack_slots     :: stack_slots,
-
-                % Where vars are needed next.
-                vli_follow_vars_map :: abs_follow_vars_map,
-
-                % Next rN, fN register that isn't reserved in follow_vars_map.
-                vli_next_non_res_r  :: int,
-                vli_next_non_res_f  :: int,
-
-                % Documented above.
-                vli_var_state_map   :: var_state_map,
-                vli_loc_var_map     :: loc_var_map,
-
-                % Locations that are temporarily reserved for purposes such as
-                % holding the tags of variables during switches.
-                vli_acquired        :: set(lval),
-
-                % If these slots contain R and F then registers r1 through rR
-                % and f1 through fF can only be modified by a place_var
-                % operation, or by a free_up_lval operation that moves a
-                % variable to the (free or freeable) lval associated with it in
-                % the exceptions field. Used to implement calls, foreign_procs
-                % and the store_maps at the ends of branched control
-                % structures.
-                vli_locked_r        :: int,
-                vli_locked_f        :: int,
-
-                % See the documentation of the locked field above.
-                vli_exceptions      :: assoc_list(prog_var, lval)
-            ).
-
-%----------------------------------------------------------------------------%
-
-init_var_locn_state(VarLocs, Liveness, VarSet, VarTypes, FloatRegType,
-        StackSlots, FollowVars, VarLocnInfo) :-
-    map.init(VarStateMap0),
-    map.init(LocVarMap0),
-    init_var_locn_state_2(VarLocs, yes(Liveness), VarStateMap0, VarStateMap,
-        LocVarMap0, LocVarMap),
-    FollowVars = abs_follow_vars(FollowVarMap, NextNonReservedR,
-        NextNonReservedF),
-    set.init(AcquiredRegs),
-    VarLocnInfo = var_locn_info(VarSet, VarTypes, FloatRegType, StackSlots,
-        FollowVarMap, NextNonReservedR, NextNonReservedF, VarStateMap,
-        LocVarMap, AcquiredRegs, 0, 0, []).
-
-reinit_var_locn_state(VarLocs, !VarLocnInfo) :-
-    map.init(VarStateMap0),
-    map.init(LocVarMap0),
-    init_var_locn_state_2(VarLocs, no, VarStateMap0, VarStateMap,
-        LocVarMap0, LocVarMap),
-    set.init(AcquiredRegs),
-    !.VarLocnInfo = var_locn_info(VarSet, VarTypes, FloatRegType, StackSlots,
-        FollowVarMap, NextNonReservedR, NextNonReservedF, _, _, _, _, _, _),
-    !:VarLocnInfo = var_locn_info(VarSet, VarTypes, FloatRegType, StackSlots,
-        FollowVarMap, NextNonReservedR, NextNonReservedF, VarStateMap,
-        LocVarMap, AcquiredRegs, 0, 0, []).
-
-:- pred init_var_locn_state_2(assoc_list(prog_var, lval)::in,
-    maybe(set_of_progvar)::in, var_state_map::in, var_state_map::out,
-    loc_var_map::in, loc_var_map::out) is det.
-
-init_var_locn_state_2([], _, !VarStateMap, !LocVarMap).
-init_var_locn_state_2([Var - Lval |  Rest], MaybeLiveness, !VarStateMap,
-        !LocVarMap) :-
-    expect(is_root_lval(Lval), $module, $pred, "unexpected lval"),
-    ( if
-        MaybeLiveness = yes(Liveness),
-        not set_of_var.member(Liveness, Var)
-    then
-        % If a variable is not live, then we do not record its state.
-        % If we did, then the variable will never die (since it is already
-        % dead), and the next call to clobber_regs would throw an exception,
-        % since it would believe that it is throwing away the last location
-        % storing the value of a "live" variable.
-        true
-    else
-        ( if map.search(!.VarStateMap, Var, _) then
-            unexpected($module, $pred, "repeated variable")
-        else
-            NewLocs = set.make_singleton_set(Lval),
-            set_of_var.init(Using),
-            State = var_state(NewLocs, no, no, Using, doa_alive),
-            map.det_insert(Var, State, !VarStateMap)
-        ),
-        make_var_depend_on_lval_roots(Var, Lval, !LocVarMap)
-    ),
-    init_var_locn_state_2(Rest, MaybeLiveness, !VarStateMap, !LocVarMap).
 
 %----------------------------------------------------------------------------%
 
@@ -680,7 +516,7 @@ clobber_lval_in_var_state_map(Lval, OkToDeleteVars, OkToDeleteAny, Var,
     then
         true
     else
-        unexpected($module, $pred, "empty state")
+        unexpected($pred, "empty state")
     ).
 
     % Try to record in VarStateMap that Var is no longer reachable through
@@ -737,29 +573,35 @@ recursive_using_vars_dead_and_ok_to_delete([Var | Vars], VarStateMap,
 var_locn_assign_var_to_var(Var, OldVar, !VLI) :-
     check_var_is_unknown(!.VLI, Var),
     var_locn_get_var_state_map(!.VLI, VarStateMap0),
-    map.lookup(VarStateMap0, OldVar, OldState0),
-    OldState0 = var_state(Lvals, MaybeConstRval, MaybeExprRval,
-        Using0, DeadOrAlive),
-    (
-        MaybeExprRval = yes(_),
-        State = var_state(Lvals, MaybeConstRval, yes(var(OldVar)),
-            set_of_var.init, doa_alive),
-        set_of_var.insert(Var, Using0, Using),
-        OldState = var_state(Lvals, MaybeConstRval, MaybeExprRval,
-            Using, DeadOrAlive),
-        map.det_update(OldVar, OldState, VarStateMap0, VarStateMap1)
-    ;
-        MaybeExprRval = no,
-        State = var_state(Lvals, MaybeConstRval, no, set_of_var.init,
-            doa_alive),
-        VarStateMap1 = VarStateMap0
-    ),
-    map.det_insert(Var, State, VarStateMap1, VarStateMap),
-    var_locn_set_var_state_map(VarStateMap, !VLI),
+    ( if map.search(VarStateMap0, OldVar, OldState0) then
+        OldState0 = var_state(Lvals, MaybeConstRval, MaybeExprRval,
+            Using0, DeadOrAlive),
+        (
+            MaybeExprRval = yes(_),
+            State = var_state(Lvals, MaybeConstRval, yes(var(OldVar)),
+                set_of_var.init, doa_alive),
+            set_of_var.insert(Var, Using0, Using),
+            OldState = var_state(Lvals, MaybeConstRval, MaybeExprRval,
+                Using, DeadOrAlive),
+            map.det_update(OldVar, OldState, VarStateMap0, VarStateMap1)
+        ;
+            MaybeExprRval = no,
+            State = var_state(Lvals, MaybeConstRval, no, set_of_var.init,
+                doa_alive),
+            VarStateMap1 = VarStateMap0
+        ),
+        map.det_insert(Var, State, VarStateMap1, VarStateMap),
+        var_locn_set_var_state_map(VarStateMap, !VLI),
 
-    var_locn_get_loc_var_map(!.VLI, LocVarMap0),
-    make_var_depend_on_lvals_roots(Var, Lvals, LocVarMap0, LocVarMap),
-    var_locn_set_loc_var_map(LocVarMap, !VLI).
+        var_locn_get_loc_var_map(!.VLI, LocVarMap0),
+        make_var_depend_on_lvals_roots(Var, Lvals, LocVarMap0, LocVarMap),
+        var_locn_set_loc_var_map(LocVarMap, !VLI)
+    else
+        var_locn_get_dummy_map(!.VLI, DummyMap),
+        map.lookup(DummyMap, OldVar, OldVarIsDummy),
+        expect(unify(OldVarIsDummy, is_dummy_type), $pred,
+            "assigning value of nondummy variable without a state")
+    ).
 
 %----------------------------------------------------------------------------%
 
@@ -818,7 +660,7 @@ var_locn_assign_lval_to_var(ModuleInfo, Var, Lval0, StaticCellInfo, Code,
         var_locn_set_loc_var_map(LocVarMap, !VLI)
     ).
 
-:- func add_field_offset(maybe(tag), rval, lval) = lval.
+:- func add_field_offset(maybe(ptag), rval, lval) = lval.
 
 add_field_offset(Ptag, Offset, Base) =
     field(Ptag, lval(Base), Offset).
@@ -844,7 +686,7 @@ var_locn_assign_const_to_var(ExprnOpts, Var, ConstRval0, !VLI) :-
         map.det_insert(Var, State, VarStateMap0, VarStateMap),
         var_locn_set_var_state_map(VarStateMap, !VLI)
     else
-        unexpected($module, $pred, "supposed constant isn't")
+        unexpected($pred, "supposed constant isn't")
     ).
 
 %----------------------------------------------------------------------------%
@@ -907,7 +749,7 @@ var_locn_reassign_mkword_hole_var(Var, Ptag, Rval, Code, !VLI) :-
 
         var_locn_assign_expr_to_var(Var, Rval, Code, !VLI)
     else
-        unexpected($module, $pred, "unexpected var_state")
+        unexpected($pred, "unexpected var_state")
     ).
 
 :- pred clobber_old_lval(prog_var::in, lval::in,
@@ -957,7 +799,7 @@ var_locn_assign_cell_to_var(ModuleInfo, ExprnOpts, Var, ReserveWordAtStart,
     ).
 
 :- pred var_locn_assign_dynamic_cell_to_var(module_info::in, prog_var::in,
-    bool::in, tag::in, list(cell_arg)::in, how_to_construct::in,
+    bool::in, ptag::in, list(cell_arg)::in, how_to_construct::in,
     maybe(int)::in, maybe(alloc_site_id)::in, may_use_atomic_alloc::in,
     label::in, llds_code::out, var_locn_info::in, var_locn_info::out) is det.
 
@@ -975,8 +817,7 @@ var_locn_assign_dynamic_cell_to_var(ModuleInfo, Var, ReserveWordAtStart, Ptag,
             MaybeOffset = yes(_),
             % Accurate GC and term profiling both want to own the word
             % before this object.
-            sorry($module, $pred,
-                "accurate GC combined with term size profiling")
+            sorry($pred, "accurate GC combined with term size profiling")
         ;
             MaybeOffset = no,
             TotalOffset = yes(1)
@@ -998,37 +839,30 @@ var_locn_assign_dynamic_cell_to_var(ModuleInfo, Var, ReserveWordAtStart, Ptag,
     % reused_cell case, otherwise `var_locn_save_cell_fields' won't know not to
     % use Lval as a temporary register (if Lval is a register).
     var_locn_set_magic_var_location(Var, Lval, !VLI),
-    % XXX The code at the end of the first three cases is the same.
-    % Switch detection could recognize this code as a switch on HowToConstruct
-    % before the change from tree.m to cord.m to represent code, but it cannot
-    % recognize it afterwards.
     (
-        HowToConstruct = construct_in_region(RegionVar),
-        var_locn_produce_var(ModuleInfo, RegionVar, RegionRval,
-            RegionVarCode, !VLI),
-        MaybeRegionRval = yes(RegionRval),
-        MaybeReuse = no_llds_reuse,
-        LldsComment = "Allocating region for ",
-        assign_all_cell_args(ModuleInfo, Vector, yes(Ptag), lval(Lval),
-            StartOffset, ArgsCode, !VLI),
-        SetupReuseCode = empty,
-        MaybeReuse = no_llds_reuse
-    ;
-        HowToConstruct = construct_dynamically,
-        RegionVarCode = empty,
-        MaybeRegionRval = no,
-        LldsComment = "Allocating heap for ",
-        assign_all_cell_args(ModuleInfo, Vector, yes(Ptag), lval(Lval),
-            StartOffset, ArgsCode, !VLI),
-        SetupReuseCode = empty,
-        MaybeReuse = no_llds_reuse
-    ;
-        % XXX  We should probably throw an exception if we find
-        % construct_statically here.
-        HowToConstruct = construct_statically,
-        RegionVarCode = empty,
-        MaybeRegionRval = no,
-        LldsComment = "Allocating heap for ",
+        (
+            HowToConstruct = construct_in_region(RegionVar),
+            LldsComment = "Allocating region for ",
+            var_locn_produce_var(ModuleInfo, RegionVar, RegionRval,
+                RegionVarCode, !VLI),
+            MaybeRegionRval = yes(RegionRval)
+        ;
+            HowToConstruct = construct_dynamically,
+            LldsComment = "Allocating heap for ",
+            RegionVarCode = empty,
+            MaybeRegionRval = no
+        ;
+            HowToConstruct = construct_statically,
+            % construct_statically is not normally used in LLDS grades, but
+            % it may be set by mark_static_terms.m to support loop invariant
+            % hoisting. If we get here then have we missed an opportunity to
+            % construct a cell statically?
+            % Currently this is reachable when cell_is_constant fails on a
+            % dummy type argument (cell_arg_skip_one_word).
+            LldsComment = "Allocating heap (unnecessarily?) for ",
+            RegionVarCode = empty,
+            MaybeRegionRval = no
+        ),
         assign_all_cell_args(ModuleInfo, Vector, yes(Ptag), lval(Lval),
             StartOffset, ArgsCode, !VLI),
         SetupReuseCode = empty,
@@ -1066,7 +900,7 @@ var_locn_assign_dynamic_cell_to_var(ModuleInfo, Var, ReserveWordAtStart, Ptag,
     ),
     Code = SetupReuseCode ++ CellCode ++ RegionVarCode ++ ArgsCode.
 
-:- pred assign_reused_cell_to_var(module_info::in, lval::in, tag::in,
+:- pred assign_reused_cell_to_var(module_info::in, lval::in, ptag::in,
     list(cell_arg)::in, cell_to_reuse::in, lval::in, llds_code::in,
     int::in, label::in, llds_reuse::out, llds_code::out, llds_code::out,
     var_locn_info::in, var_locn_info::out) is det.
@@ -1094,8 +928,8 @@ assign_reused_cell_to_var(ModuleInfo, Lval, Ptag, Vector, CellToReuse,
         TempRegs = TempRegs0
     ),
 
-    % XXX Optimise the stripping of the tag when the tags are the same
-    % or the old tag is known, as we do in the high level backend.
+    % XXX Optimise the stripping of the ptag when the ptags are the same
+    % or the old ptag is known, as we do in the high level backend.
     MaybeReuse = llds_reuse(unop(strip_tag, lval(ReuseLval)), MaybeFlag),
 
     % NeedsUpdates0 can be shorter than Vector due to extra fields.
@@ -1103,7 +937,7 @@ assign_reused_cell_to_var(ModuleInfo, Lval, Ptag, Vector, CellToReuse,
     ( if Padding >= 0 then
         NeedsUpdates = list.duplicate(Padding, needs_update) ++ NeedsUpdates0
     else
-        unexpected($module, $pred, "Padding < 0")
+        unexpected($pred, "Padding < 0")
     ),
 
     (
@@ -1131,7 +965,7 @@ assign_reused_cell_to_var(ModuleInfo, Lval, Ptag, Vector, CellToReuse,
     list.foldl(var_locn_release_reg, TempRegs, !VLI).
 
 :- pred assign_all_cell_args(module_info::in, list(cell_arg)::in,
-    maybe(tag)::in, rval::in, int::in, llds_code::out,
+    maybe(ptag)::in, rval::in, int::in, llds_code::out,
     var_locn_info::in, var_locn_info::out) is det.
 
 assign_all_cell_args(_, [], _, _, _, empty, !VLI).
@@ -1139,15 +973,20 @@ assign_all_cell_args(ModuleInfo, [CellArg | CellArgs], Ptag, Base, Offset,
         Code, !VLI) :-
     (
         ( CellArg = cell_arg_full_word(Rval, _Completeness)
-        ; CellArg = cell_arg_take_addr(_, yes(Rval))
+        ; CellArg = cell_arg_take_addr_one_word(_, yes(Rval))
         ),
         assign_cell_arg(ModuleInfo, Rval, Ptag, Base, Offset, ThisCode, !VLI),
         NextOffset = Offset + 1
     ;
-        CellArg = cell_arg_double_word(Rval0),
-        materialize_if_var(ModuleInfo, Rval0, EvalCode, Rval, !VLI),
-        RvalA = binop(float_word_bits, Rval, const(llconst_int(0))),
-        RvalB = binop(float_word_bits, Rval, const(llconst_int(1))),
+        (
+            CellArg = cell_arg_double_word(Rval0),
+            materialize_if_var(ModuleInfo, Rval0, EvalCode, Rval, !VLI),
+            RvalA = unop(dword_float_get_word0, Rval),
+            RvalB = unop(dword_float_get_word1, Rval)
+        ;
+            CellArg = cell_arg_take_addr_two_words(_, yes({RvalA, RvalB})),
+            EvalCode = cord.init
+        ),
         assign_cell_arg(ModuleInfo, RvalA, Ptag, Base, Offset,
             ThisCodeA, !VLI),
         assign_cell_arg(ModuleInfo, RvalB, Ptag, Base, Offset + 1,
@@ -1155,35 +994,50 @@ assign_all_cell_args(ModuleInfo, [CellArg | CellArgs], Ptag, Base, Offset,
         ThisCode = EvalCode ++ ThisCodeA ++ ThisCodeB,
         NextOffset = Offset + 2
     ;
-        ( CellArg = cell_arg_skip
-        ; CellArg = cell_arg_take_addr(_, no)
+        ( CellArg = cell_arg_skip_one_word
+        ; CellArg = cell_arg_take_addr_one_word(_, no)
         ),
         ThisCode = empty,
         NextOffset = Offset + 1
+    ;
+        ( CellArg = cell_arg_skip_two_words
+        ; CellArg = cell_arg_take_addr_two_words(_, no)
+        ),
+        ThisCode = empty,
+        NextOffset = Offset + 2
     ),
     assign_all_cell_args(ModuleInfo, CellArgs, Ptag, Base, NextOffset,
         RestCode, !VLI),
     Code = ThisCode ++ RestCode.
 
 :- pred assign_some_cell_args(module_info::in, list(cell_arg)::in,
-    list(needs_update)::in, maybe(tag)::in, rval::in, int::in, llds_code::out,
+    list(needs_update)::in, maybe(ptag)::in, rval::in, int::in, llds_code::out,
     llds_code::out, var_locn_info::in, var_locn_info::out) is det.
 
 assign_some_cell_args(_, [], [], _, _, _, empty, empty, !VLI).
+assign_some_cell_args(_, [], [_ | _], _, _, _, _, _, !VLI) :-
+    unexpected($pred, "mismatch lists").
+assign_some_cell_args(_, [_ | _], [], _, _, _, _, _, !VLI) :-
+    unexpected($pred, "mismatch lists").
 assign_some_cell_args(ModuleInfo,
         [CellArg | CellArgs], [NeedsUpdate | NeedsUpdates],
         Ptag, Base, Offset, CannotSkipArgsCode, CanSkipArgsCode, !VLI) :-
     (
         ( CellArg = cell_arg_full_word(Rval, _Completeness)
-        ; CellArg = cell_arg_take_addr(_, yes(Rval))
+        ; CellArg = cell_arg_take_addr_one_word(_, yes(Rval))
         ),
         assign_cell_arg(ModuleInfo, Rval, Ptag, Base, Offset, ThisCode, !VLI),
         NextOffset = Offset + 1
     ;
-        CellArg = cell_arg_double_word(Rval0),
-        materialize_if_var(ModuleInfo, Rval0, EvalCode, Rval, !VLI),
-        RvalA = binop(float_word_bits, Rval, const(llconst_int(0))),
-        RvalB = binop(float_word_bits, Rval, const(llconst_int(1))),
+        (
+            CellArg = cell_arg_double_word(Rval0),
+            materialize_if_var(ModuleInfo, Rval0, EvalCode, Rval, !VLI),
+            RvalA = unop(dword_float_get_word0, Rval),
+            RvalB = unop(dword_float_get_word1, Rval)
+        ;
+            CellArg = cell_arg_take_addr_two_words(_, yes({RvalA, RvalB})),
+            EvalCode = cord.init
+        ),
         assign_cell_arg(ModuleInfo, RvalA, Ptag, Base, Offset,
             ThisCodeA, !VLI),
         assign_cell_arg(ModuleInfo, RvalB, Ptag, Base, Offset + 1,
@@ -1191,11 +1045,17 @@ assign_some_cell_args(ModuleInfo,
         ThisCode = EvalCode ++ ThisCodeA ++ ThisCodeB,
         NextOffset = Offset + 2
     ;
-        ( CellArg = cell_arg_skip
-        ; CellArg = cell_arg_take_addr(_, no)
+        ( CellArg = cell_arg_skip_one_word
+        ; CellArg = cell_arg_take_addr_one_word(_, no)
         ),
         ThisCode = empty,
         NextOffset = Offset + 1
+    ;
+        ( CellArg = cell_arg_skip_two_words
+        ; CellArg = cell_arg_take_addr_two_words(_, no)
+        ),
+        ThisCode = empty,
+        NextOffset = Offset + 2
     ),
     assign_some_cell_args(ModuleInfo, CellArgs, NeedsUpdates, Ptag, Base,
         NextOffset, RestCannotSkipArgsCode, RestCanSkipArgsCode, !VLI),
@@ -1209,12 +1069,7 @@ assign_some_cell_args(ModuleInfo,
         CanSkipArgsCode = ThisCode ++ RestCanSkipArgsCode
     ).
 
-assign_some_cell_args(_, [], [_ | _], _, _, _, _, _, !VLI) :-
-    unexpected($module, $pred, "mismatch lists").
-assign_some_cell_args(_, [_ | _], [], _, _, _, _, _, !VLI) :-
-    unexpected($module, $pred, "mismatch lists").
-
-:- pred assign_cell_arg(module_info::in, rval::in, maybe(tag)::in, rval::in,
+:- pred assign_cell_arg(module_info::in, rval::in, maybe(ptag)::in, rval::in,
     int::in, llds_code::out, var_locn_info::in, var_locn_info::out) is det.
 
 assign_cell_arg(ModuleInfo, Rval0, Ptag, Base, Offset, Code, !VLI) :-
@@ -1222,9 +1077,8 @@ assign_cell_arg(ModuleInfo, Rval0, Ptag, Base, Offset, Code, !VLI) :-
     (
         Rval0 = var(Var),
         materialize_if_var(ModuleInfo, Rval0, EvalCode, Rval, !VLI),
-        var_locn_get_vartypes(!.VLI, VarTypes),
-        lookup_var_type(VarTypes, Var, Type),
-        IsDummy = check_dummy_type(ModuleInfo, Type),
+        var_locn_get_dummy_map(!.VLI, DummyMap),
+        map.lookup(DummyMap, Var, IsDummy),
         (
             IsDummy = is_dummy_type,
             AssignCode = empty
@@ -1243,6 +1097,9 @@ assign_cell_arg(ModuleInfo, Rval0, Ptag, Base, Offset, Code, !VLI) :-
             Rval0 = mkword(_, _),
             Comment = "assigning field from tagged pointer"
         ;
+            Rval0 = cast(_, _),
+            Comment = "assigning field from cast"
+        ;
             Rval0 = unop(_, _),
             Comment = "assigning field from unary op"
         ;
@@ -1256,40 +1113,12 @@ assign_cell_arg(ModuleInfo, Rval0, Ptag, Base, Offset, Code, !VLI) :-
         AssignCode = singleton(llds_instr(assign(Target, Rval0), Comment))
     ;
         Rval0 = mkword_hole(_),
-        unexpected($module, $pred, "mkword_hole")
+        unexpected($pred, "mkword_hole")
     ;
         Rval0 = mem_addr(_),
-        unexpected($module, $pred, "unknown rval")
+        unexpected($pred, "unknown rval")
     ),
     Code = EvalCode ++ AssignCode.
-
-:- pred materialize_if_var(module_info::in, rval::in, llds_code::out,
-    rval::out, var_locn_info::in, var_locn_info::out) is det.
-
-materialize_if_var(ModuleInfo, Rval0, EvalCode, Rval, !VLI) :-
-    (
-        Rval0 = var(Var),
-        find_var_availability(!.VLI, Var, no, Avail),
-        (
-            Avail = available(Rval),
-            EvalCode = empty
-        ;
-            Avail = needs_materialization,
-            materialize_var(ModuleInfo, Var, no, no, [], Rval, EvalCode,
-                !VLI)
-        )
-    ;
-        ( Rval0 = const(_)
-        ; Rval0 = mkword(_, _)
-        ; Rval0 = mkword_hole(_)
-        ; Rval0 = unop(_, _)
-        ; Rval0 = binop(_, _, _)
-        ; Rval0 = lval(_)
-        ; Rval0 = mem_addr(_)
-        ),
-        EvalCode = empty,
-        Rval = Rval0
-    ).
 
 var_locn_save_cell_fields(ModuleInfo, ReuseVar, ReuseLval, Code, Regs, !VLI) :-
     var_locn_get_var_state_map(!.VLI, VarStateMap),
@@ -1312,12 +1141,11 @@ var_locn_save_cell_fields_2(ModuleInfo, ReuseLval, DepVar, SaveDepVarCode,
         EvalCode = empty
     ;
         Avail = needs_materialization,
-        materialize_var(ModuleInfo, DepVar, no, no, [], DepVarRval, EvalCode,
-            !VLI)
+        materialize_var_general(ModuleInfo, DepVar, no, do_not_store_var, [],
+            DepVarRval, EvalCode, !VLI)
     ),
-    var_locn_get_vartypes(!.VLI, VarTypes),
-    lookup_var_type(VarTypes, DepVar, DepVarType),
-    IsDummy = check_dummy_type(ModuleInfo, DepVarType),
+    var_locn_get_dummy_map(!.VLI, DummyMap),
+    map.lookup(DummyMap, DepVar, IsDummy),
     (
         IsDummy = is_dummy_type,
         AssignCode = empty
@@ -1327,6 +1155,8 @@ var_locn_save_cell_fields_2(ModuleInfo, ReuseLval, DepVar, SaveDepVarCode,
             rval_depends_on_search_lval(DepVarRval,
                 specific_reg_or_stack(ReuseLval))
         then
+            var_locn_get_vartypes(!.VLI, VarTypes),
+            lookup_var_type(VarTypes, DepVar, DepVarType),
             reg_type_for_type(!.VLI, DepVarType, RegType),
             var_locn_acquire_reg(RegType, Target, !VLI),
             add_additional_lval_for_var(DepVar, Target, !VLI),
@@ -1401,7 +1231,7 @@ remove_use_refs_2([ContainedVar | ContainedVars], UsingVar, !VLI) :-
     ( if set_of_var.remove(UsingVar, Using0, Using1) then
         Using = Using1
     else
-        unexpected($module, $pred, "using ref not present")
+        unexpected($pred, "using ref not present")
     ),
     State = var_state(Lvals, MaybeConstRval, MaybeExprRval, Using,
         DeadOrAlive),
@@ -1421,7 +1251,7 @@ remove_use_refs_2([ContainedVar | ContainedVars], UsingVar, !VLI) :-
 
 var_locn_check_and_set_magic_var_location(Var, Lval, !VLI) :-
     ( if var_locn_lval_in_use(!.VLI, Lval) then
-        unexpected($module, $pred, "in use")
+        unexpected($pred, "in use")
     else
         var_locn_set_magic_var_location(Var, Lval, !VLI)
     ).
@@ -1445,7 +1275,7 @@ check_var_is_unknown(VLI, Var) :-
     var_locn_get_var_state_map(VLI, VarStateMap0),
     ( if map.search(VarStateMap0, Var, _) then
         get_var_name(VLI, Var, Name),
-        unexpected($module, $pred, "existing definition of variable " ++ Name)
+        unexpected($pred, "existing definition of variable " ++ Name)
     else
         true
     ).
@@ -1574,67 +1404,75 @@ var_locn_place_var(ModuleInfo, Var, Target, Code, !VLI) :-
 actually_place_var(ModuleInfo, Var, Target, ForbiddenLvals, Code, !VLI) :-
     var_locn_get_acquired(!.VLI, Acquired),
     ( if set.member(Target, Acquired) then
-        unexpected($module, $pred, "target is acquired reg")
+        unexpected($pred, "target is acquired reg")
     else
         true
     ),
     var_locn_get_var_state_map(!.VLI, VarStateMap0),
-    map.lookup(VarStateMap0, Var, State0),
-    State0 = var_state(Lvals0, _, _, _, _),
-    ( if set.member(Target, Lvals0) then
-        Code = empty
-    else
-        free_up_lval(ModuleInfo, Target, [Var], ForbiddenLvals, FreeCode,
-            !VLI),
-
-        % If Var's value is cached, Lvals0 must be empty. However, the cached
-        % value may simply be var(Other), and Other may already be in Target.
-        % However, it may also be in another lval, so we say we prefer the
-        % copy in Target.
-        find_var_availability(!.VLI, Var, yes(Target), Avail),
-        (
-            Avail = available(Rval),
-            EvalCode = empty,
-            ( if Rval = lval(SourceLval) then
-                record_copy(SourceLval, Target, !VLI)
-            else
-                record_clobbering(Target, [Var], !VLI)
-            )
-        ;
-            Avail = needs_materialization,
-            materialize_var(ModuleInfo, Var, yes(Target), no, [Target], Rval,
-                EvalCode, !VLI),
-            record_clobbering(Target, [Var], !VLI)
-        ),
-
-        % Record that Var is now in Target.
-        add_additional_lval_for_var(Var, Target, !VLI),
-
-        ( if Rval = lval(Target) then
-            AssignCode = empty
+    ( if map.search(VarStateMap0, Var, State0) then
+        State0 = var_state(Lvals0, _, _, _, _),
+        ( if set.member(Target, Lvals0) then
+            Code = empty
         else
-            get_var_name(!.VLI, Var, VarName),
+            free_up_lval(ModuleInfo, Target, [Var], ForbiddenLvals, FreeCode,
+                !VLI),
+
+            % If Var's value is cached, Lvals0 must be empty. However,
+            % the cached value may simply be var(Other), and Other may
+            % already be in Target. However, it may also be in another lval,
+            % so we say we prefer the copy in Target.
+            find_var_availability(!.VLI, Var, yes(Target), Avail),
             (
-                ForbiddenLvals = [],
-                string.append("Placing ", VarName, Msg)
+                Avail = available(Rval),
+                EvalCode = empty,
+                ( if Rval = lval(SourceLval) then
+                    record_copy(SourceLval, Target, !VLI)
+                else
+                    record_clobbering(Target, [Var], !VLI)
+                )
             ;
-                ForbiddenLvals = [_ | _],
-                string.int_to_string(list.length(ForbiddenLvals), LengthStr),
-                string.append_list(["Placing ", VarName,
-                    " (depth ", LengthStr, ")"], Msg)
+                Avail = needs_materialization,
+                materialize_var_general(ModuleInfo, Var, yes(Target),
+                    do_not_store_var, [Target], Rval, EvalCode, !VLI),
+                record_clobbering(Target, [Var], !VLI)
             ),
-            var_locn_get_vartypes(!.VLI, VarTypes),
-            lookup_var_type(VarTypes, Var, Type),
-            IsDummy = check_dummy_type(ModuleInfo, Type),
-            (
-                IsDummy = is_dummy_type,
+
+            % Record that Var is now in Target.
+            add_additional_lval_for_var(Var, Target, !VLI),
+
+            ( if Rval = lval(Target) then
                 AssignCode = empty
-            ;
-                IsDummy = is_not_dummy_type,
-                AssignCode = singleton(llds_instr(assign(Target, Rval), Msg))
-            )
-        ),
-        Code = FreeCode ++ EvalCode ++ AssignCode
+            else
+                get_var_name(!.VLI, Var, VarName),
+                (
+                    ForbiddenLvals = [],
+                    string.append("Placing ", VarName, Msg)
+                ;
+                    ForbiddenLvals = [_ | _],
+                    string.int_to_string(list.length(ForbiddenLvals),
+                        LengthStr),
+                    string.append_list(["Placing ", VarName,
+                        " (depth ", LengthStr, ")"], Msg)
+                ),
+                var_locn_get_dummy_map(!.VLI, DummyMap),
+                map.lookup(DummyMap, Var, IsDummy),
+                (
+                    IsDummy = is_dummy_type,
+                    AssignCode = empty
+                ;
+                    IsDummy = is_not_dummy_type,
+                    AssignCode = singleton(
+                        llds_instr(assign(Target, Rval), Msg))
+                )
+            ),
+            Code = FreeCode ++ EvalCode ++ AssignCode
+        )
+    else
+        var_locn_get_dummy_map(!.VLI, DummyMap),
+        map.lookup(DummyMap, Var, IsDummy),
+        expect(unify(IsDummy, is_dummy_type), $pred,
+            "placing nondummy var which has no state"),
+        Code = empty
     ).
 
 :- pred record_clobbering(lval::in, list(prog_var)::in,
@@ -1851,7 +1689,7 @@ lval_spare_reg_type(Lval) = RegType :-
     var_locn_info::in, var_locn_info::out) is det.
 
 record_copy(Old, New, !VLI) :-
-    expect(is_root_lval(New), $module, $pred, "non-root New lval"),
+    expect(is_root_lval(New), $pred, "non-root New lval"),
     var_locn_get_var_state_map(!.VLI, VarStateMap0),
     var_locn_get_loc_var_map(!.VLI, LocVarMap0),
     set.list_to_set([Old, New], AssignSet),
@@ -1922,7 +1760,7 @@ record_copy_for_var(Old, New, Var, !VarStateMap, !LocVarMap) :-
     LvalSet = set.map(substitute_lval_in_lval(Token, New), LvalSet3),
     State = var_state(LvalSet, MaybeConstRval, MaybeExprRval,
         Using, DeadOrAlive),
-    expect(nonempty_state(State), $module, $pred, "empty state"),
+    expect(nonempty_state(State), $pred, "empty state"),
     map.det_update(Var, State, !VarStateMap),
     record_change_in_root_dependencies(LvalSet0, LvalSet, Var, !LocVarMap).
 
@@ -1968,7 +1806,7 @@ var_locn_var_becomes_dead(Var, FirstTime, !VLI) :-
             DeadOrAlive0),
         (
             DeadOrAlive0 = doa_dead,
-            expect(unify(FirstTime, no), $module, $pred, "already dead")
+            expect(unify(FirstTime, no), $pred, "already dead")
         ;
             DeadOrAlive0 = doa_alive
         ),
@@ -1990,7 +1828,17 @@ var_locn_var_becomes_dead(Var, FirstTime, !VLI) :-
             var_locn_set_var_state_map(VarStateMap, !VLI)
         )
     else
-        expect(unify(FirstTime, no), $module, $pred, "premature deletion")
+        var_locn_get_dummy_map(!.VLI, DummyMap),
+        map.lookup(DummyMap, Var, IsDummy),
+        ( if
+            ( IsDummy = is_dummy_type
+            ; FirstTime = no
+            )
+        then
+            true
+        else
+            unexpected($pred, "premature deletion")
+        )
     ).
 
     % Given a set of lvals, return the set of root lvals among them and inside
@@ -2227,7 +2075,7 @@ var_locn_acquire_reg(Type, Lval, !VLI) :-
 
 var_locn_acquire_reg_require_given(Lval, !VLI) :-
     ( if var_locn_lval_in_use(!.VLI, Lval) then
-        unexpected($module, $pred, "lval in use")
+        unexpected($pred, "lval in use")
     else
         true
     ),
@@ -2263,7 +2111,7 @@ var_locn_release_reg(Lval, !VLI) :-
         set.delete(Lval, Acquired0, Acquired),
         var_locn_set_acquired(Acquired, !VLI)
     else
-        unexpected($module, $pred, "unacquired reg")
+        unexpected($pred, "unacquired reg")
     ).
 
 %----------------------------------------------------------------------------%
@@ -2299,21 +2147,22 @@ cell_is_constant(VarStateMap, ExprnOpts, [CellArg | CellArgs],
     require_complete_switch [CellArg]
     (
         CellArg = cell_arg_full_word(Rval0, complete),
-        ArgWidth = full_word
+        NumWords = one_word
     ;
         CellArg = cell_arg_double_word(Rval0),
-        ArgWidth = double_word
+        NumWords = two_words
     ;
-        CellArg = cell_arg_take_addr(_, _),
-        fail
-    ;
-        CellArg = cell_arg_skip,
+        ( CellArg = cell_arg_take_addr_one_word(_, _)
+        ; CellArg = cell_arg_take_addr_two_words(_, _)
+        ; CellArg = cell_arg_skip_two_words
+        ; CellArg = cell_arg_skip_one_word
+        ),
         fail
     ),
     expr_is_constant(VarStateMap, ExprnOpts, Rval0, Rval),
     UnboxedFloats = get_unboxed_floats(ExprnOpts),
     UnboxedInt64s = get_unboxed_int64s(ExprnOpts),
-    LldsType = rval_type_as_arg(UnboxedFloats, UnboxedInt64s, ArgWidth, Rval),
+    LldsType = rval_type_as_arg(UnboxedFloats, UnboxedInt64s, NumWords, Rval),
     cell_is_constant(VarStateMap, ExprnOpts, CellArgs, TypedRvals).
 
     % expr_is_constant(VarStateMap, ExprnOpts, Rval0, Rval):
@@ -2331,6 +2180,10 @@ expr_is_constant(VarStateMap, ExprnOpts, Rval0, Rval) :-
         Rval0 = const(Const),
         exprn_aux.const_is_constant(Const, ExprnOpts, yes),
         Rval = Rval0
+    ;
+        Rval0 = cast(Type, SubRval0),
+        expr_is_constant(VarStateMap, ExprnOpts, SubRval0, SubRval),
+        Rval = cast(Type, SubRval)
     ;
         Rval0 = unop(UnOp, SubRval0),
         expr_is_constant(VarStateMap, ExprnOpts, SubRval0, SubRval),
@@ -2352,7 +2205,7 @@ expr_is_constant(VarStateMap, ExprnOpts, Rval0, Rval) :-
         map.search(VarStateMap, Var, State),
         State = var_state(_, yes(Rval), _, _, _),
         expect(expr_is_constant(VarStateMap, ExprnOpts, Rval, _),
-            $module, $pred, "non-constant rval in variable state")
+            $pred, "non-constant rval in variable state")
     ;
         ( Rval0 = lval(_)
         ; Rval0 = mem_addr(_)
@@ -2363,14 +2216,18 @@ expr_is_constant(VarStateMap, ExprnOpts, Rval0, Rval) :-
 %----------------------------------------------------------------------------%
 
 var_locn_materialize_vars_in_lval(ModuleInfo, Lval0, Lval, Code, !VLI) :-
-    var_locn_materialize_vars_in_lval_avoid(ModuleInfo, Lval0, [], Lval, Code,
-        !VLI).
+    materialize_vars_in_lval_avoid(ModuleInfo, Lval0, [], Lval,
+        Code, !VLI).
 
-:- pred var_locn_materialize_vars_in_lval_avoid(module_info::in, lval::in,
+var_locn_materialize_vars_in_rval(ModuleInfo, Rval0, Rval, Code, !VLI) :-
+    materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, [], Rval,
+        Code, !VLI).
+
+:- pred materialize_vars_in_lval_avoid(module_info::in, lval::in,
     list(lval)::in, lval::out, llds_code::out,
     var_locn_info::in, var_locn_info::out) is det.
 
-var_locn_materialize_vars_in_lval_avoid(ModuleInfo, Lval0, Avoid, Lval, Code,
+materialize_vars_in_lval_avoid(ModuleInfo, Lval0, Avoid, Lval, Code,
         !VLI) :-
     (
         ( Lval0 = reg(_, _)
@@ -2390,66 +2247,66 @@ var_locn_materialize_vars_in_lval_avoid(ModuleInfo, Lval0, Avoid, Lval, Code,
         Code = empty
     ;
         Lval0 = succip_slot(Rval0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
+        materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
             Rval, Code, !VLI),
         Lval = succip_slot(Rval)
     ;
         Lval0 = redoip_slot(Rval0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
+        materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
             Rval, Code, !VLI),
         Lval = redoip_slot(Rval)
     ;
         Lval0 = succfr_slot(Rval0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
+        materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
             Rval, Code, !VLI),
         Lval = succfr_slot(Rval)
     ;
         Lval0 = redofr_slot(Rval0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
+        materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
             Rval, Code, !VLI),
         Lval = redofr_slot(Rval)
     ;
         Lval0 = prevfr_slot(Rval0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
+        materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
             Rval, Code, !VLI),
         Lval = prevfr_slot(Rval)
     ;
         Lval0 = mem_ref(Rval0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
+        materialize_vars_in_rval_avoid(ModuleInfo, Rval0, no, Avoid,
             Rval, Code, !VLI),
         Lval = mem_ref(Rval)
     ;
         Lval0 = field(Tag, RvalA0, RvalB0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, RvalA0, no, Avoid,
+        materialize_vars_in_rval_avoid(ModuleInfo, RvalA0, no, Avoid,
             RvalA, CodeA, !VLI),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, RvalB0, no, Avoid,
+        materialize_vars_in_rval_avoid(ModuleInfo, RvalB0, no, Avoid,
             RvalB, CodeB, !VLI),
         Lval = field(Tag, RvalA, RvalB),
         Code = CodeA ++ CodeB
     ;
         Lval0 = temp(_, _),
-        unexpected($module, $pred, "temp")
+        unexpected($pred, "temp")
     ;
         Lval0 = lvar(_),
-        unexpected($module, $pred, "lvar")
+        unexpected($pred, "lvar")
     ).
 
     % Rval is Rval0 with all variables in Rval0 replaced by their values.
     %
-:- pred var_locn_materialize_vars_in_rval_avoid(module_info::in,
+:- pred materialize_vars_in_rval_avoid(module_info::in,
     rval::in, maybe(lval)::in, list(lval)::in, rval::out, llds_code::out,
     var_locn_info::in, var_locn_info::out) is det.
 
-var_locn_materialize_vars_in_rval_avoid(ModuleInfo, Rval0, MaybePrefer, Avoid,
+materialize_vars_in_rval_avoid(ModuleInfo, Rval0, MaybePrefer, Avoid,
         Rval, Code, !VLI) :-
     (
         Rval0 = lval(Lval0),
-        var_locn_materialize_vars_in_lval_avoid(ModuleInfo, Lval0,
+        materialize_vars_in_lval_avoid(ModuleInfo, Lval0,
             Avoid, Lval, Code, !VLI),
         Rval = lval(Lval)
     ;
         Rval0 = mkword(Tag, SubRval0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, SubRval0, no,
+        materialize_vars_in_rval_avoid(ModuleInfo, SubRval0, no,
             Avoid, SubRval, Code, !VLI),
         Rval = mkword(Tag, SubRval)
     ;
@@ -2457,15 +2314,20 @@ var_locn_materialize_vars_in_rval_avoid(ModuleInfo, Rval0, MaybePrefer, Avoid,
         Rval = Rval0,
         Code = empty
     ;
+        Rval0 = cast(Type, SubRval0),
+        materialize_vars_in_rval_avoid(ModuleInfo, SubRval0, no,
+            Avoid, SubRval, Code, !VLI),
+        Rval = cast(Type, SubRval)
+    ;
         Rval0 = unop(Unop, SubRval0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, SubRval0, no,
+        materialize_vars_in_rval_avoid(ModuleInfo, SubRval0, no,
             Avoid, SubRval, Code, !VLI),
         Rval = unop(Unop, SubRval)
     ;
         Rval0 = binop(Binop, SubRvalA0, SubRvalB0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, SubRvalA0, no,
+        materialize_vars_in_rval_avoid(ModuleInfo, SubRvalA0, no,
             Avoid, SubRvalA, CodeA, !VLI),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, SubRvalB0, no,
+        materialize_vars_in_rval_avoid(ModuleInfo, SubRvalB0, no,
             Avoid, SubRvalB, CodeB, !VLI),
         Rval = binop(Binop, SubRvalA, SubRvalB),
         Code = CodeA ++ CodeB
@@ -2475,7 +2337,7 @@ var_locn_materialize_vars_in_rval_avoid(ModuleInfo, Rval0, MaybePrefer, Avoid,
         Code = empty
     ;
         Rval0 = mem_addr(MemRef0),
-        var_locn_materialize_vars_in_mem_ref_avoid(ModuleInfo, MemRef0, MemRef,
+        materialize_vars_in_mem_ref_avoid(ModuleInfo, MemRef0, MemRef,
             Avoid, Code, !VLI),
         Rval = mem_addr(MemRef)
     ;
@@ -2486,18 +2348,18 @@ var_locn_materialize_vars_in_rval_avoid(ModuleInfo, Rval0, MaybePrefer, Avoid,
             Code = empty
         ;
             Avail = needs_materialization,
-            materialize_var(ModuleInfo, Var, MaybePrefer, yes,
+            materialize_var_general(ModuleInfo, Var, MaybePrefer, store_var,
                 Avoid, Rval, Code, !VLI)
         )
     ).
 
     % MemRef is MemRef0 with all variables in MemRef replaced by their values.
     %
-:- pred var_locn_materialize_vars_in_mem_ref_avoid(module_info::in,
+:- pred materialize_vars_in_mem_ref_avoid(module_info::in,
     mem_ref::in, mem_ref::out, list(lval)::in, llds_code::out,
     var_locn_info::in, var_locn_info::out) is det.
 
-var_locn_materialize_vars_in_mem_ref_avoid(ModuleInfo, MemRef0, MemRef, Avoid,
+materialize_vars_in_mem_ref_avoid(ModuleInfo, MemRef0, MemRef, Avoid,
         Code, !VLI) :-
     (
         ( MemRef0 = stackvar_ref(_)
@@ -2507,9 +2369,9 @@ var_locn_materialize_vars_in_mem_ref_avoid(ModuleInfo, MemRef0, MemRef, Avoid,
         Code = empty
     ;
         MemRef0 = heap_ref(PtrRval0, MaybeTag, FieldNumRval0),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, PtrRval0, no,
+        materialize_vars_in_rval_avoid(ModuleInfo, PtrRval0, no,
             Avoid, PtrRval, PtrCode, !VLI),
-        var_locn_materialize_vars_in_rval_avoid(ModuleInfo, FieldNumRval0, no,
+        materialize_vars_in_rval_avoid(ModuleInfo, FieldNumRval0, no,
             Avoid, FieldNumRval, FieldNumCode, !VLI),
         Code = PtrCode ++ FieldNumCode,
         MemRef = heap_ref(PtrRval, MaybeTag, FieldNumRval)
@@ -2541,12 +2403,51 @@ find_var_availability(VLI, Var, MaybePrefer, Avail) :-
         Avail = needs_materialization
     ).
 
-:- pred materialize_var(module_info::in, prog_var::in, maybe(lval)::in,
-    bool::in, list(lval)::in, rval::out, llds_code::out,
+:- pred materialize_if_var(module_info::in, rval::in, llds_code::out,
+    rval::out, var_locn_info::in, var_locn_info::out) is det.
+
+materialize_if_var(ModuleInfo, Rval0, EvalCode, Rval, !VLI) :-
+    (
+        Rval0 = var(Var),
+        materialize_var(ModuleInfo, Var, EvalCode, Rval, !VLI)
+    ;
+        ( Rval0 = const(_)
+        ; Rval0 = mkword(_, _)
+        ; Rval0 = mkword_hole(_)
+        ; Rval0 = cast(_, _)
+        ; Rval0 = unop(_, _)
+        ; Rval0 = binop(_, _, _)
+        ; Rval0 = lval(_)
+        ; Rval0 = mem_addr(_)
+        ),
+        EvalCode = empty,
+        Rval = Rval0
+    ).
+
+:- pred materialize_var(module_info::in, prog_var::in, llds_code::out,
+    rval::out, var_locn_info::in, var_locn_info::out) is det.
+
+materialize_var(ModuleInfo, Var, EvalCode, Rval, !VLI) :-
+    find_var_availability(!.VLI, Var, no, Avail),
+    (
+        Avail = available(Rval),
+        EvalCode = empty
+    ;
+        Avail = needs_materialization,
+        materialize_var_general(ModuleInfo, Var, no, do_not_store_var, [],
+            Rval, EvalCode, !VLI)
+    ).
+
+:- type store_var_if_required
+    --->    do_not_store_var
+    ;       store_var.
+
+:- pred materialize_var_general(module_info::in, prog_var::in, maybe(lval)::in,
+    store_var_if_required::in, list(lval)::in, rval::out, llds_code::out,
     var_locn_info::in, var_locn_info::out) is det.
 
-materialize_var(ModuleInfo, Var, MaybePrefer, StoreIfReq, Avoid, Rval, Code,
-        !VLI) :-
+materialize_var_general(ModuleInfo, Var, MaybePrefer, StoreIfReq, Avoid,
+        Rval, Code, !VLI) :-
     var_locn_get_var_state_map(!.VLI, VarStateMap),
     map.lookup(VarStateMap, Var, State),
     State = var_state(_Lvals, _MaybeConstRval, MaybeExprRval,
@@ -2555,12 +2456,12 @@ materialize_var(ModuleInfo, Var, MaybePrefer, StoreIfReq, Avoid, Rval, Code,
         MaybeExprRval = yes(ExprRval)
     ;
         MaybeExprRval = no,
-        unexpected($module, $pred, "no expr")
+        unexpected($pred, "no expr")
     ),
-    var_locn_materialize_vars_in_rval_avoid(ModuleInfo, ExprRval, MaybePrefer,
+    materialize_vars_in_rval_avoid(ModuleInfo, ExprRval, MaybePrefer,
         Avoid, Rval0, ExprCode, !VLI),
     ( if
-        StoreIfReq = yes,
+        StoreIfReq = store_var,
         NumUsingVars = set_of_var.count(UsingVars),
         NumUsingVars > 1
     then
@@ -2598,7 +2499,7 @@ make_var_depend_on_lval_roots(Var, Lval, !LocVarMap) :-
     loc_var_map::in, loc_var_map::out) is det.
 
 make_var_depend_on_root_lval(Var, Lval, !LocVarMap) :-
-    expect(is_root_lval(Lval), $module, $pred, "non-root lval"),
+    expect(is_root_lval(Lval), $pred, "non-root lval"),
     ( if map.search(!.LocVarMap, Lval, Vars0) then
         set_of_var.insert(Var, Vars0, Vars),
         map.det_update(Lval, Vars, !LocVarMap)
@@ -2614,7 +2515,7 @@ make_var_depend_on_root_lval(Var, Lval, !LocVarMap) :-
     loc_var_map::in, loc_var_map::out) is det.
 
 make_var_not_depend_on_root_lval(Var, Lval, !LocVarMap) :-
-    expect(is_root_lval(Lval), $module, $pred, "non-root lval"),
+    expect(is_root_lval(Lval), $pred, "non-root lval"),
     ( if map.search(!.LocVarMap, Lval, Vars0) then
         set_of_var.delete(Var, Vars0, Vars),
         ( if set_of_var.is_empty(Vars) then
@@ -2623,7 +2524,7 @@ make_var_not_depend_on_root_lval(Var, Lval, !LocVarMap) :-
             map.det_update(Lval, Vars, !LocVarMap)
         )
     else
-        unexpected($module, $pred, "no record")
+        unexpected($pred, "no record")
     ).
 
 :- pred is_root_lval(lval::in) is semidet.
@@ -2653,13 +2554,13 @@ rval_depends_on_search_lval(Rval, SearchLval) :-
         Rval = lval(Lval),
         lval_depends_on_search_lval(Lval, SearchLval)
     ;
-        Rval = mkword(_Tag, SubRval),
+        ( Rval = mkword(_Tag, SubRval)
+        ; Rval = cast(_Type, SubRval)
+        ; Rval = unop(_UnOp, SubRval)
+        ),
         rval_depends_on_search_lval(SubRval, SearchLval)
     ;
-        Rval = unop(_Op, SubRval),
-        rval_depends_on_search_lval(SubRval, SearchLval)
-    ;
-        Rval = binop(_Op, SubRvalA, SubRvalB),
+        Rval = binop(_BinOp, SubRvalA, SubRvalB),
         (
             rval_depends_on_search_lval(SubRvalA, SearchLval)
         ;
@@ -2685,7 +2586,7 @@ rval_depends_on_search_lval(Rval, SearchLval) :-
         fail
     ;
         Rval = var(_Var),
-        unexpected($module, $pred, "var")
+        unexpected($pred, "var")
     ).
 
 :- pred lval_depends_on_search_lval(lval::in, dep_search_lval::in) is semidet.
@@ -2736,7 +2637,7 @@ lval_depends_on_search_lval(Lval, SearchLval) :-
         fail
     ;
         Lval = lvar(_Var),
-        unexpected($module, $pred, "lvar")
+        unexpected($pred, "lvar")
     ).
 
 %----------------------------------------------------------------------------%
@@ -2767,8 +2668,197 @@ nonempty_state(State) :-
 
 %----------------------------------------------------------------------------%
 
+:- type dead_or_alive
+    --->    doa_dead
+    ;       doa_alive.
+
+    % The state of a variable can be one of three kinds: const, cached
+    % and general.
+    %
+    % 1 The value of the variable is a known constant. In this case,
+    %   the const_rval field will be yes, and the expr_rval field
+    %   will be no. Both the empty set and nonempty sets are valid
+    %   for the locs field. It will start out empty, will become
+    %   nonempty if the variable is placed in some lval, and may
+    %   become empty again if that lval is later overwritten.
+    %
+    % 2 The value of the variable is not stored anywhere, but its
+    %   definition (an expression involving other variables) is cached.
+    %   In this case, the const_rval field will be no, and the locs
+    %   field will contain the empty set, but the expr_rval field
+    %   will be yes. The variables referred to in the expr_rval field
+    %   will include this variable in their using_vars sets, which
+    %   protects them from deletion from the code generator state until
+    %   the using variable is produced or placed in an lval. When that
+    %   happens, the using variable's state will be transformed to the
+    %   general, third kind, releasing this variable's hold on the
+    %   variables contained in its expr_rval field.
+    %
+    % 3 The value of the variable is not a constant, nor is the
+    %   variable cached. The locs field will be nonempty, and both
+    %   const_rval and expr_rval will be no.
+
+:- type var_state
+    --->    var_state(
+                % Must not contain any rval of the form var(_).
+                locs            :: set(lval),
+
+                % Must not contain any rval of the form var(_);
+                % must be constant.
+                const_rval      :: maybe(rval),
+
+                % Will contain var(_), must not contain lvals.
+                expr_rval       :: maybe(rval),
+
+                % The set of vars whose expr_rval field refers to this var.
+                using_vars      :: set_of_progvar,
+
+                % A dead variable should be removed from var_state_map
+                % when its using_vars field becomes empty.
+                dead_or_alive   :: dead_or_alive
+            ).
+
+:- type var_state_map   ==  map(prog_var, var_state).
+
+    % The loc_var_map maps each root lval (register or stack slot)
+    % to the set of variables that depend on that location,
+    % either because they are stored there or because the location
+    % contains a part of the pointer chain that leads to their address.
+    % In concrete terms, this means the set of variables whose var_state's
+    % locs field includes an lval that contains that root lval.
+    %
+    % If a root lval stack slot is unused, then it will either not appear
+    % in the var_loc_map or it will be mapped to an empty set. Allowing
+    % unused root lvals to be mapped to the empty set, and not requiring
+    % their deletion from the map, makes it simpler to manipulate
+    % loc_var_maps using higher-order code.
+
+:- type loc_var_map ==  map(lval, set_of_progvar).
+
+:- type dummy_map == map(prog_var, is_dummy_type).
+
+:- type var_locn_info
+    --->    var_locn_info(
+                % The varset and vartypes from the proc_info.
+                % XXX These fields are redundant; they are also stored
+                % in the code_info.
+                vli_varset          :: prog_varset,
+                vli_vartypes        :: vartypes,
+
+                vli_dummy_map       :: dummy_map,
+
+                % The register type to use for float vars.
+                vli_float_reg_type  :: reg_type,
+
+                % Maps each var to its stack slot, if it has one.
+                vli_stack_slots     :: stack_slots,
+
+                % Where vars are needed next.
+                vli_follow_vars_map :: abs_follow_vars_map,
+
+                % Next rN, fN register that isn't reserved in follow_vars_map.
+                vli_next_non_res_r  :: int,
+                vli_next_non_res_f  :: int,
+
+                % Documented above.
+                vli_var_state_map   :: var_state_map,
+                vli_loc_var_map     :: loc_var_map,
+
+                % Locations that are temporarily reserved for purposes such as
+                % holding the tags of variables during switches.
+                vli_acquired        :: set(lval),
+
+                % If these slots contain R and F then registers r1 through rR
+                % and f1 through fF can only be modified by a place_var
+                % operation, or by a free_up_lval operation that moves a
+                % variable to the (free or freeable) lval associated with it in
+                % the exceptions field. Used to implement calls, foreign_procs
+                % and the store_maps at the ends of branched control
+                % structures.
+                vli_locked_r        :: int,
+                vli_locked_f        :: int,
+
+                % See the documentation of the locked field above.
+                vli_exceptions      :: assoc_list(prog_var, lval)
+            ).
+
+%----------------------------------------------------------------------------%
+
+init_var_locn_state(ModuleInfo, VarLocs, Liveness, VarSet, VarTypes,
+        FloatRegType, StackSlots, FollowVars, VarLocnInfo) :-
+    map.init(VarStateMap0),
+    map.init(LocVarMap0),
+    init_var_locn_state_2(VarLocs, yes(Liveness), VarStateMap0, VarStateMap,
+        LocVarMap0, LocVarMap),
+    FollowVars = abs_follow_vars(FollowVarMap, NextNonReservedR,
+        NextNonReservedF),
+    set.init(AcquiredRegs),
+    vartypes_to_sorted_assoc_list(VarTypes, VarsTypes),
+    build_dummy_list(ModuleInfo, VarsTypes, [], RevDummyAssocList),
+    map.from_rev_sorted_assoc_list(RevDummyAssocList, DummyMap),
+    VarLocnInfo = var_locn_info(VarSet, VarTypes, DummyMap, FloatRegType,
+        StackSlots, FollowVarMap, NextNonReservedR, NextNonReservedF,
+        VarStateMap, LocVarMap, AcquiredRegs, 0, 0, []).
+
+reinit_var_locn_state(VarLocs, !VarLocnInfo) :-
+    map.init(VarStateMap0),
+    map.init(LocVarMap0),
+    init_var_locn_state_2(VarLocs, no, VarStateMap0, VarStateMap,
+        LocVarMap0, LocVarMap),
+    set.init(AcquiredRegs),
+    !.VarLocnInfo = var_locn_info(VarSet, VarTypes, DummyMap, FloatRegType,
+        StackSlots, FollowVarMap, NextNonReservedR, NextNonReservedF,
+        _, _, _, _, _, _),
+    !:VarLocnInfo = var_locn_info(VarSet, VarTypes, DummyMap, FloatRegType,
+        StackSlots, FollowVarMap, NextNonReservedR, NextNonReservedF,
+        VarStateMap, LocVarMap, AcquiredRegs, 0, 0, []).
+
+:- pred init_var_locn_state_2(assoc_list(prog_var, lval)::in,
+    maybe(set_of_progvar)::in, var_state_map::in, var_state_map::out,
+    loc_var_map::in, loc_var_map::out) is det.
+
+init_var_locn_state_2([], _, !VarStateMap, !LocVarMap).
+init_var_locn_state_2([Var - Lval |  Rest], MaybeLiveness, !VarStateMap,
+        !LocVarMap) :-
+    expect(is_root_lval(Lval), $pred, "unexpected lval"),
+    ( if
+        MaybeLiveness = yes(Liveness),
+        not set_of_var.member(Liveness, Var)
+    then
+        % If a variable is not live, then we do not record its state.
+        % If we did, then the variable will never die (since it is already
+        % dead), and the next call to clobber_regs would throw an exception,
+        % since it would believe that it is throwing away the last location
+        % storing the value of a "live" variable.
+        true
+    else
+        ( if map.search(!.VarStateMap, Var, _) then
+            unexpected($pred, "repeated variable")
+        else
+            NewLocs = set.make_singleton_set(Lval),
+            set_of_var.init(Using),
+            State = var_state(NewLocs, no, no, Using, doa_alive),
+            map.det_insert(Var, State, !VarStateMap)
+        ),
+        make_var_depend_on_lval_roots(Var, Lval, !LocVarMap)
+    ),
+    init_var_locn_state_2(Rest, MaybeLiveness, !VarStateMap, !LocVarMap).
+
+:- pred build_dummy_list(module_info::in, assoc_list(prog_var, mer_type)::in,
+    assoc_list(prog_var, is_dummy_type)::in,
+    assoc_list(prog_var, is_dummy_type)::out) is det.
+
+build_dummy_list(_, [], !RevDummyAssocList).
+build_dummy_list(ModuleInfo, [Var - Type | VarTypes], !RevDummyAssocList) :-
+    IsDummy = is_type_a_dummy(ModuleInfo, Type),
+    !:RevDummyAssocList = [Var - IsDummy | !.RevDummyAssocList],
+    build_dummy_list(ModuleInfo, VarTypes, !RevDummyAssocList).
+
+%----------------------------------------------------------------------------%
+
 :- pred var_locn_get_varset(var_locn_info::in, prog_varset::out) is det.
 :- pred var_locn_get_vartypes(var_locn_info::in, vartypes::out) is det.
+:- pred var_locn_get_dummy_map(var_locn_info::in, dummy_map::out) is det.
 :- pred var_locn_get_float_reg_type(var_locn_info::in, reg_type::out) is det.
 :- pred var_locn_get_var_state_map(var_locn_info::in, var_state_map::out)
     is det.
@@ -2795,6 +2885,7 @@ nonempty_state(State) :-
 
 var_locn_get_varset(VI, VI ^ vli_varset).
 var_locn_get_vartypes(VI, VI ^ vli_vartypes).
+var_locn_get_dummy_map(VI, VI ^ vli_dummy_map).
 var_locn_get_float_reg_type(VI, VI ^ vli_float_reg_type).
 var_locn_get_stack_slots(VI, VI ^ vli_stack_slots).
 var_locn_get_follow_var_map(VI, VI ^ vli_follow_vars_map).

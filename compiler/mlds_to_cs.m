@@ -417,14 +417,12 @@ output_exported_enums_for_csharp(Info, Indent, ExportedEnums, !IO) :-
     mlds_exported_enum::in, io::di, io::uo) is det.
 
 output_exported_enum_for_csharp(Info, Indent, ExportedEnum, !IO) :-
-    ExportedEnum = mlds_exported_enum(Lang, _, TypeCtor, ExportedConstants0),
+    ExportedEnum = mlds_exported_enum(Lang, _, TypeCtor, ExportedConstants),
     (
         Lang = lang_csharp,
         ml_gen_type_name(TypeCtor, ClassName, ClassArity),
         ClassId = mlds_class_id(ClassName, ClassArity, mlds_enum),
         MLDS_Type = mlds_class_type(ClassId),
-        % We reverse the list so the constants are printed out in order.
-        list.reverse(ExportedConstants0, ExportedConstants),
         list.foldl(
             output_exported_enum_constant_for_csharp(Info, Indent, MLDS_Type),
             ExportedConstants, !IO)
@@ -1076,7 +1074,7 @@ output_vector_cell_init_for_csharp(Info, Indent, TypeNum, CellGroup, !IO) :-
 
 get_type_initializer(Info, Type) = Initializer :-
     (
-        Type = mercury_type(_, CtorCat, _),
+        Type = mercury_type(_, _, CtorCat),
         (
             ( CtorCat = ctor_cat_builtin(cat_builtin_int(int_type_int))
             ; CtorCat = ctor_cat_builtin(cat_builtin_int(int_type_int8))
@@ -1224,7 +1222,7 @@ output_initializer_alloc_only_for_csharp(Info, Initializer, MaybeType, !IO) :-
         Initializer = init_struct(StructType, FieldInits),
         io.write_string("new ", !IO),
         ( if
-            StructType = mercury_type(_Type, CtorCat, _),
+            StructType = mercury_type(_, _, CtorCat),
             type_category_is_array(CtorCat) = is_array
         then
             Size = list.length(FieldInits),
@@ -1777,7 +1775,7 @@ output_type_for_csharp_dims(Info, MLDS_Type, ArrayDims0, !IO) :-
 
 type_to_string_for_csharp(Info, MLDS_Type, String, ArrayDims) :-
     (
-        MLDS_Type = mercury_type(Type, CtorCat, _),
+        MLDS_Type = mercury_type(Type, _, CtorCat),
         ( if
             % We need to handle type_info (etc.) types specially --
             % they get mapped to types in the runtime rather than
@@ -1807,7 +1805,7 @@ type_to_string_for_csharp(Info, MLDS_Type, String, ArrayDims) :-
         )
     ;
         MLDS_Type = mlds_mercury_array_type(ElementType),
-        ( if ElementType = mercury_type(_, ctor_cat_variable, _) then
+        ( if ElementType = mercury_type(_, _, ctor_cat_variable) then
             String = "System.Array",
             ArrayDims = []
         else
@@ -2059,7 +2057,7 @@ type_is_array_for_csharp(Type) = IsArray :-
         IsArray = is_array
     else if Type = mlds_mercury_array_type(_) then
         IsArray = is_array
-    else if Type = mercury_type(_, CtorCat, _) then
+    else if Type = mercury_type(_, _, CtorCat) then
         IsArray = type_category_is_array(CtorCat)
     else if Type = mlds_rtti_type(RttiIdMaybeElement) then
         rtti_id_maybe_element_csharp_type(RttiIdMaybeElement,
@@ -2223,8 +2221,6 @@ output_access_for_csharp(_Info, Access, !IO) :-
     ;
         Access = func_private,
         io.write_string("private ", !IO)
-    ;
-        Access = func_local
     ).
 
 :- pred output_class_access_for_csharp(class_access::in,
@@ -2349,7 +2345,7 @@ output_stmt_for_csharp(Info, Indent, FuncInfo, Stmt, ExitMethods, !IO) :-
         output_stmt_block_for_csharp(Info, Indent, FuncInfo, Stmt,
             ExitMethods, !IO)
     ;
-        Stmt = ml_stmt_while(_, _, _, _),
+        Stmt = ml_stmt_while(_, _, _, _, _),
         output_stmt_while_for_csharp(Info, Indent, FuncInfo, Stmt,
             ExitMethods, !IO)
     ;
@@ -2436,7 +2432,7 @@ output_stmt_block_for_csharp(Info, Indent, FuncInfo, Stmt,
 :- pragma inline(output_stmt_while_for_csharp/7).
 
 output_stmt_while_for_csharp(Info, Indent, FuncInfo, Stmt, ExitMethods, !IO) :-
-    Stmt = ml_stmt_while(Kind, Cond, BodyStmt, Context),
+    Stmt = ml_stmt_while(Kind, Cond, BodyStmt, _LoopLocalVars, Context),
     scope_indent(BodyStmt, Indent, ScopeIndent),
     (
         Kind = may_loop_zero_times,
@@ -2902,9 +2898,8 @@ output_atomic_stmt_for_csharp(Info, Indent, AtomicStmt, Context, !IO) :-
         AtomicStmt = delete_object(_Lval),
         unexpected($pred, "delete_object not supported in C#.")
     ;
-        AtomicStmt = new_object(Target, _MaybeTag, ExplicitSecTag, Type,
-            _MaybeSize, MaybeCtorName, Args, ArgTypes, _MayUseAtomic,
-            _AllocId),
+        AtomicStmt = new_object(Target, _Ptag, ExplicitSecTag, Type,
+            _MaybeSize, MaybeCtorName, ArgRvalsTypes, _MayUseAtomic, _AllocId),
         (
             ExplicitSecTag = yes,
             unexpected($pred, "explicit secondary tag")
@@ -2923,7 +2918,7 @@ output_atomic_stmt_for_csharp(Info, Indent, AtomicStmt, Context, !IO) :-
         ( if
             MaybeCtorName = yes(QualifiedCtorId),
             not (
-                Type = mercury_type(MerType, CtorCat, _),
+                Type = mercury_type(MerType, _, CtorCat),
                 hand_defined_type_for_csharp(MerType, CtorCat, _, _)
             )
         then
@@ -2941,13 +2936,13 @@ output_atomic_stmt_for_csharp(Info, Indent, AtomicStmt, Context, !IO) :-
             % The new object will be an array, so we need to initialise it
             % using array literals syntax.
             io.write_string(" {", !IO),
-            output_init_args_for_csharp(Info, Args, ArgTypes, !IO),
+            output_init_args_for_csharp(Info, ArgRvalsTypes, !IO),
             io.write_string("};\n", !IO)
         ;
             IsArray = not_array,
             % Generate constructor arguments.
             io.write_string("(", !IO),
-            output_init_args_for_csharp(Info, Args, ArgTypes, !IO),
+            output_init_args_for_csharp(Info, ArgRvalsTypes, !IO),
             io.write_string(");\n", !IO)
         ),
         indent_line_after_context(Info ^ csoi_line_numbers, Context,
@@ -3029,23 +3024,20 @@ output_target_code_component_for_csharp(Info, TargetCode, !IO) :-
     % Output initial values of an object's fields as arguments for the
     % object's class constructor.
     %
-:- pred output_init_args_for_csharp(csharp_out_info::in, list(mlds_rval)::in,
-    list(mlds_type)::in, io::di, io::uo) is det.
+:- pred output_init_args_for_csharp(csharp_out_info::in,
+    list(mlds_typed_rval)::in, io::di, io::uo) is det.
 
-output_init_args_for_csharp(_, [], [], !IO).
-output_init_args_for_csharp(_, [_ | _], [], _, _) :-
-    unexpected($pred, "length mismatch.").
-output_init_args_for_csharp(_, [], [_ | _], _, _) :-
-    unexpected($pred, "length mismatch.").
-output_init_args_for_csharp(Info, [Arg | Args], [_ArgType | ArgTypes], !IO) :-
-    output_rval_for_csharp(Info, Arg, !IO),
+output_init_args_for_csharp(_, [], !IO).
+output_init_args_for_csharp(Info, [ArgRvalType | ArgRvalsTypes], !IO) :-
+    ArgRvalType = ml_typed_rval(ArgRval, _ArgType),
+    output_rval_for_csharp(Info, ArgRval, !IO),
     (
-        Args = []
+        ArgRvalsTypes = []
     ;
-        Args = [_ | _],
+        ArgRvalsTypes = [_ | _],
         io.write_string(", ", !IO)
     ),
-    output_init_args_for_csharp(Info, Args, ArgTypes, !IO).
+    output_init_args_for_csharp(Info, ArgRvalsTypes, !IO).
 
 %---------------------------------------------------------------------------%
 %
@@ -3168,11 +3160,26 @@ output_rval_for_csharp(Info, Rval, !IO) :-
         Rval = ml_const(Const),
         output_rval_const_for_csharp(Info, Const, !IO)
     ;
-        Rval = ml_unop(Op, RvalA),
-        output_unop_for_csharp(Info, Op, RvalA, !IO)
+        Rval = ml_cast(Type, SubRval),
+        output_cast_rval_for_csharp(Info, Type, SubRval, !IO)
     ;
-        Rval = ml_binop(Op, RvalA, RvalB),
-        output_binop_for_csharp(Info, Op, RvalA, RvalB, !IO)
+        Rval = ml_box(Type, SubRval),
+        ( if Type = mercury_type(comparison_result_type, _, _) then
+            io.write_string("builtin.comparison_result_object[(int) ", !IO),
+            output_rval_for_csharp(Info, SubRval, !IO),
+            io.write_string("]", !IO)
+        else
+            output_boxed_rval_for_csharp(Info, Type, SubRval, !IO)
+        )
+    ;
+        Rval = ml_unbox(Type, SubRval),
+        output_unboxed_rval_for_csharp(Info, Type, SubRval, !IO)
+    ;
+        Rval = ml_unop(Unop, SubRval),
+        output_unop_for_csharp(Info, Unop, SubRval, !IO)
+    ;
+        Rval = ml_binop(Op, SubRvalA, SubRvalB),
+        output_binop_for_csharp(Info, Op, SubRvalA, SubRvalB, !IO)
     ;
         Rval = ml_mem_addr(Lval),
         io.write_string("out ", !IO),
@@ -3204,30 +3211,6 @@ output_rval_for_csharp(Info, Rval, !IO) :-
         io.write_string("this", !IO)
     ).
 
-:- pred output_unop_for_csharp(csharp_out_info::in, mlds_unary_op::in,
-    mlds_rval::in, io::di, io::uo) is det.
-
-output_unop_for_csharp(Info, Unop, Expr, !IO) :-
-    (
-        Unop = cast(Type),
-        output_cast_rval_for_csharp(Info, Type, Expr, !IO)
-    ;
-        Unop = box(Type),
-        ( if Type = mercury_type(comparison_result_type, _, _) then
-            io.write_string("builtin.comparison_result_object[(int) ", !IO),
-            output_rval_for_csharp(Info, Expr, !IO),
-            io.write_string("]", !IO)
-        else
-            output_boxed_rval_for_csharp(Info, Type, Expr, !IO)
-        )
-    ;
-        Unop = unbox(Type),
-        output_unboxed_rval_for_csharp(Info, Type, Expr, !IO)
-    ;
-        Unop = std_unop(StdUnop),
-        output_std_unop_for_csharp(Info, StdUnop, Expr, !IO)
-    ).
-
 :- pred output_cast_rval_for_csharp(csharp_out_info::in, mlds_type::in,
     mlds_rval::in, io::di, io::uo) is det.
 
@@ -3249,7 +3232,7 @@ output_cast_rval_for_csharp(Info, Type, Expr, !IO) :-
             io.write_string(")", !IO)
         )
     else if
-        ( Type = mercury_type(_, ctor_cat_system(cat_system_type_info), _)
+        ( Type = mercury_type(_, _, ctor_cat_system(cat_system_type_info))
         ; Type = mlds_type_info_type
         )
     then
@@ -3329,7 +3312,7 @@ csharp_builtin_type(Type, TargetType) :-
         Type = mlds_native_float_type,
         TargetType = "double"
     ;
-        Type = mercury_type(MerType, TypeCtorCat, _),
+        Type = mercury_type(MerType, _, TypeCtorCat),
         require_complete_switch [MerType] (
             MerType = builtin_type(BuiltinType),
             require_complete_switch [BuiltinType] (
@@ -3397,10 +3380,10 @@ csharp_builtin_type(Type, TargetType) :-
         unexpected($file, $pred, "unknown typed")
     ).
 
-:- pred output_std_unop_for_csharp(csharp_out_info::in,
-    builtin_ops.unary_op::in, mlds_rval::in, io::di, io::uo) is det.
+:- pred output_unop_for_csharp(csharp_out_info::in, unary_op::in,
+    mlds_rval::in, io::di, io::uo) is det.
 
-output_std_unop_for_csharp(Info, UnaryOp, Expr, !IO) :-
+output_unop_for_csharp(Info, UnaryOp, Expr, !IO) :-
     % For the C# backend, there are no tags, so all the tagging operators
     % are no-ops, except for `tag', which always returns zero (a tag of zero
     % means there is no tag).
@@ -3451,6 +3434,15 @@ output_std_unop_for_csharp(Info, UnaryOp, Expr, !IO) :-
         io.write_string("(", !IO),
         output_rval_for_csharp(Info, Expr, !IO),
         io.write_string(")", !IO)
+    ;
+        ( UnaryOp = dword_float_get_word0
+        ; UnaryOp = dword_float_get_word1
+        ; UnaryOp = dword_int64_get_word0
+        ; UnaryOp = dword_int64_get_word1
+        ; UnaryOp = dword_uint64_get_word0
+        ; UnaryOp = dword_uint64_get_word1
+        ),
+        unexpected($pred, "invalid unary operator")
     ).
 
 :- pred output_binop_for_csharp(csharp_out_info::in, binary_op::in,
@@ -3581,8 +3573,9 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = float_gt
         ; Op = float_le
         ; Op = float_ge
-        ; Op = float_word_bits
         ; Op = float_from_dword
+        ; Op = int64_from_dword
+        ; Op = uint64_from_dword
         ; Op = compound_eq
         ; Op = compound_lt
         ),
@@ -3721,7 +3714,8 @@ output_binary_op_for_csharp(Op, !IO) :-
         ( Op = array_index(_)
         ; Op = body
         ; Op = float_from_dword
-        ; Op = float_word_bits
+        ; Op = int64_from_dword
+        ; Op = uint64_from_dword
         ; Op = offset_str_eq(_)
         ; Op = str_cmp
         ; Op = str_eq

@@ -178,15 +178,13 @@ replace_in_type_defn(ModuleName, TypeEqvMap, TypeCtor, !Defn,
             EquivTypeInfo = EquivTypeInfo1
         ;
             MaybeRepn0 = yes(Repn0),
-            Repn0 = du_type_repn(ConsIdToTagMap,
-                CtorRepns0, _CtorNameToRepnMap0, CheaperTagTest,
-                DuKind, DirectArgCtors),
+            Repn0 = du_type_repn(CtorRepns0, _CtorNameToRepnMap0,
+                CheaperTagTest, DuKind, DirectArgCtors),
             list.map_foldl3(replace_in_ctor_repn(TypeEqvMap),
                 CtorRepns0, CtorRepns, map.init, CtorNameToRepnMap,
                 TVarSet1, TVarSet, EquivTypeInfo1, EquivTypeInfo),
-            Repn = du_type_repn(ConsIdToTagMap,
-                CtorRepns, CtorNameToRepnMap, CheaperTagTest,
-                DuKind, DirectArgCtors),
+            Repn = du_type_repn(CtorRepns, CtorNameToRepnMap,
+                CheaperTagTest, DuKind, DirectArgCtors),
             MaybeRepn = yes(Repn)
         ),
         Body = hlds_du_type(Ctors, MaybeCanonical, MaybeRepn, MaybeForeign)
@@ -238,12 +236,14 @@ replace_in_ctor_repn(TypeEqvMap, CtorRepn0, CtorRepn, !CtorNameToRepnMap,
         MaybeExistConstraints0 = no_exist_constraints,
         MaybeExistConstraints = no_exist_constraints
     ;
-        MaybeExistConstraints0 = exist_constraints(
-            cons_exist_constraints(ExistQVars, Constraints0)),
+        MaybeExistConstraints0 = exist_constraints(ExistConstraints0),
+        ExistConstraints0 = cons_exist_constraints(ExistQVars, Constraints0,
+            UnconstrainedExistQVars, ConstrainedExistQVars),
         replace_in_prog_constraint_list(TypeEqvMap, Constraints0, Constraints,
             !TVarSet, !EquivTypeInfo),
-        MaybeExistConstraints = exist_constraints(
-            cons_exist_constraints(ExistQVars, Constraints))
+        ExistConstraints = cons_exist_constraints(ExistQVars, Constraints,
+            UnconstrainedExistQVars, ConstrainedExistQVars),
+        MaybeExistConstraints = exist_constraints(ExistConstraints)
     ),
     CtorRepn = ctor_repn(MaybeExistConstraints, CtorName, Tag,
         CtorArgRepns, Arity, Context),

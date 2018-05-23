@@ -73,7 +73,7 @@ ml_generate_tag_switch(TaggedCases, Var, CodeModel, CanFail, Context,
     % Generate the rval for the primary tag.
     ml_gen_var(!.Info, Var, VarLval),
     VarRval = ml_lval(VarLval),
-    PTagRval = ml_unop(std_unop(tag), VarRval),
+    PtagRval = ml_unop(tag, VarRval),
 
     % Group the cases based on primary tag value, find out how many
     % constructors share each primary tag value, and sort the cases so that
@@ -112,7 +112,7 @@ ml_generate_tag_switch(TaggedCases, Var, CodeModel, CanFail, Context,
 
     % Package up the results into a switch statement.
     Range = mlds_switch_range(0, MaxPrimary),
-    SwitchStmt0 = ml_stmt_switch(mlds_native_int_type, PTagRval, Range,
+    SwitchStmt0 = ml_stmt_switch(mlds_native_int_type, PtagRval, Range,
         PtagCases, Default, Context),
     ml_simplify_switch(SwitchStmt0, SwitchStmt, !Info),
     Stmts = [SwitchStmt].
@@ -196,7 +196,7 @@ gen_ptag_case(PtagCase, CodeMap, Var, CanFail, CodeModel, PtagCountMap,
         ptag_case(SecTagLocn, GoalMap)),
     map.lookup(PtagCountMap, MainPtag, CountInfo),
     CountInfo = SecTagLocn1 - MaxSecondary,
-    expect(unify(SecTagLocn, SecTagLocn1), $module, $pred,
+    expect(unify(SecTagLocn, SecTagLocn1), $pred,
         "secondary tag locations differ"),
     map.to_assoc_list(GoalMap, GoalList),
     (
@@ -206,20 +206,19 @@ gen_ptag_case(PtagCase, CodeMap, Var, CanFail, CodeModel, PtagCountMap,
         % There is no secondary tag, so there is no switch on it.
         (
             GoalList = [],
-            unexpected($module, $pred, "no goal for non-shared tag")
+            unexpected($pred, "no goal for non-shared tag")
         ;
             GoalList = [_Stag - CaseId],
             lookup_code_map(CodeMap, CaseId, CodeModel, Stmt, !Info)
         ;
             GoalList = [_, _ | _],
-            unexpected($module, $pred, "more than one goal for non-shared tag")
+            unexpected($pred, "more than one goal for non-shared tag")
         )
     ;
         ( SecTagLocn = sectag_local
         ; SecTagLocn = sectag_remote
         ),
-        expect(unify(OtherPtags, []), $module, $pred,
-            ">1 ptag with secondary tag"),
+        expect(unify(OtherPtags, []), $pred, ">1 ptag with secondary tag"),
         (
             CanFail = cannot_fail,
             CaseCanFail = cannot_fail
@@ -254,7 +253,7 @@ gen_ptag_case(PtagCase, CodeMap, Var, CanFail, CodeModel, PtagCountMap,
     OtherPtagMatches = list.map(make_ptag_match, OtherPtags),
     MLDS_Case = mlds_switch_case(MainPtagMatch, OtherPtagMatches, Stmt).
 
-:- func make_ptag_match(tag_bits) = mlds_case_match_cond.
+:- func make_ptag_match(ptag) = mlds_case_match_cond.
 
 make_ptag_match(Ptag) = match_value(ml_const(mlconst_int(Ptag))).
 
@@ -316,23 +315,21 @@ build_stag_rev_map([Entry | Entries], !RevMap) :-
 gen_stag_switch(Cases, CodeMap, PrimaryTag, StagLocn, Var, CodeModel,
         CanFail, Context, Stmt, !Info) :-
     % Generate the rval for the secondary tag.
-    ml_gen_info_get_module_info(!.Info, ModuleInfo),
     ml_variable_type(!.Info, Var, VarType),
     ml_gen_var(!.Info, Var, VarLval),
     VarRval = ml_lval(VarLval),
     (
         StagLocn = sectag_local,
-        STagRval = ml_unop(std_unop(unmkbody), VarRval)
+        StagRval = ml_unop(unmkbody, VarRval)
     ;
         StagLocn = sectag_remote,
-        ml_gen_info_get_target(!.Info, Target),
-        STagRval = ml_gen_secondary_tag_rval(ModuleInfo, Target,
-            PrimaryTag, VarType, VarRval)
+        ml_gen_secondary_tag_rval(!.Info, VarType, VarRval,
+            PrimaryTag, StagRval)
     ;
         ( StagLocn = sectag_none
         ; StagLocn = sectag_none_direct_arg
         ),
-        unexpected($module, $pred, "no stag")
+        unexpected($pred, "no stag")
     ),
 
     % Generate the switch on the secondary tag.
@@ -342,7 +339,7 @@ gen_stag_switch(Cases, CodeMap, PrimaryTag, StagLocn, Var, CodeModel,
 
     % Package up the results into a switch statement.
     Range = mlds_switch_range_unknown, % XXX could do better
-    SwitchStmt = ml_stmt_switch(mlds_native_int_type, STagRval, Range,
+    SwitchStmt = ml_stmt_switch(mlds_native_int_type, StagRval, Range,
         StagCases, Default, Context),
     ml_simplify_switch(SwitchStmt, Stmt, !Info).
 

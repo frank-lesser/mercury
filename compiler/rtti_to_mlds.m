@@ -961,8 +961,7 @@ gen_field_names(_ModuleInfo, RttiTypeCtor, Ordinal, MaybeNames, !GlobalData) :-
     StrType = builtin_type(builtin_type_string),
     Initializer = gen_init_array(
         gen_init_maybe(
-            mercury_type(StrType, ctor_cat_builtin(cat_builtin_string),
-                non_foreign_type(StrType)),
+            mercury_type(StrType, no, ctor_cat_builtin(cat_builtin_string)),
             gen_init_string),
         MaybeNames),
     RttiName = type_ctor_field_names(Ordinal),
@@ -978,54 +977,97 @@ gen_field_locns(_ModuleInfo, RttiTypeCtor, Ordinal, ArgInfos, HaveArgLocns,
     ( if
         some [ArgInfo] (
             list.member(ArgInfo, ArgInfos),
-            ArgInfo ^ du_arg_width \= full_word
+            ArgInfo ^ du_arg_pos_width \= apw_full(_, _)
         )
     then
         HaveArgLocns = yes,
         RttiName = type_ctor_field_locns(Ordinal),
         RttiId = ctor_rtti_id(RttiTypeCtor, RttiName),
-        list.map_foldl(gen_field_locn(RttiId), ArgInfos, ArgLocnInitializers,
-            -1, _Offset),
+        list.map(gen_field_locn(RttiId), ArgInfos, ArgLocnInitializers),
         Initializer = init_array(ArgLocnInitializers),
         rtti_id_and_init_to_defn(RttiId, Initializer, !GlobalData)
     else
         HaveArgLocns = no
     ).
 
-:- pred gen_field_locn(rtti_id::in, du_arg_info::in, mlds_initializer::out,
-    int::in, int::out) is det.
+:- pred gen_field_locn(rtti_id::in, du_arg_info::in, mlds_initializer::out)
+    is det.
 
-gen_field_locn(RttiId, ArgInfo, ArgLocnInitializer, PrevOffset,
-        NextPrevOffset) :-
-    ArgWidth = ArgInfo ^ du_arg_width,
+gen_field_locn(RttiId, ArgInfo, ArgLocnInitializer) :-
+    ArgPosWidth = ArgInfo ^ du_arg_pos_width,
+    % The meanings of the various special values of MR_arg_bits
+    % are documented next to the definition of the MR_DuArgLocn type
+    % in mercury_type_info.h.
     (
-        ArgWidth = full_word,
-        FieldOffset = PrevOffset + 1,
+        ArgPosWidth = apw_full(arg_only_offset(ArgOnlyOffset), _),
         Shift = 0,
-        Bits = 0,
-        NextPrevOffset = FieldOffset
+        % NumBits = 0 means the argument takes a full word.
+        NumBits = 0
     ;
-        ArgWidth = double_word,
-        FieldOffset = PrevOffset + 1,
+        ArgPosWidth = apw_double(arg_only_offset(ArgOnlyOffset), _,
+            DoubleWordKind),
         Shift = 0,
-        Bits = -1,
-        NextPrevOffset = FieldOffset + 1
+        % NumBits = -1, -2 and -3 mean the argument takes two words,
+        % containing a float, int64 and uint64 respectively.
+        (
+            DoubleWordKind = dw_float,
+            NumBits = -1
+        ;
+            DoubleWordKind = dw_int64,
+            NumBits = -2
+        ;
+            DoubleWordKind = dw_uint64,
+            NumBits = -3
+        )
     ;
-        ArgWidth = partial_word_first(Mask),
-        FieldOffset = PrevOffset + 1,
+        (
+            ArgPosWidth = apw_partial_first(arg_only_offset(ArgOnlyOffset),
+                _, arg_num_bits(NumBits0), _, Fill),
+            Shift = 0
+        ;
+            ArgPosWidth = apw_partial_shifted(arg_only_offset(ArgOnlyOffset),
+                _, arg_shift(Shift), arg_num_bits(NumBits0), _, Fill)
+        ),
+        % NumBits = -4 to -9 mean the argument takes part a word
+        % and contains an 8, 16 or 32 bit sized int or uint.
+        (
+            Fill = fill_enum,
+            NumBits = NumBits0
+        ;
+            Fill = fill_int8,
+            NumBits = -4
+        ;
+            Fill = fill_uint8,
+            NumBits = -5
+        ;
+            Fill = fill_int16,
+            NumBits = -6
+        ;
+            Fill = fill_uint16,
+            NumBits = -7
+        ;
+            Fill = fill_int32,
+            NumBits = -8
+        ;
+            Fill = fill_uint32,
+            NumBits = -9
+        )
+    ;
+        (
+            ArgPosWidth = apw_none_shifted(arg_only_offset(ArgOnlyOffset), _)
+        ;
+            ArgPosWidth = apw_none_nowhere,
+            ArgOnlyOffset = -1
+        ),
+        % NumBits = -10 means the argument is of a dummy type,
+        % and takes no space at all.
         Shift = 0,
-        int.log2(Mask + 1, Bits),
-        NextPrevOffset = FieldOffset
-    ;
-        ArgWidth = partial_word_shifted(Shift, Mask),
-        FieldOffset = PrevOffset,
-        int.log2(Mask + 1, Bits),
-        NextPrevOffset = FieldOffset
+        NumBits = -10
     ),
     ArgLocnInitializer = init_struct(mlds_rtti_type(item_type(RttiId)), [
-        gen_init_int(FieldOffset),
+        gen_init_int(ArgOnlyOffset),
         gen_init_int(Shift),
-        gen_init_int(Bits)
+        gen_init_int(NumBits)
     ]).
 
 %-----------------------------------------------------------------------------%
@@ -1222,7 +1264,7 @@ gen_init_cast_rtti_data(DestType, ModuleName, RttiData) = Initializer :-
     then
         % rtti_data_to_id/3 does not handle this case
         SrcType = mlds_native_int_type,
-        Initializer = init_obj(ml_unop(gen_cast(SrcType, DestType),
+        Initializer = init_obj(gen_cast(SrcType, DestType,
             ml_const(mlconst_int(VarNum))))
     else if
         RttiData = rtti_data_base_typeclass_info(TCName, InstanceModuleName,
@@ -1235,7 +1277,7 @@ gen_init_cast_rtti_data(DestType, ModuleName, RttiData) = Initializer :-
         RttiId = tc_rtti_id(TCName, type_class_base_typeclass_info(
             InstanceModuleName, InstanceString)),
         Rval = ml_const(mlconst_data_addr_rtti(MLDS_ModuleName, RttiId)),
-        Initializer = init_obj(ml_unop(gen_cast(SrcType, DestType), Rval))
+        Initializer = init_obj(gen_cast(SrcType, DestType, Rval))
     else
         rtti_data_to_id(RttiData, RttiId),
         Initializer = gen_init_cast_rtti_id(DestType, ModuleName, RttiId)
@@ -1243,9 +1285,9 @@ gen_init_cast_rtti_data(DestType, ModuleName, RttiData) = Initializer :-
 
     % Currently casts only store the destination type.
     %
-:- func gen_cast(mlds_type, mlds_type) = mlds_unary_op.
+:- func gen_cast(mlds_type, mlds_type, mlds_rval) = mlds_rval.
 
-gen_cast(_SrcType, DestType) = cast(DestType).
+gen_cast(_SrcType, DestType, SubRval) = ml_cast(DestType, SubRval).
 
     % Generate an MLDS initializer comprising just the rval
     % for a given rtti_id.
@@ -1283,7 +1325,7 @@ gen_init_tc_rtti_name(ModuleName, TCName, TCRttiName) =
 
 gen_init_cast_rtti_id(DestType, ModuleName, RttiId) = Initializer :-
     SrcType = mlds_rtti_type(item_type(RttiId)),
-    Initializer = init_obj(ml_unop(gen_cast(SrcType, DestType),
+    Initializer = init_obj(gen_cast(SrcType, DestType,
         gen_rtti_id(ModuleName, RttiId))).
 
     % Generate the MLDS rval for an rtti_id.
@@ -1511,7 +1553,7 @@ gen_wrapper_func_and_initializer(ModuleInfo, Target, NumExtra, RttiProcId,
 
         % The initializer for the wrapper is just the wrapper function's
         % address, converted to mlds_generic_type (by boxing).
-        Initializer = init_obj(ml_unop(box(WrapperFuncType), WrapperFuncRval))
+        Initializer = init_obj(ml_box(WrapperFuncType, WrapperFuncRval))
     ).
 
 :- func gen_init_proc_id(module_info, rtti_proc_label) = mlds_initializer.
@@ -1533,7 +1575,7 @@ gen_init_proc_id(ModuleInfo, RttiProcId) = Initializer :-
     % generic type because since the actual type for the procedure will
     % depend on how many type_info parameters it takes, which will depend
     % on the type's arity.
-    ProcAddrArg = ml_unop(box(mlds_func_type(Params)), ProcAddrRval),
+    ProcAddrArg = ml_box(mlds_func_type(Params), ProcAddrRval),
     Initializer = init_obj(ProcAddrArg).
 
 :- func gen_init_proc_id_from_univ(module_info, univ) =
@@ -1662,13 +1704,16 @@ add_rtti_defn_arcs_rval(DefnGlobalVarName, Rval, !Graph) :-
         Rval = ml_lval(Lval),
         add_rtti_defn_arcs_lval(DefnGlobalVarName, Lval, !Graph)
     ;
-        Rval = ml_mkword(_Tag, SubRvalA),
-        add_rtti_defn_arcs_rval(DefnGlobalVarName, SubRvalA, !Graph)
-    ;
         Rval = ml_const(Const),
         add_rtti_defn_arcs_const(DefnGlobalVarName, Const, !Graph)
     ;
-        Rval = ml_unop(_, SubRvalA),
+        ( Rval = ml_mkword(_Tag, SubRvalA)
+        ; Rval = ml_box(_, SubRvalA)
+        ; Rval = ml_unbox(_, SubRvalA)
+        ; Rval = ml_cast(_, SubRvalA)
+        ; Rval = ml_unop(_, SubRvalA)
+        ; Rval = ml_vector_common_row_addr(_, SubRvalA)
+        ),
         add_rtti_defn_arcs_rval(DefnGlobalVarName, SubRvalA, !Graph)
     ;
         Rval = ml_binop(_, SubRvalA, SubRvalB),
@@ -1678,14 +1723,10 @@ add_rtti_defn_arcs_rval(DefnGlobalVarName, Rval, !Graph) :-
         Rval = ml_mem_addr(SubLval),
         add_rtti_defn_arcs_lval(DefnGlobalVarName, SubLval, !Graph)
     ;
-        Rval = ml_scalar_common(_)
-    ;
-        Rval = ml_scalar_common_addr(_)
-    ;
-        Rval = ml_vector_common_row_addr(_, RowRval),
-        add_rtti_defn_arcs_rval(DefnGlobalVarName, RowRval, !Graph)
-    ;
-        Rval = ml_self(_)
+        ( Rval = ml_scalar_common(_)
+        ; Rval = ml_scalar_common_addr(_)
+        ; Rval = ml_self(_)
+        )
     ).
 
 :- pred add_rtti_defn_arcs_lval(mlds_global_var_name::in, mlds_lval::in,

@@ -197,6 +197,7 @@
     ;       inform_inferred
     ;       inform_inferred_types
     ;       inform_inferred_modes
+    ;       inform_suboptimal_packing
 
     % Verbosity options
     ;       verbose
@@ -469,22 +470,25 @@
 
     % Data representation compilation model options
     ;       tags
-    ;       num_tag_bits
+    ;       num_ptag_bits
     ;       bits_per_word
     ;       bytes_per_word
-            % The undocumented conf_low_tag_bits option is used by the `mmc'
-            % script to pass the default value for num_tag_bits assuming
+            % The undocumented conf_low_ptag_bits option is used by the `mmc'
+            % script to pass the default value for num_ptag_bits assuming
             % --tags low. The reason that `mmc' doesn't just pass a default
             % value for --num-tag-bits is that we want to be able to give an
             % error message if the user specifies `--tags high' and doesn't
             % specify `--num-tag-bits'.
 
-    ;       conf_low_tag_bits
+    ;       conf_low_ptag_bits
     ;       unboxed_float
     ;       unboxed_int64s
     ;       unboxed_no_tag_types
     ;       arg_pack_bits
     ;       allow_double_word_fields
+    ;       allow_double_word_ints      % XXX bootstrapping option
+    ;       allow_packing_dummies       % XXX bootstrapping option
+    ;       allow_packing_ints          % XXX bootstrapping option
     ;       sync_term_size % in words
 
     % LLDS back-end compilation model options
@@ -826,6 +830,7 @@
     %   - MLDS
     ;       optimize_tailcalls
     ;       optimize_initializations
+    ;       eliminate_unused_mlds_assigns
     ;       eliminate_local_vars
     ;       generate_trail_ops_inline
 
@@ -1205,7 +1210,8 @@ option_defaults_2(warning_option, [
     warn_state_var_shadowing            -   bool(yes),
     inform_inferred                     -   bool_special,
     inform_inferred_types               -   bool(yes),
-    inform_inferred_modes               -   bool(yes)
+    inform_inferred_modes               -   bool(yes),
+    inform_suboptimal_packing           -   bool(no)
 ]).
 option_defaults_2(verbosity_option, [
     % Verbosity Options
@@ -1425,9 +1431,9 @@ option_defaults_2(compilation_model_option, [
 
     % Data representation compilation model options
     tags                                -   string("low"),
-    num_tag_bits                        -   int(-1),
+    num_ptag_bits                        -   int(-1),
                                         % -1 is a special value which means
-                                        % use the value of conf_low_tag_bits
+                                        % use the value of conf_low_ptag_bits
                                         % instead
     bits_per_word                       -   int(32),
                                         % A good default for the current
@@ -1435,7 +1441,7 @@ option_defaults_2(compilation_model_option, [
     bytes_per_word                      -   int(4),
                                         % A good default for the current
                                         % generation of architectures.
-    conf_low_tag_bits                   -   int(2),
+    conf_low_ptag_bits                  -   int(2),
                                         % The `mmc' script will override the
                                         % above default with a value determined
                                         % at configuration time.
@@ -1446,6 +1452,9 @@ option_defaults_2(compilation_model_option, [
                                         % -1 is a special value which means use
                                         % all word bits for argument packing.
     allow_double_word_fields            -   bool(yes),
+    allow_double_word_ints              -   bool(no),
+    allow_packing_dummies               -   bool(no),
+    allow_packing_ints                  -   bool(no),
     sync_term_size                      -   int(8),
                                         % 8 is the size on linux (at the time
                                         % of writing) - will usually be
@@ -1720,6 +1729,7 @@ option_defaults_2(optimization_option, [
     % MLDS
     optimize_tailcalls                  -   bool(no),
     optimize_initializations            -   bool(no),
+    eliminate_unused_mlds_assigns       -   bool(yes),
     eliminate_local_vars                -   bool(no),
     generate_trail_ops_inline           -   bool(yes),
 
@@ -2083,7 +2093,9 @@ long_option("warn-target-code",         warn_target_code).
 long_option("warn-up-to-date",          warn_up_to_date).
 long_option("warn-stubs",               warn_stubs).
 long_option("warn-dead-procs",          warn_dead_procs).
+long_option("warn-dead-procedures",     warn_dead_procs).
 long_option("warn-dead-preds",          warn_dead_preds).
+long_option("warn-dead-predicates",     warn_dead_preds).
 long_option("warn-table-with-inline",   warn_table_with_inline).
 long_option("warn-non-term-special-preds", warn_non_term_special_preds).
 long_option("warn-known-bad-format-calls", warn_known_bad_format_calls).
@@ -2106,6 +2118,7 @@ long_option("warn-state-var-shadowing", warn_state_var_shadowing).
 long_option("inform-inferred",          inform_inferred).
 long_option("inform-inferred-types",    inform_inferred_types).
 long_option("inform-inferred-modes",    inform_inferred_modes).
+long_option("inform-suboptimal-packing",    inform_suboptimal_packing).
 
 % verbosity options
 long_option("verbose",                  verbose).
@@ -2381,15 +2394,20 @@ long_option("pregenerated-dist",    pregenerated_dist).
 long_option("single-prec-float",    single_prec_float).
 long_option("single-precision-float",   single_prec_float).
 long_option("tags",                 tags).
-long_option("num-tag-bits",         num_tag_bits).
+long_option("num-tag-bits",         num_ptag_bits). % for historical reasons
+long_option("num-ptag-bits",        num_ptag_bits).
 long_option("bits-per-word",        bits_per_word).
 long_option("bytes-per-word",       bytes_per_word).
-long_option("conf-low-tag-bits",    conf_low_tag_bits).
+long_option("conf-low-tag-bits",    conf_low_ptag_bits). % for historical ...
+long_option("conf-low-ptag-bits",   conf_low_ptag_bits).
 long_option("unboxed-float",        unboxed_float).
 long_option("unboxed-int64s",       unboxed_int64s).
 long_option("unboxed-no-tag-types", unboxed_no_tag_types).
 long_option("arg-pack-bits",        arg_pack_bits).
 long_option("allow-double-word-fields", allow_double_word_fields).
+long_option("allow-double-word-ints", allow_double_word_ints).
+long_option("allow-packing-dummies", allow_packing_dummies).
+long_option("allow-packing-ints",   allow_packing_ints).
 long_option("sync-term-size",       sync_term_size).
 long_option("highlevel-data",       highlevel_data).
 long_option("high-level-data",      highlevel_data).
@@ -2708,6 +2726,7 @@ long_option("optimize-tailcalls",   optimize_tailcalls).
 long_option("optimise-tailcalls",   optimize_tailcalls).
 long_option("optimize-initializations", optimize_initializations).
 long_option("optimise-initializations", optimize_initializations).
+long_option("eliminate-unused-mlds-assigns", eliminate_unused_mlds_assigns).
 long_option("eliminate-local-vars", eliminate_local_vars).
 long_option("generate-trail-ops-inline", generate_trail_ops_inline).
 
@@ -3336,7 +3355,8 @@ style_warning_options = [
     inform_ite_instead_of_switch,
     inform_incomplete_switch,
     warn_suspicious_foreign_procs,
-    warn_state_var_shadowing
+    warn_state_var_shadowing,
+    inform_suboptimal_packing
 ].
 
 :- func non_style_warning_options = list(option).
@@ -3917,7 +3937,10 @@ options_help_warning -->
         "--no-inform-inferred-types",
         "\tDo not generate messages about inferred types.",
         "--no-inform-inferred-modes",
-        "\tDo not generate messages about inferred modes."
+        "\tDo not generate messages about inferred modes.",
+        "--inform-suboptimal-packing",
+        "\tGenerate messages if the arguments of a data constructor",
+        "\tcould be packed more tightly if they were reordered."
     ]).
 
 :- pred options_help_verbosity(io::di, io::uo) is det.
@@ -5656,6 +5679,9 @@ options_help_mlds_mlds_optimization -->
         "\tLeave initializations of local variables as",
         "\tassignment statements, rather than converting such",
         "\tassignment statements into initializers.",
+% This is useful for developers only.
+%       "--eliminate-unused-mlds-assigns",
+%       "\tEliminate assignments to dead variables in the MLDS.",
         "--eliminate-local-vars",
         "\tEliminate local variables with known values, where possible,",
         "\tby replacing occurrences of such variables with their values.",

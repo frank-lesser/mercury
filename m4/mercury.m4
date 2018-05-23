@@ -179,6 +179,23 @@ AC_SUBST(ALL_LOCAL_C_LIB_DIR_MMC_OPTS)
 
 #-----------------------------------------------------------------------------#
 #
+# Check if a C expression is true at compile time.
+#
+
+AC_DEFUN([MERCURY_TRY_STATIC_ASSERT], [
+    AC_TRY_COMPILE(
+	[$1],
+	[
+	    struct mercury_static_assert {
+		int static_assert_expr : ( $2 ) ? 1 : -1;
+	    };
+	],
+	[$3],
+	[$4])
+])
+
+#-----------------------------------------------------------------------------#
+#
 # Check for readline and related header files and libraries
 #
 AC_DEFUN([MERCURY_CHECK_READLINE],
@@ -646,8 +663,19 @@ AC_SUBST([ERL])
 AC_DEFUN([MERCURY_GCC_VERSION], [
 AC_REQUIRE([AC_PROG_CC])
 
-mercury_cv_gcc_version=`$CC -dumpversion | tr . ' ' | {
-    read major minor patchlevel ignore
+# We expect that the major and minor version numbers will always be present.
+# MinGW-w64 may add a suffix "-win32" or "-posix" after the second or third
+# number that should be ignored.
+mercury_cv_gcc_version=`$CC -dumpversion | tr .- '  ' | {
+    read major minor third ignore
+    case $third in
+        [0-9]*)
+            patchlevel=$third
+            ;;
+        *)
+            patchlevel=
+            ;;
+    esac
     echo ${major:-u}_${minor:-u}_${patchlevel:-u}
     }`
 ])

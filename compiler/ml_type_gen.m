@@ -18,8 +18,6 @@
 % For discriminated unions, we create an MLDS base class type corresponding
 % to the HLDS type, and we also create MLDS derived class types corresponding
 % to each of the constructors which are defined from the base class type.
-% For constructors which are represented as the addresses of specially reserved
-% objects, we generate the static (one_copy) members for those objects.
 %
 %---------------------------------------------------------------------------%
 
@@ -149,7 +147,7 @@
     % specific representation. The target specific code generators may
     % further transform it.
     %
-:- pred ml_gen_exported_enums(module_info::in, mlds_exported_enums::out)
+:- pred ml_gen_exported_enums(module_info::in, list(mlds_exported_enum)::out)
     is det.
 
 %---------------------------------------------------------------------------%
@@ -231,9 +229,8 @@ ml_gen_hld_type_defn(ModuleInfo, Target, TypeCtor, TypeDefn, !Defns) :-
         ;
             MaybeRepn = yes(Repn)
         ),
-        Repn = du_type_repn(_TagValues, CtorRepns, _ConsCtorMap,
-            _CheaperTagTest, DuTypeKind, _MaybeDirectArgCtors),
-        % XXX We probably shouldn't ignore _ReservedAddr.
+        Repn = du_type_repn(CtorRepns, _ConsCtorMap, _CheaperTagTest,
+            DuTypeKind, _MaybeDirectArgCtors),
         ml_gen_equality_members(MaybeUserEqComp, MaybeEqualityMembers),
         (
             ( DuTypeKind = du_type_kind_mercury_enum
@@ -336,60 +333,16 @@ ml_gen_hld_enum_value_member(Context) =
 
 ml_gen_hld_enum_constant(Context, MLDS_Type, CtorRepn) = FieldVarDefn :-
     % Figure out the value of this enumeration constant.
-    CtorRepn = ctor_repn(_MaybeExistConstraints, Name, TagVal, _Args,
-        Arity, _Ctxt),
-    (
-        TagVal = int_tag(IntTag),
-        (
-            IntTag = int_tag_int(Int),
-            ConstValue = ml_const(mlconst_enum(Int, MLDS_Type))
-        ;
-            ( IntTag = int_tag_uint(_)
-            ; IntTag = int_tag_int8(_)
-            ; IntTag = int_tag_uint8(_)
-            ; IntTag = int_tag_int16(_)
-            ; IntTag = int_tag_uint16(_)
-            ; IntTag = int_tag_int32(_)
-            ; IntTag = int_tag_uint32(_)
-            ; IntTag = int_tag_int64(_)
-            ; IntTag = int_tag_uint64(_)
-            ),
-            unexpected($pred, "enum constant needs int tag")
-        )
-    ;
-        TagVal = foreign_tag(ForeignLang, ForeignTagValue),
-        ConstValue = ml_const(
-            mlconst_foreign(ForeignLang, ForeignTagValue, MLDS_Type))
-    ;
-        ( TagVal = string_tag(_)
-        ; TagVal = float_tag(_)
-        ; TagVal = closure_tag(_, _, _)
-        ; TagVal = type_ctor_info_tag(_, _, _)
-        ; TagVal = base_typeclass_info_tag(_, _, _)
-        ; TagVal = type_info_const_tag(_)
-        ; TagVal = typeclass_info_const_tag(_)
-        ; TagVal = ground_term_const_tag(_, _)
-        ; TagVal = tabling_info_tag(_, _)
-        ; TagVal = deep_profiling_proc_layout_tag(_, _)
-        ; TagVal = table_io_entry_tag(_, _)
-        ; TagVal = single_functor_tag
-        ; TagVal = unshared_tag(_)
-        ; TagVal = direct_arg_tag(_)
-        ; TagVal = shared_remote_tag(_, _)
-        ; TagVal = shared_local_tag(_, _)
-        ; TagVal = no_tag
-        ),
-        unexpected($pred, "enum constant needs int or foreign tag")
-    ),
-    % Sanity check.
+    CtorRepn = ctor_repn(_, QualSymName, ConsTag, _, Arity, _),
     expect(unify(Arity, 0), $pred, "arity != []"),
+    enum_cons_tag_to_ml_const_rval(MLDS_Type, ConsTag, ConstRval),
 
     % Generate an MLDS definition for this enumeration constant.
-    UnqualifiedName = unqualify_name(Name),
-    VarName = fvn_enum_const(UnqualifiedName),
+    Name = unqualify_name(QualSymName),
+    VarName = fvn_enum_const(Name),
     FieldVarDefn = mlds_field_var_defn(VarName, Context,
         ml_gen_enum_constant_data_decl_flags, mlds_native_int_type,
-        init_obj(ConstValue), gc_no_stmt).
+        init_obj(ConstRval), gc_no_stmt).
 
 %---------------------------------------------------------------------------%
 %
@@ -571,7 +524,7 @@ ctors_with_and_without_secondary_tag_loop([],
 ctors_with_and_without_secondary_tag_loop([CtorRepn | CtorRepns],
         !NumWith, !NumWithout) :-
     TagVal = CtorRepn ^ cr_tag,
-    MaybeSecTag = get_secondary_tag(TagVal),
+    MaybeSecTag = get_maybe_secondary_tag(TagVal),
     (
         MaybeSecTag = yes(_),
         !:NumWith = !.NumWith + 1
@@ -590,7 +543,7 @@ ctors_with_and_without_secondary_tag_loop([CtorRepn | CtorRepns],
 
 ml_gen_hld_tag_constant(Context, CtorRepn) = Defns :-
     TagVal = CtorRepn ^ cr_tag,
-    MaybeSecondaryTag = get_secondary_tag(TagVal),
+    MaybeSecondaryTag = get_maybe_secondary_tag(TagVal),
     (
         MaybeSecondaryTag = yes(SecondaryTag),
         % Generate an MLDS definition for this secondary tag constant.
@@ -710,11 +663,12 @@ ml_gen_hld_du_ctor_member(ModuleInfo, Target, BaseClassId, BaseClassQualifier,
         ArgNum2 = ArgNum0
     ;
         MaybeExistConstraints = exist_constraints(ExistConstraints),
-        ExistConstraints =
-            cons_exist_constraints(ExistQTVars, Constraints),
+        ExistConstraints = cons_exist_constraints(ExistQTVars, Constraints,
+            UnconstrainedTVarsEC, _ConstrainedTVars),
         constraint_list_get_tvars(Constraints, ConstrainedTVars),
-        list.delete_elems(ExistQTVars, ConstrainedTVars,
-            UnconstrainedTVars),
+        list.delete_elems(ExistQTVars, ConstrainedTVars, UnconstrainedTVars),
+        expect(unify(UnconstrainedTVars, UnconstrainedTVarsEC), $pred,
+            "UnconstrainedTVars != UnconstrainedTVarsEC"),
         list.map2_foldl(
             ml_gen_hld_du_ctor_type_info_field(ModuleInfo, Context),
             UnconstrainedTVars, TypeInfoFields, TypeInfoFieldInfos,
@@ -737,7 +691,7 @@ ml_gen_hld_du_ctor_member(ModuleInfo, Target, BaseClassId, BaseClassQualifier,
 
     % Generate a constructor function to initialize the fields, if needed
     % (not all back-ends use constructor functions).
-    MaybeSecTagVal = get_secondary_tag(TagVal),
+    MaybeSecTagVal = get_maybe_secondary_tag(TagVal),
     UsesConstructors = ml_target_uses_constructors(Target),
     UsesBaseClass = ml_tag_uses_base_class(TagVal),
     (
@@ -920,7 +874,7 @@ gen_init_tag(Target, CtorClassId, SecondaryTagClassId, TagVal, Context)
 ml_gen_hld_du_ctor_typeclass_info_field(ModuleInfo, Context, Constraint,
         Defn, FieldInfo, !ArgNum) :-
     polymorphism.build_typeclass_info_type(Constraint, Type),
-    ml_gen_hld_du_ctor_field_gen(ModuleInfo, Context, no, Type, full_word,
+    ml_gen_hld_du_ctor_field_gen(ModuleInfo, Context, no, Type, aw_full_word,
         Defn, FieldInfo, !ArgNum).
 
 :- pred ml_gen_hld_du_ctor_type_info_field(module_info::in,
@@ -934,7 +888,7 @@ ml_gen_hld_du_ctor_type_info_field(ModuleInfo, Context, TypeVar,
     % and won't be used in any other way.
     Kind = kind_star,
     polymorphism.build_type_info_type(type_variable(TypeVar, Kind), Type),
-    ml_gen_hld_du_ctor_field_gen(ModuleInfo, Context, no, Type, full_word,
+    ml_gen_hld_du_ctor_field_gen(ModuleInfo, Context, no, Type, aw_full_word,
         Defn, FieldInfo, !ArgNum).
 
 :- pred ml_gen_hld_du_ctor_field(module_info::in, prog_context::in,
@@ -943,7 +897,8 @@ ml_gen_hld_du_ctor_type_info_field(ModuleInfo, Context, TypeVar,
 
 ml_gen_hld_du_ctor_field(ModuleInfo, Context, ArgRepn, Defn, FieldInfo,
         !ArgNum) :-
-    ArgRepn = ctor_arg_repn(MaybeFieldName, Type, Width, _Context),
+    ArgRepn = ctor_arg_repn(MaybeFieldName, Type, PosWidth, _Context),
+    Width = arg_pos_width_to_width_only(PosWidth),
     ml_gen_hld_du_ctor_field_gen(ModuleInfo, Context, MaybeFieldName,
         Type, Width, Defn, FieldInfo, !ArgNum).
 
@@ -1045,10 +1000,9 @@ ml_gen_enum_constant_data_decl_flags =
 
 %---------------------------------------------------------------------------%
 
-% A constructor is represented using the base class rather than a derived
-% class if there is only a single functor, or if there is a single
-% functor and some constants represented using reserved addresses.
 ml_tag_uses_base_class(Tag) = UsesBaseClass :-
+    % A constructor is represented using the base class (rather than
+    % a derived class) if there is only a single functor.
     (
         Tag = single_functor_tag,
         UsesBaseClass = tag_uses_base_class
@@ -1070,9 +1024,10 @@ ml_tag_uses_base_class(Tag) = UsesBaseClass :-
         ; Tag = table_io_entry_tag(_, _)
         ; Tag = unshared_tag(_)
         ; Tag = direct_arg_tag(_)
-        ; Tag = shared_remote_tag(_, _)
+        ; Tag = shared_remote_tag(_, _, _)
         ; Tag = shared_local_tag(_, _)
         ; Tag = no_tag
+        ; Tag = dummy_tag
         ),
         UsesBaseClass = tag_does_not_use_base_class
     ).
@@ -1080,6 +1035,8 @@ ml_tag_uses_base_class(Tag) = UsesBaseClass :-
 ml_target_uses_constructors(ml_target_c) = no.
 ml_target_uses_constructors(ml_target_csharp) = yes.
 ml_target_uses_constructors(ml_target_java) = yes.
+% NOTE The information here is repeated in target_uses_constructors in
+% du_type_layout.m; any changes here will require corresponding changes there.
 
 %---------------------------------------------------------------------------%
 
@@ -1091,33 +1048,41 @@ ml_gen_exported_enums(ModuleInfo, MLDS_ExportedEnums) :-
     mlds_exported_enum::out) is det.
 
 ml_gen_exported_enum(ExportedEnumInfo, MLDS_ExportedEnum) :-
-    ExportedEnumInfo = exported_enum_info(Lang, Context, TypeCtor, Mapping,
-        Ctors, TagValues),
+    ExportedEnumInfo = exported_enum_info(TypeCtor, CtorRepns, Lang,
+        Mapping, Context),
     ml_gen_type_name(TypeCtor, QualifiedClassName, MLDS_ClassArity),
     MLDS_Type = mlds_class_type(
         mlds_class_id(QualifiedClassName, MLDS_ClassArity, mlds_enum)),
-    list.foldl(
-        generate_foreign_enum_constant(TypeCtor, Mapping, TagValues,
-            MLDS_Type),
-        Ctors, [], ExportConstants),
+    list.map(
+        generate_foreign_enum_constant(Mapping, MLDS_Type),
+        CtorRepns, ExportConstants),
     MLDS_ExportedEnum = mlds_exported_enum(Lang, Context, TypeCtor,
         ExportConstants).
 
-:- pred generate_foreign_enum_constant(type_ctor::in,
-    map(sym_name, string)::in, cons_id_to_tag_map::in, mlds_type::in,
-    constructor::in,
-    list(mlds_exported_enum_constant)::in,
-    list(mlds_exported_enum_constant)::out) is det.
+:- pred generate_foreign_enum_constant(map(string, string)::in,
+    mlds_type::in, constructor_repn::in, mlds_exported_enum_constant::out)
+    is det.
 
-generate_foreign_enum_constant(TypeCtor, Mapping, TagValues, MLDS_Type, Ctor,
-        !ExportConstants) :-
-    Ctor = ctor(_, QualName, _Args, Arity, _),
-    map.lookup(TagValues, cons(QualName, Arity, TypeCtor), TagVal),
+generate_foreign_enum_constant(Mapping, MLDS_Type, CtorRepn,
+        ExportConstant) :-
+    CtorRepn = ctor_repn(_, SymName, ConsTag, _, Arity, _),
+    expect(unify(Arity, 0), $pred, "enum constant arity != 0"),
+    enum_cons_tag_to_ml_const_rval(MLDS_Type, ConsTag, ConstRval),
+
+    Name = unqualify_name(SymName),
+    map.lookup(Mapping, Name, ForeignName),
+    ExportConstant = mlds_exported_enum_constant(ForeignName,
+        init_obj(ConstRval)).
+
+:- pred enum_cons_tag_to_ml_const_rval(mlds_type::in, cons_tag::in,
+    mlds_rval::out) is det.
+
+enum_cons_tag_to_ml_const_rval(MLDS_Type, ConsTag, ConstRval) :-
     (
-        TagVal = int_tag(IntTag),
+        ConsTag = int_tag(IntTag),
         (
             IntTag = int_tag_int(Int),
-            ConstValue = ml_const(mlconst_enum(Int, MLDS_Type))
+            ConstRval = ml_const(mlconst_enum(Int, MLDS_Type))
         ;
             ( IntTag = int_tag_uint(_)
             ; IntTag = int_tag_int8(_)
@@ -1129,42 +1094,35 @@ generate_foreign_enum_constant(TypeCtor, Mapping, TagValues, MLDS_Type, Ctor,
             ; IntTag = int_tag_int64(_)
             ; IntTag = int_tag_uint64(_)
             ),
-            unexpected($pred,
-                "enum constant requires an int or foreign tag")
+            unexpected($pred, "enum constant requires an int or foreign tag")
         )
     ;
-        TagVal = foreign_tag(Lang, String),
-        ConstValue = ml_const(mlconst_foreign(Lang, String, MLDS_Type))
+        ConsTag = foreign_tag(Lang, String),
+        ConstRval = ml_const(mlconst_foreign(Lang, String, MLDS_Type))
     ;
-        ( TagVal = string_tag(_)
-        ; TagVal = float_tag(_)
-        ; TagVal = closure_tag(_, _, _)
-        ; TagVal = type_ctor_info_tag(_, _, _)
-        ; TagVal = base_typeclass_info_tag(_, _, _)
-        ; TagVal = type_info_const_tag(_)
-        ; TagVal = typeclass_info_const_tag(_)
-        ; TagVal = ground_term_const_tag(_, _)
-        ; TagVal = tabling_info_tag(_, _)
-        ; TagVal = deep_profiling_proc_layout_tag(_, _)
-        ; TagVal = table_io_entry_tag(_, _)
-        ; TagVal = single_functor_tag
-        ; TagVal = unshared_tag(_)
-        ; TagVal = direct_arg_tag(_)
-        ; TagVal = shared_remote_tag(_, _)
-        ; TagVal = shared_local_tag(_, _)
-        ; TagVal = no_tag
+        ConsTag = dummy_tag,
+        ConstRval = ml_const(mlconst_enum(0, MLDS_Type))
+    ;
+        ( ConsTag = string_tag(_)
+        ; ConsTag = float_tag(_)
+        ; ConsTag = closure_tag(_, _, _)
+        ; ConsTag = type_ctor_info_tag(_, _, _)
+        ; ConsTag = base_typeclass_info_tag(_, _, _)
+        ; ConsTag = type_info_const_tag(_)
+        ; ConsTag = typeclass_info_const_tag(_)
+        ; ConsTag = ground_term_const_tag(_, _)
+        ; ConsTag = tabling_info_tag(_, _)
+        ; ConsTag = deep_profiling_proc_layout_tag(_, _)
+        ; ConsTag = table_io_entry_tag(_, _)
+        ; ConsTag = single_functor_tag
+        ; ConsTag = unshared_tag(_)
+        ; ConsTag = direct_arg_tag(_)
+        ; ConsTag = shared_remote_tag(_, _, _)
+        ; ConsTag = shared_local_tag(_, _)
+        ; ConsTag = no_tag
         ),
-        unexpected($pred,
-            "enum constant requires an int or foreign tag")
-    ),
-    % Sanity check.
-    expect(unify(Arity, 0), $pred, "enum constant arity != 0"),
-    UnqualName = unqualify_name(QualName),
-    UnqualSymName = unqualified(UnqualName),
-    map.lookup(Mapping, UnqualSymName, ForeignName),
-    ExportConstant = mlds_exported_enum_constant(ForeignName,
-        init_obj(ConstValue)),
-    !:ExportConstants = [ExportConstant | !.ExportConstants].
+        unexpected($pred, "enum constant requires an int or foreign tag")
+    ).
 
 %---------------------------------------------------------------------------%
 :- end_module ml_backend.ml_type_gen.

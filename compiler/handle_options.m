@@ -724,10 +724,11 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
 
     % --pregenerated-dist sets options so that the pre-generated C source
     % distribution can be compiled equally on 32-bit and 64-bit platforms.
+    % Any changes here may require changes in runtime/mercury_conf_param.h.
     globals.lookup_bool_option(!.Globals, pregenerated_dist, PregeneratedDist),
     (
         PregeneratedDist = yes,
-        globals.set_option(num_tag_bits, int(2), !Globals),
+        globals.set_option(num_ptag_bits, int(2), !Globals),
         globals.set_option(arg_pack_bits, int(32), !Globals),
         globals.set_option(unboxed_float, bool(no), !Globals),
         globals.set_option(unboxed_int64s, bool(no), !Globals),
@@ -740,12 +741,12 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
     % --tags none implies --num-tag-bits 0.
     (
         TagsMethod0 = tags_none,
-        NumTagBits0 = 0
+        NumPtagBits0 = 0
     ;
         ( TagsMethod0 = tags_low
         ; TagsMethod0 = tags_high
         ),
-        globals.lookup_int_option(!.Globals, num_tag_bits, NumTagBits0)
+        globals.lookup_int_option(!.Globals, num_ptag_bits, NumPtagBits0)
     ),
 
     % If --tags low but --num-tag-bits is not specified,
@@ -754,29 +755,29 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
     % using the deliberately undocumented --conf-low-tag-bits option.)
     ( if
         TagsMethod0 = tags_low,
-        NumTagBits0 = -1
+        NumPtagBits0 = -1
     then
-        globals.lookup_int_option(!.Globals, conf_low_tag_bits, NumTagBits1)
+        globals.lookup_int_option(!.Globals, conf_low_ptag_bits, NumPtagBits1)
     else
-        NumTagBits1 = NumTagBits0
+        NumPtagBits1 = NumPtagBits0
     ),
 
     % If --num-tag-bits is negative (which may or may not be its default
     % value of -1), issue a warning and assume --num-tag-bits 0.
-    ( if NumTagBits1 < 0 then
-        NumTagBits = 0,
-        NumTagBitsSpec =
+    ( if NumPtagBits1 < 0 then
+        NumPtagBits = 0,
+        NumPtagBitsSpec =
             [words("Warning: the value of the"), quote("--num-tag-bits"),
             words("option is either unspecified or invalid."), nl,
             words("Using"), quote("--num-tag-bits 0"), suffix(","),
             words("which disables tags."), nl],
-        add_warning(phase_options, NumTagBitsSpec, !Specs)
+        add_warning(phase_options, NumPtagBitsSpec, !Specs)
     else
-        NumTagBits = NumTagBits1
+        NumPtagBits = NumPtagBits1
     ),
 
-    globals.set_option(num_tag_bits, int(NumTagBits), !Globals),
-    ( if NumTagBits = 0 then
+    globals.set_option(num_ptag_bits, int(NumPtagBits), !Globals),
+    ( if NumPtagBits = 0 then
         TagsMethod = tags_none,
         globals.set_tags_method(TagsMethod, !Globals)
     else
@@ -897,7 +898,7 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         globals.set_option(unboxed_int64s, bool(yes), !Globals),
         globals.set_option(nondet_copy_out, bool(yes), !Globals),
         globals.set_option(det_copy_out, bool(yes), !Globals),
-        globals.set_option(num_tag_bits, int(0), !Globals),
+        globals.set_option(num_ptag_bits, int(0), !Globals),
         globals.set_option(unboxed_no_tag_types, bool(no), !Globals),
         globals.set_option(put_nondet_env_on_heap, bool(yes), !Globals),
         globals.set_option(pretest_equality_cast_pointers, bool(yes),
@@ -1343,14 +1344,17 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
     ),
 
     % Argument packing only works on C back-ends with low-level data.
-    % In the future, we may want to use C bit-field syntax for high-level data.
-    % For other back-ends, any RTTI code will need to be updated to cope with
-    % packed arguments.
-    %
-    % Only C targets may store a constructor argument across two words.
-    option_implies(highlevel_data, arg_pack_bits, int(0), !Globals),
-    (
+    % In the future, we may want to use bit-field syntax on C backends
+    % with high-level data. For the other target languages, implementing
+    % argument packing will require not just a lot of work on RTTI, but also
+    % generalizing field addressing, to allow both single fields and
+    % a group of adjacent fields packed into a single word to be
+    % addressed via a mechanism other than an argument's name.
+    globals.lookup_bool_option(!.Globals, highlevel_data, HighLevelData),
+    ( if
         Target = target_c,
+        HighLevelData = no
+    then
         globals.lookup_int_option(!.Globals, arg_pack_bits, ArgPackBits0),
         globals.lookup_int_option(!.Globals, bits_per_word, BitsPerWord),
         % If --arg-pack-bits is negative then it means use all word bits.
@@ -1372,13 +1376,18 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
             ArgPackBits = ArgPackBits0
         ),
         globals.set_option(arg_pack_bits, int(ArgPackBits), !Globals)
-    ;
-        ( Target = target_csharp
-        ; Target = target_java
-        ; Target = target_erlang
-        ),
+        % Leave the value of num_ptag_bits as set above.
+        % Leave the value of allow_double_word_fields as set by the user.
+        % Leave the value of allow_packing_dummies as set by the user.
+        % Leave the value of allow_packing_ints as set by the user.
+    else
         globals.set_option(arg_pack_bits, int(0), !Globals),
-        globals.set_option(allow_double_word_fields, bool(no), !Globals)
+        % Leave the value of num_ptag_bits alone. We have set it to zero above
+        % for the C# and Java backends, and the C backend with high level data
+        % depends on it *not* being set to zero.
+        globals.set_option(allow_double_word_fields, bool(no), !Globals),
+        globals.set_option(allow_packing_dummies, bool(no), !Globals),
+        globals.set_option(allow_packing_ints, bool(no), !Globals)
     ),
 
     % We assume that single-precision floats do not need to be boxed.
@@ -1637,6 +1646,10 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         globals.set_option(optimize_constructor_last_call, bool(no), !Globals),
         % Term size profiling breaks the assumption that even word offsets from
         % the start of the cell are double-word aligned memory addresses.
+        %
+        % XXX Actually, we do not (or should not) make that assumption as it
+        % would also be violated by memory attribution profiling which also
+        % allocates an extra word at the start of a cell.
         globals.set_option(allow_double_word_fields, bool(no), !Globals),
         (
             HighLevelCode = yes,
@@ -2278,7 +2291,7 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         ( TagsMethod = tags_low
         ; TagsMethod = tags_high
         ),
-        NumTagBits >= 2
+        NumPtagBits >= 2
     then
         globals.set_option(can_compare_constants_as_ints, bool(yes), !Globals)
     else
@@ -2554,7 +2567,7 @@ raw_lookup_bool_option(OptionTable, Option, BoolValue) :-
         BoolValue = BoolValuePrime
     else
         OptionStr = string.string(Option),
-        unexpected($module, $pred, OptionStr ++ "is not a bool")
+        unexpected($pred, OptionStr ++ "is not a bool")
     ).
 
 :- pred raw_lookup_int_option(option_table::in, option::in, int::out) is det.
@@ -2565,7 +2578,7 @@ raw_lookup_int_option(OptionTable, Option, IntValue) :-
         IntValue = IntValuePrime
     else
         OptionStr = string.string(Option),
-        unexpected($module, $pred, OptionStr ++ "is not an int")
+        unexpected($pred, OptionStr ++ "is not an int")
     ).
 
 :- pred raw_lookup_string_option(option_table::in, option::in,
@@ -2577,7 +2590,7 @@ raw_lookup_string_option(OptionTable, Option, StringValue) :-
         StringValue = StringValuePrime
     else
         OptionStr = string.string(Option),
-        unexpected($module, $pred, OptionStr ++ "is not a string")
+        unexpected($pred, OptionStr ++ "is not a string")
     ).
 
 :- pred raw_lookup_accumulating_option(option_table::in, option::in,
@@ -2589,7 +2602,7 @@ raw_lookup_accumulating_option(OptionTable, Option, AccumulatingValue) :-
         AccumulatingValue = AccumulatingValuePrime
     else
         OptionStr = string.string(Option),
-        unexpected($module, $pred, OptionStr ++ "is not accumulating")
+        unexpected($pred, OptionStr ++ "is not accumulating")
     ).
 
 %---------------------------------------------------------------------------%

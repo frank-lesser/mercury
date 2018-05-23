@@ -379,7 +379,7 @@
             % Restore maxfr from the saved copy in the given lval. Assumes the
             % lval was saved with save_maxfr.
 
-    ;       incr_hp(lval, maybe(tag), maybe(int), rval, maybe(alloc_site_id),
+    ;       incr_hp(lval, maybe(ptag), maybe(int), rval, maybe(alloc_site_id),
                 may_use_atomic_alloc, maybe(rval), llds_reuse)
             % incr_hp(Target, MaybeTag, MaybeOffset, SizeRval, MaybeAllocId,
             %   MayUseAtomicAlloc, MaybeRegionId, MaybeReuse)
@@ -1126,13 +1126,14 @@
 
     % Values on the heap.
 
-    ;       field(maybe(tag), rval, rval)
-            % field(Tag, Address, FieldNum) selects a field of a compound term.
-            % Address is a tagged pointer to a cell on the heap; the offset
-            % into the cell is FieldNum words. If Tag is yes, the arg gives
-            % the value of the tag; if it is no, the tag bits will have to be
-            % masked off. The value of the tag should be given if it is known,
-            % since this will lead to faster code.
+    ;       field(maybe(ptag), rval, rval)
+            % field(MaybePtag, Address, FieldNum) selects one field of a
+            % compound term. Address is a tagged pointer to a cell on the heap;
+            % the offset into the cell is FieldNum words. If MaybePtag is yes,
+            % its argument gives the value of the primary tag to be subtracted
+            % from Address; if it is no, the primary tag bits will have to be
+            % masked off. The value of the primary tag should be given
+            % if it is known, since this will lead to faster code.
 
     % Values somewhere in memory.
 
@@ -1169,13 +1170,15 @@
             % should not be present in the LLDS at any stage after code
             % generation.
 
-    ;       mkword(tag, rval)
-            % Given a pointer and a tag, mkword returns a tagged pointer.
+    ;       mkword(ptag, rval)
+            % Given a pointer and a ptag, mkword returns a tagged pointer.
 
-    ;       mkword_hole(tag)
+    ;       mkword_hole(ptag)
             % Make a tagged pointer to an address which is not yet known.
 
     ;       const(rval_const)
+
+    ;       cast(llds_type, rval)
 
     ;       unop(unary_op, rval)
 
@@ -1192,9 +1195,9 @@
     ;       framevar_ref(rval)
             % Stack slot number.
 
-    ;       heap_ref(rval, maybe(int), rval).
-            % The cell pointer, the tag to subtract (if unknown, all the tag
-            % bits must be masked off), and the field number.
+    ;       heap_ref(rval, maybe(ptag), rval).
+            % The cell pointer, the ptag to subtract (if unknown, all the
+            % primary tag bits must be masked off), and the field number.
 
 :- type c_global_var_ref
     --->    env_var_ref(string).
@@ -1340,10 +1343,18 @@
             % visible regular register input arguments, and zero visible float
             % register input arguments.
 
-    % A tag (used in mkword, create and field expressions and in incr_hp
-    % instructions) is a small integer.
+    % Each function symbol of this type corresponds to one of the C types
+    % {int,uint}_least{8,16,32}.
     %
-:- type tag ==  int.
+    % Values of these types are intended for use in static data declarations,
+    % not for data that gets stored in registers, stack slots etc.
+:- type int_least_type
+    --->    int_least8
+    ;       uint_least8
+    ;       int_least16
+    ;       uint_least16
+    ;       int_least32
+    ;       uint_least32.
 
     % We categorize the data types used in the LLDS into a small number of
     % categories, for purposes such as choosing the right sort of register
@@ -1353,38 +1364,10 @@
     --->    lt_bool
             % A boolean value represented using the C type `MR_Integer'.
 
-    ;       lt_int_least8
-            % A signed value that fits that contains at least eight bits,
-            % represented using the C type MR_int_least8_t. Intended for use
-            % in static data declarations, not for data that gets stored in
-            % registers, stack slots etc.
-
-    ;       lt_uint_least8
-            % An unsigned version of int_least8, represented using the C type
-            % MR_uint_least8_t.
-
-    ;       lt_int_least16
-            % A signed value that fits that contains at least sixteen bits,
-            % represented using the C type MR_int_least16_t. Intended for use
-            % in static data declarations, not for data that gets stored in
-            % registers, stack slots etc.
-
-    ;       lt_uint_least16
-            % An unsigned version of int_least16, represented using the C type
-            % MR_uint_least16_t.
-
-    ;       lt_int_least32
-            % A signed value that fits that contains at least 32 bits,
-            % represented using the C type MR_int_least32_t. Intended for use
-            % in static data declarations, not for data that gets stored in
-            % registers, stack slots etc.
-
-    ;       lt_uint_least32
-            % An unsigned version of intleast_32, represented using the C type
-            % uint_least32_t.
+    ;       lt_int_least(int_least_type)
+            % As documented above.
 
     ;       lt_int(int_type)
-
             % A Mercury `int', represented in C as a value of type `MR_Integer'
             % (which is a signed integral type of the same size as a pointer).
             % Something whose C type is `MR_Unsigned' (the unsigned equivalent
@@ -1424,12 +1407,15 @@
             % Fill two words of a cell with the given rval, which must be a
             % double precision float.
 
-    ;       cell_arg_skip
-            % Leave a single word of a cell unfilled.
+    ;       cell_arg_skip_one_word
+    ;       cell_arg_skip_two_words
+            % Leave one or two words of a cell unfilled.
 
-    ;       cell_arg_take_addr(prog_var, maybe(rval)).
-            % Take the address of a field. If the second argument is
-            % `yes(Rval)' then the field is set to Rval beforehand.
+    ;       cell_arg_take_addr_one_word(prog_var, maybe(rval))
+    ;       cell_arg_take_addr_two_words(prog_var, maybe({rval, rval})).
+            % Take the address of a one- or two-word field.
+            % If the second argument is `yes(Rval/Rvals)',
+            % then set the field to Rval/Rvals beforehand.
 
 :- type completeness
     --->    complete
@@ -1553,9 +1539,9 @@ typed_rvals_project_types([typed_rval(_Rval, Type) | TypedRvals]) =
 
 build_typed_rvals([], [], []).
 build_typed_rvals([_|_], [], _) :-
-    unexpected($module, $pred, "length mismatch").
+    unexpected($pred, "length mismatch").
 build_typed_rvals([], [_|_], _) :-
-    unexpected($module, $pred, "length mismatch").
+    unexpected($pred, "length mismatch").
 build_typed_rvals([Rval | Rvals], [Type | Types], [TypedRval | TypedRvals]) :-
     TypedRval = typed_rval(Rval, Type),
     build_typed_rvals(Rvals, Types, TypedRvals).
@@ -1608,7 +1594,7 @@ abs_locn_to_lval_or_any_reg(abs_framevar(N)) =
     loa_lval(stack_slot_to_lval(nondet_slot(N))).
 
 abs_locn_to_lval(any_reg) = _ :-
-    unexpected($module, $pred, "any_reg").
+    unexpected($pred, "any_reg").
 abs_locn_to_lval(abs_reg(Type, N)) = reg(Type, N).
 abs_locn_to_lval(abs_stackvar(N, Width)) =
     stack_slot_to_lval(det_slot(N, Width)).
@@ -1641,7 +1627,7 @@ break_up_local_label(Label, ProcLabel, LabelNum) :-
         Label = internal_label(LabelNum, ProcLabel)
     ;
         Label = entry_label(_, _),
-        unexpected($module, $pred, "entry label")
+        unexpected($pred, "entry label")
     ).
 
 lval_type(reg(RegType, _), Type) :-
@@ -1665,14 +1651,14 @@ lval_type(succfr_slot(_), lt_data_ptr).
 lval_type(prevfr_slot(_), lt_data_ptr).
 lval_type(field(_, _, _), lt_word).
 lval_type(lvar(_), _) :-
-    unexpected($module, $pred, "lvar").
+    unexpected($pred, "lvar").
 lval_type(mem_ref(_), lt_word).
 lval_type(global_var_ref(_), lt_word).
 
 rval_type(lval(Lval), Type) :-
     lval_type(Lval, Type).
 rval_type(var(_), _) :-
-    unexpected($module, $pred, "var").
+    unexpected($pred, "var").
     %
     % Note that mkword and data_addr consts must be of type data_ptr,
     % not of type word, to ensure that static consts containing them
@@ -1688,6 +1674,7 @@ rval_type(mkword(_, _), lt_data_ptr).
 rval_type(mkword_hole(_), lt_data_ptr).
 rval_type(const(Const), Type) :-
     const_type(Const, Type).
+rval_type(cast(Type, _), Type).
 rval_type(unop(UnOp, _), Type) :-
     unop_return_type(UnOp, Type).
 rval_type(binop(BinOp, _, _), Type) :-
@@ -1727,6 +1714,12 @@ unop_return_type(hash_string3, lt_int(int_type_int)).
 unop_return_type(hash_string4, lt_int(int_type_int)).
 unop_return_type(hash_string5, lt_int(int_type_int)).
 unop_return_type(hash_string6, lt_int(int_type_int)).
+unop_return_type(dword_float_get_word0,  lt_word).
+unop_return_type(dword_float_get_word1,  lt_word).
+unop_return_type(dword_int64_get_word0,  lt_word).
+unop_return_type(dword_int64_get_word1,  lt_word).
+unop_return_type(dword_uint64_get_word0, lt_word).
+unop_return_type(dword_uint64_get_word1, lt_word).
 
 unop_arg_type(mktag, lt_word).
 unop_arg_type(tag, lt_word).
@@ -1742,6 +1735,12 @@ unop_arg_type(hash_string3, lt_string).
 unop_arg_type(hash_string4, lt_string).
 unop_arg_type(hash_string5, lt_string).
 unop_arg_type(hash_string6, lt_string).
+unop_arg_type(dword_float_get_word0,  lt_float).
+unop_arg_type(dword_float_get_word1,  lt_float).
+unop_arg_type(dword_int64_get_word0,  lt_int(int_type_int64)).
+unop_arg_type(dword_int64_get_word1,  lt_int(int_type_int64)).
+unop_arg_type(dword_uint64_get_word0, lt_int(int_type_uint64)).
+unop_arg_type(dword_uint64_get_word1, lt_int(int_type_uint64)).
 
 binop_return_type(int_add(IntType), lt_int(IntType)).
 binop_return_type(int_sub(IntType), lt_int(IntType)).
@@ -1782,8 +1781,9 @@ binop_return_type(float_lt, lt_bool).
 binop_return_type(float_gt, lt_bool).
 binop_return_type(float_le, lt_bool).
 binop_return_type(float_ge, lt_bool).
-binop_return_type(float_word_bits, lt_word).
-binop_return_type(float_from_dword, lt_float).
+binop_return_type(float_from_dword,  lt_float).
+binop_return_type(int64_from_dword,  lt_int(int_type_int64)).
+binop_return_type(uint64_from_dword, lt_int(int_type_uint64)).
 binop_return_type(body, lt_word).
 binop_return_type(compound_eq, lt_bool).
 binop_return_type(compound_lt, lt_bool).

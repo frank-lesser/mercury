@@ -187,6 +187,7 @@
 
 :- import_module check_hlds.
 :- import_module check_hlds.mode_util.
+:- import_module check_hlds.type_util.
 :- import_module hlds.arg_info.
 :- import_module hlds.code_model.
 :- import_module hlds.goal_form.
@@ -522,7 +523,7 @@ detect_liveness_in_goal(Goal0, Goal, Liveness0, FinalLiveness, LiveInfo) :-
         set_of_var.difference(FinalLiveness, GoalFinalLiveness, PostBirths)
     ;
         GoalExpr0 = shorthand(_),
-        unexpected($module, $pred, "shorthand")
+        unexpected($pred, "shorthand")
     ),
     % We always initialize all the liveness-related fields in order to
     % obliterate any annotations left by a previous invocation of this module.
@@ -615,10 +616,10 @@ detect_liveness_in_fgt_construct(Goal0, Goal, !Liveness, LiveInfo, TermVar) :-
                 PreDeaths, PostDeaths, no_resume_point, GoalInfo0, GoalInfo),
             Goal = hlds_goal(GoalExpr, GoalInfo)
         else
-            unexpected($module, $pred, "unexpected liveness")
+            unexpected($pred, "unexpected liveness")
         )
     else
-        unexpected($module, $pred, "not conj")
+        unexpected($pred, "not conj")
     ).
 
 :- pred detect_liveness_in_fgt_construct_goal_loop(
@@ -644,10 +645,10 @@ detect_liveness_in_fgt_construct_goal_loop([Goal0 | Goals0], [Goal | Goals],
                 PreDeaths, PostDeaths, no_resume_point, GoalInfo0, GoalInfo),
             Goal = hlds_goal(GoalExpr, GoalInfo)
         else
-            unexpected($module, $pred, "rhs var not live")
+            unexpected($pred, "rhs var not live")
         )
     else
-        unexpected($module, $pred, "unexpected conjunct")
+        unexpected($pred, "unexpected conjunct")
     ),
     detect_liveness_in_fgt_construct_goal_loop(Goals0, Goals, !LocalLiveVars).
 
@@ -847,7 +848,7 @@ detect_deadness_in_goal(Goal0, Goal, !Deadness, !.Liveness, LiveInfo) :-
         GoalInfo = GoalInfo0
     ;
         GoalExpr0 = shorthand(_),
-        unexpected($module, $pred, "shorthand")
+        unexpected($pred, "shorthand")
     ),
 
     Goal = hlds_goal(GoalExpr, GoalInfo),
@@ -960,7 +961,7 @@ detect_deadness_in_par_conj([Goal0 | Goals0], [Goal | Goals], Deadness0,
     ( if instmap_delta_is_reachable(InstmapDelta1) then
         InstmapReachable = yes
     else
-        unexpected($module, $pred, "unreachable instmap")
+        unexpected($pred, "unreachable instmap")
     ),
     add_branch_pre_deaths(DeadnessGoal, Deadness0, CompletedNonLocalUnion,
         InstmapReachable, Goal1, Goal).
@@ -1116,7 +1117,7 @@ update_liveness_expr(GoalExpr, LiveInfo, !Liveness) :-
         )
     ;
         GoalExpr = shorthand(_),
-        unexpected($module, $pred, "shorthand")
+        unexpected($pred, "shorthand")
     ).
 
 :- pred update_liveness_conj(list(hlds_goal)::in, live_info::in,
@@ -1280,7 +1281,7 @@ delay_death_goal_expr(!GoalExpr, !GoalInfo, !BornVars, !DelayedDead, VarSet) :-
             !:GoalExpr = switch(Var, CanFail, Cases)
         ;
             MaybeBornVarsDelayedDead = no,
-            unexpected($module, $pred, "empty switch")
+            unexpected($pred, "empty switch")
         )
     ;
         !.GoalExpr = negation(Goal0),
@@ -1319,7 +1320,7 @@ delay_death_goal_expr(!GoalExpr, !GoalInfo, !BornVars, !DelayedDead, VarSet) :-
         !:GoalExpr = scope(Reason, Goal)
     ;
         !.GoalExpr = shorthand(_),
-        unexpected($module, $pred, "shorthand")
+        unexpected($pred, "shorthand")
     ).
 
 :- pred delay_death_conj(list(hlds_goal)::in, list(hlds_goal)::out,
@@ -1517,8 +1518,8 @@ detect_resume_points_in_goal(Goal0, Goal, !Liveness, LiveInfo, ResumeVars0) :-
 
         % Attach the set of variables needed after the condition
         % as the resume point set of the condition.
-        CondResume = resume_point(CondResumeVars, CondResumeLocs),
-        goal_set_resume_point(CondResume, Cond1, Cond),
+        make_and_set_resume_point(LiveInfo, CondResumeVars, CondResumeLocs,
+            Cond1, Cond),
 
         require_equal(LivenessThen, LivenessElse, "if-then-else", LiveInfo),
 
@@ -1549,8 +1550,8 @@ detect_resume_points_in_goal(Goal0, Goal, !Liveness, LiveInfo, ResumeVars0) :-
 
         % Attach the set of variables alive after the negation
         % as the resume point set of the negated goal.
-        Resume = resume_point(ResumeVars1, ResumeLocs),
-        goal_set_resume_point(Resume, SubGoal1, SubGoal),
+        make_and_set_resume_point(LiveInfo, ResumeVars1, ResumeLocs,
+            SubGoal1, SubGoal),
 
         !:Liveness = Liveness,
         GoalExpr = negation(SubGoal)
@@ -1582,7 +1583,7 @@ detect_resume_points_in_goal(Goal0, Goal, !Liveness, LiveInfo, ResumeVars0) :-
     ;
         GoalExpr0 = shorthand(_),
         % These should have been expanded out by now.
-        unexpected($module, $pred, "shorthand")
+        unexpected($pred, "shorthand")
     ),
 
     Goal = hlds_goal(GoalExpr, GoalInfo0),
@@ -1620,7 +1621,7 @@ detect_resume_points_in_conj([Goal0 | Goals0], [Goal | Goals],
     live_info::in, set_of_progvar::in, set_of_progvar::out) is det.
 
 detect_resume_points_in_non_disj([], _, _, _, _, _, _) :-
-    unexpected($module, $pred, "empty nondet disjunction").
+    unexpected($pred, "empty nondet disjunction").
 detect_resume_points_in_non_disj([Goal0 | Goals0], [Goal | Goals],
         Liveness0, Liveness, LiveInfo, ResumeVars0, Needed) :-
     (
@@ -1703,8 +1704,7 @@ detect_resume_points_in_non_last_disjunct(Goal0, Goal, MayUseOrigOnly,
 
     % Attach the set of variables needed in the following disjuncts
     % as the resume point set of this disjunct.
-    Resume = resume_point(ResumeVars1, ResumeLocs),
-    goal_set_resume_point(Resume, Goal1, Goal),
+    make_and_set_resume_point(LiveInfo, ResumeVars1, ResumeLocs, Goal1, Goal),
 
     Goal = hlds_goal(_, GoalInfo),
     goal_info_get_pre_deaths(GoalInfo, PreDeaths),
@@ -1777,7 +1777,7 @@ require_equal(LivenessFirst, LivenessRest, GoalType, LiveInfo) :-
             mercury_vars_to_string(VarSet, print_name_and_num, RestVars),
         Msg = "branches of " ++ GoalType ++ " disagree on liveness\n" ++
             "First: " ++ FirstNames ++ "\n" ++ "Rest:  " ++ RestNames ++ "\n",
-        unexpected($module, $pred, Msg)
+        unexpected($pred, Msg)
     ).
 
 %-----------------------------------------------------------------------------%
@@ -1792,7 +1792,7 @@ initial_liveness(ModuleInfo, PredInfo, ProcInfo, !:Liveness) :-
     ( if initial_liveness_2(ModuleInfo, Vars, Types, Modes, !Liveness) then
         true
     else
-        unexpected($module, $pred, "length mismatch")
+        unexpected($pred, "length mismatch")
     ),
 
     % If a variable is unused in the goal, it shouldn't be in the initial
@@ -1918,15 +1918,58 @@ maybe_complete_with_typeinfos(LiveInfo, Vars0, Vars) :-
         LiveInfo ^ li_vartypes, LiveInfo ^ li_rtti_varmaps, Vars).
 
 %-----------------------------------------------------------------------------%
+
+:- pred make_and_set_resume_point(live_info::in,
+    set_of_progvar::in, resume_locs::in, hlds_goal::in, hlds_goal::out) is det.
+
+make_and_set_resume_point(LiveInfo, ResumeVars0, ResumeLocs, Goal0, Goal) :-
+    AllowPackingDummies = LiveInfo ^ li_allow_packing_dummies,
+    (
+        AllowPackingDummies = no,
+        % Each dummy argument of a term is stored in a full word in the term's
+        % memory cell, and we can copy this word to and from a register
+        % or stack slot when creating and when restoring from resume points.
+        ResumeVars = ResumeVars0
+    ;
+        AllowPackingDummies = yes,
+        % Each dummy argument of a term is NOT stored ANYWHERE in the term's
+        % memory cell, which means that when the code that establishes
+        % the resume point tries to create the resume map (which maps
+        % each variable in ResumeVars0 to a register or stack slot),
+        % we have no source lval for the copying assignment.
+        %
+        % We could generalize the copying code to make it accept a source
+        % rval (such as the integer constant zero) as the source, but that
+        % would be suboptimal. Instead, we simply don't save the value
+        % of dummy variables, and create the value in var_locn.m out of
+        % thin air when (and if) it is ever needed.
+        ModuleInfo = LiveInfo ^ li_module_info,
+        VarTypes = LiveInfo ^ li_vartypes,
+        set_of_var.filter(var_is_not_dummy_type(ModuleInfo, VarTypes),
+            ResumeVars0, ResumeVars)
+    ),
+    Resume = resume_point(ResumeVars, ResumeLocs),
+    goal_set_resume_point(Resume, Goal0, Goal).
+
+:- pred var_is_not_dummy_type(module_info::in, vartypes::in, prog_var::in)
+    is semidet.
+
+var_is_not_dummy_type(ModuleInfo, VarTypes, Var) :-
+    lookup_var_type(VarTypes, Var, Type),
+    IsDummy = is_type_a_dummy(ModuleInfo, Type),
+    IsDummy = is_not_dummy_type.
+
+%-----------------------------------------------------------------------------%
 %-----------------------------------------------------------------------------%
 
 :- type live_info
     --->    live_info(
-                li_module_info          :: module_info,
-                li_typeinfo_liveness    :: bool,
-                li_varset               :: prog_varset,
-                li_vartypes             :: vartypes,
-                li_rtti_varmaps         :: rtti_varmaps
+                li_module_info              :: module_info,
+                li_typeinfo_liveness        :: bool,
+                li_allow_packing_dummies    :: bool,
+                li_varset                   :: prog_varset,
+                li_vartypes                 :: vartypes,
+                li_rtti_varmaps             :: rtti_varmaps
             ).
 
 :- pred live_info_init(module_info::in, bool::in,
@@ -1934,7 +1977,10 @@ maybe_complete_with_typeinfos(LiveInfo, Vars0, Vars) :-
 
 live_info_init(ModuleInfo, TypeInfoLiveness, VarSet, VarTypes, RttiVarMaps,
         LiveInfo) :-
-    LiveInfo = live_info(ModuleInfo, TypeInfoLiveness,
+    module_info_get_globals(ModuleInfo, Globals),
+    globals.lookup_bool_option(Globals, allow_packing_dummies,
+        AllowPackingDummies),
+    LiveInfo = live_info(ModuleInfo, TypeInfoLiveness, AllowPackingDummies,
         VarSet, VarTypes, RttiVarMaps).
 
 %-----------------------------------------------------------------------------%

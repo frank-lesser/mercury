@@ -19,6 +19,7 @@
 :- interface.
 
 :- import_module hlds.
+:- import_module hlds.hlds_data.
 :- import_module hlds.hlds_llds.
 :- import_module ll_backend.llds.
 :- import_module ll_backend.llds_out.llds_out_util.
@@ -96,7 +97,7 @@
 
 :- pred output_test_rval(llds_out_info::in, rval::in, io::di, io::uo) is det.
 
-:- pred output_tag(tag::in, io::di, io::uo) is det.
+:- pred output_ptag(ptag::in, io::di, io::uo) is det.
 
     % Return true iff an integer constant can be used directly as a value
     % in a structure field of the given type, instead of being cast to
@@ -324,14 +325,14 @@ output_lval(Info, Lval, !IO) :-
         output_rval(Info, Rval, !IO),
         io.write_string(")", !IO)
     ;
-        Lval = field(MaybeTag, Rval, FieldNumRval),
+        Lval = field(MaybePtag, Rval, FieldNumRval),
         (
-            MaybeTag = yes(Tag),
+            MaybePtag = yes(Ptag),
             io.write_string("MR_tfield(", !IO),
-            io.write_int(Tag, !IO),
+            io.write_int(Ptag, !IO),
             io.write_string(", ", !IO)
         ;
-            MaybeTag = no,
+            MaybePtag = no,
             io.write_string("MR_mask_field(", !IO)
         ),
         output_rval(Info, Rval, !IO),
@@ -471,15 +472,15 @@ output_lval_for_assign(Info, Lval, Type, !IO) :-
         output_rval(Info, Rval, !IO),
         io.write_string(")", !IO)
     ;
-        Lval = field(MaybeTag, Rval, FieldNumRval),
+        Lval = field(MaybePtag, Rval, FieldNumRval),
         Type = lt_word,
         (
-            MaybeTag = yes(Tag),
+            MaybePtag = yes(Ptag),
             io.write_string("MR_tfield(", !IO),
-            io.write_int(Tag, !IO),
+            io.write_int(Ptag, !IO),
             io.write_string(", ", !IO)
         ;
-            MaybeTag = no,
+            MaybePtag = no,
             io.write_string("MR_mask_field(", !IO)
         ),
         output_rval(Info, Rval, !IO),
@@ -567,20 +568,20 @@ output_llds_type_cast(LLDSType, !IO) :-
     output_llds_type(LLDSType, !IO),
     io.write_string(") ", !IO).
 
-output_llds_type(lt_int_least8, !IO) :-
-    io.write_string("MR_int_least8_t", !IO).
-output_llds_type(lt_uint_least8, !IO) :-
-    io.write_string("MR_uint_least8_t", !IO).
-output_llds_type(lt_int_least16, !IO) :-
-    io.write_string("MR_int_least16_t", !IO).
-output_llds_type(lt_uint_least16, !IO) :-
-    io.write_string("MR_uint_least16_t", !IO).
-output_llds_type(lt_int_least32, !IO) :-
-    io.write_string("MR_int_least32_t", !IO).
-output_llds_type(lt_uint_least32, !IO) :-
-    io.write_string("MR_uint_least32_t", !IO).
 output_llds_type(lt_bool, !IO) :-
     io.write_string("MR_Integer", !IO).
+output_llds_type(lt_int_least(int_least8), !IO) :-
+    io.write_string("MR_int_least8_t", !IO).
+output_llds_type(lt_int_least(uint_least8), !IO) :-
+    io.write_string("MR_uint_least8_t", !IO).
+output_llds_type(lt_int_least(int_least16), !IO) :-
+    io.write_string("MR_int_least16_t", !IO).
+output_llds_type(lt_int_least(uint_least16), !IO) :-
+    io.write_string("MR_uint_least16_t", !IO).
+output_llds_type(lt_int_least(int_least32), !IO) :-
+    io.write_string("MR_int_least32_t", !IO).
+output_llds_type(lt_int_least(uint_least32), !IO) :-
+    io.write_string("MR_uint_least32_t", !IO).
 output_llds_type(lt_int(int_type_int), !IO) :-
     io.write_string("MR_Integer", !IO).
 output_llds_type(lt_int(int_type_uint), !IO) :-
@@ -687,7 +688,7 @@ output_record_rval_decls_tab(Info, Rval, !DeclSet, !IO) :-
     % before and after this call.
     %
     % Every time we emit a declaration for a symbol, we insert it into the
-    % set of symbols we've already declared. That way, we avoid generating
+    % set of symbols we have already declared. That way, we avoid generating
     % the same symbol twice, which would cause an error in the C code.
     %
 :- pred output_record_rval_decls_format(llds_out_info::in, rval::in,
@@ -703,10 +704,6 @@ output_record_rval_decls_format(Info, Rval, FirstIndent, LaterIndent,
     ;
         Rval = var(_),
         unexpected($file, $pred, "var")
-    ;
-        Rval = mkword(_, SubRval),
-        output_record_rval_decls_format(Info, SubRval,
-            FirstIndent, LaterIndent, !N, !DeclSet, !IO)
     ;
         Rval = mkword_hole(_)
     ;
@@ -815,8 +812,11 @@ output_record_rval_decls_format(Info, Rval, FirstIndent, LaterIndent,
             )
         )
     ;
-        Rval = unop(_, SubRvalA),
-        output_record_rval_decls_format(Info, SubRvalA,
+        ( Rval = mkword(_, SubRval)
+        ; Rval = cast(_, SubRval)
+        ; Rval = unop(_, SubRval)
+        ),
+        output_record_rval_decls_format(Info, SubRval,
             FirstIndent, LaterIndent, !N, !DeclSet, !IO)
     ;
         Rval = binop(Op, SubRvalA, SubRvalB),
@@ -943,12 +943,19 @@ output_rval(Info, Rval, !IO) :-
         Rval = const(Const),
         output_rval_const(Info, Const, !IO)
     ;
-        Rval = unop(UnaryOp, SubRvalA),
+        Rval = cast(Type, SubRval),
+        io.write_string("((", !IO),
+        output_llds_type(Type, !IO),
+        io.write_string(") ", !IO),
+        output_rval(Info, SubRval, !IO),
+        io.write_string(")", !IO)
+    ;
+        Rval = unop(UnaryOp, SubRval),
         c_util.unary_prefix_op(UnaryOp, OpString),
         io.write_string(OpString, !IO),
         io.write_string("(", !IO),
         llds.unop_arg_type(UnaryOp, ArgType),
-        output_rval_as_type(Info, SubRvalA, ArgType, !IO),
+        output_rval_as_type(Info, SubRval, ArgType, !IO),
         io.write_string(")", !IO)
     ;
         Rval = binop(Op, SubRvalA, SubRvalB),
@@ -1037,7 +1044,53 @@ output_rval(Info, Rval, !IO) :-
             ( Op = int_add(IntType), OpStr = "+"
             ; Op = int_sub(IntType), OpStr = "-"
             ; Op = int_mul(IntType), OpStr = "*"
-            ; Op = int_div(IntType), OpStr = "/"
+            ),
+            (
+                (
+                    IntType = int_type_int,
+                    SignedType = "MR_Integer",
+                    UnsignedType = "MR_Unsigned"
+                ;
+                    IntType = int_type_int8,
+                    SignedType = "int8_t",
+                    UnsignedType = "uint8_t"
+                ;
+                    IntType = int_type_int16,
+                    SignedType = "int16_t",
+                    UnsignedType = "uint16_t"
+                ;
+                    IntType = int_type_int32,
+                    SignedType = "int32_t",
+                    UnsignedType = "uint32_t"
+                ;
+                    IntType = int_type_int64,
+                    SignedType = "int64_t",
+                    UnsignedType = "uint64_t"
+                ),
+                % We used to handle X + (-C) (for constant C) specially, by
+                % converting it to X - C, but we no longer do that since it
+                % would overflow in the case where C == min_int.
+                io.format("(%s) ((%s) ", [s(SignedType), s(UnsignedType)],
+                    !IO),
+                output_rval_as_type(Info, SubRvalA, lt_int(IntType), !IO),
+                io.format(" %s (%s) ", [s(OpStr), s(UnsignedType)], !IO),
+                output_rval_as_type(Info, SubRvalB, lt_int(IntType), !IO),
+                io.write_string(")", !IO)
+            ;
+                ( IntType = int_type_uint
+                ; IntType = int_type_uint8
+                ; IntType = int_type_uint16
+                ; IntType = int_type_uint32
+                ; IntType = int_type_uint64
+                ),
+                io.write_string("(", !IO),
+                output_rval_as_type(Info, SubRvalA, lt_int(IntType), !IO),
+                io.format(" %s ", [s(OpStr)], !IO),
+                output_rval_as_type(Info, SubRvalB, lt_int(IntType), !IO),
+                io.write_string(")", !IO)
+            )
+        ;
+            ( Op = int_div(IntType), OpStr = "/"
             ; Op = int_mod(IntType), OpStr = "%"
             ; Op = eq(IntType), OpStr = "=="
             ; Op = ne(IntType), OpStr = "!="
@@ -1090,23 +1143,6 @@ output_rval(Info, Rval, !IO) :-
                 io.write_string(" ", !IO),
                 output_rval(Info, SubRvalB, !IO),
                 io.write_string(")", !IO)
-        %   else if
-        %       XXX broken for C == minint
-        %       (since `NewC = 0 - C' overflows)
-        %       Op = (+),
-        %       SubRvalB = const(llconst_int(C)),
-        %       C < 0
-        %   then
-        %       NewOp = (-),
-        %       NewC = 0 - C,
-        %       NewSubRvalB = const(llconst_int(NewC)),
-        %       io.write_string("("),
-        %       output_rval(SubRvalA),
-        %       io.write_string(" "),
-        %       io.write_string(NewOpStr),
-        %       io.write_string(" "),
-        %       output_rval(NewSubRvalB),
-        %       io.write_string(")")
             else
                 io.write_string("(", !IO),
                 output_rval_as_type(Info, SubRvalA, lt_int(IntType), !IO),
@@ -1164,20 +1200,17 @@ output_rval(Info, Rval, !IO) :-
             output_rval_as_type(Info, SubRvalB, lt_int(int_type_int), !IO),
             io.write_string(")", !IO)
         ;
-            Op = float_word_bits,
-            io.write_string("MR_float_word_bits(", !IO),
-            output_rval_as_type(Info, SubRvalA, lt_float, !IO),
-            io.write_string(", ", !IO),
-            output_rval_as_type(Info, SubRvalB, lt_int(int_type_int), !IO),
-            io.write_string(")", !IO)
-        ;
-            Op = float_from_dword,
+            ( Op = float_from_dword,  OpStr = "MR_float_from_dword"
+            ; Op = int64_from_dword,  OpStr = "MR_int64_from_dword"
+            ; Op = uint64_from_dword, OpStr = "MR_uint64_from_dword"
+            ),
+            io.write_string(OpStr, !IO),
             ( if is_aligned_dword_ptr(SubRvalA, SubRvalB, MemRef) then
-                io.write_string("MR_float_from_dword_ptr(MR_dword_ptr(", !IO),
+                io.write_string("_ptr(MR_dword_ptr(", !IO),
                 output_rval(Info, mem_addr(MemRef), !IO),
                 io.write_string("))", !IO)
             else
-                io.write_string("MR_float_from_dword(", !IO),
+                io.write_string("(", !IO),
                 output_rval(Info, SubRvalA, !IO),
                 io.write_string(", ", !IO),
                 output_rval(Info, SubRvalB, !IO),
@@ -1185,13 +1218,13 @@ output_rval(Info, Rval, !IO) :-
             )
         )
     ;
-        Rval = mkword(Tag, SubRval),
+        Rval = mkword(Ptag, SubRval),
         ( if
             SubRval = const(llconst_data_addr(DataId, no)),
             DataId = scalar_common_data_id(type_num(TypeNum), CellNum)
         then
             io.write_string("MR_TAG_COMMON(", !IO),
-            io.write_int(Tag, !IO),
+            io.write_int(Ptag, !IO),
             io.write_string(",", !IO),
             io.write_int(TypeNum, !IO),
             io.write_string(",", !IO),
@@ -1201,35 +1234,35 @@ output_rval(Info, Rval, !IO) :-
             SubRval = unop(mkbody, const(llconst_int(Body)))
         then
             io.write_string("MR_tbmkword(", !IO),
-            io.write_int(Tag, !IO),
+            io.write_int(Ptag, !IO),
             io.write_string(", ", !IO),
             io.write_int(Body, !IO),
             io.write_string(")", !IO)
         else
             io.write_string("MR_tmkword(", !IO),
-            io.write_int(Tag, !IO),
+            io.write_int(Ptag, !IO),
             io.write_string(", ", !IO),
             output_rval_as_type(Info, SubRval, lt_data_ptr, !IO),
             io.write_string(")", !IO)
         )
     ;
-        Rval = mkword_hole(Tag),
+        Rval = mkword_hole(Ptag),
         io.write_string("MR_tmkword(", !IO),
-        io.write_int(Tag, !IO),
+        io.write_int(Ptag, !IO),
         io.write_string(", 0)", !IO)
     ;
         Rval = lval(Lval),
         % If a field is used as an rval, then we need to use the
         % MR_const_field() macro or its variants, not the MR_field() macro
         % or its variants, to avoid warnings about discarding const.
-        ( if Lval = field(MaybeTag, Rval, FieldNumRval) then
+        ( if Lval = field(MaybePtag, Rval, FieldNumRval) then
             (
-                MaybeTag = yes(Tag),
+                MaybePtag = yes(Ptag),
                 io.write_string("MR_ctfield(", !IO),
-                io.write_int(Tag, !IO),
+                io.write_int(Ptag, !IO),
                 io.write_string(", ", !IO)
             ;
-                MaybeTag = no,
+                MaybePtag = no,
                 io.write_string("MR_const_mask_field(", !IO)
             ),
             output_rval(Info, Rval, !IO),
@@ -1271,14 +1304,14 @@ output_rval(Info, Rval, !IO) :-
             ),
             io.write_string(")", !IO)
         ;
-            MemRef = heap_ref(BaseRval, MaybeTag, FieldNumRval),
+            MemRef = heap_ref(BaseRval, MaybePtag, FieldNumRval),
             (
-                MaybeTag = yes(Tag),
+                MaybePtag = yes(Ptag),
                 io.write_string("&MR_tfield(", !IO),
-                io.write_int(Tag, !IO),
+                io.write_int(Ptag, !IO),
                 io.write_string(", ", !IO)
             ;
-                MaybeTag = no,
+                MaybePtag = no,
                 io.write_string("&MR_mask_field(", !IO)
             ),
             output_rval(Info, BaseRval, !IO),
@@ -1562,13 +1595,15 @@ output_rval_as_type(Info, Rval, DesiredType, !IO) :-
                 io.write_int(N, !IO)
             else
                 % Cast value to desired type.
+                io.write_string("(", !IO),
                 output_llds_type_cast(DesiredType, !IO),
-                output_rval(Info, Rval, !IO)
+                output_rval(Info, Rval, !IO),
+                io.write_string(")", !IO)
             )
         )
     ).
 
-    % Output a float rval, converted to type `MR_Word *'
+    % Output a float rval, converted to type `MR_Word *'.
     %
 :- pred output_float_rval_as_data_ptr(llds_out_info::in, rval::in,
     io::di, io::uo) is det.
@@ -1576,7 +1611,7 @@ output_rval_as_type(Info, Rval, DesiredType, !IO) :-
 output_float_rval_as_data_ptr(Info, Rval, !IO) :-
     output_float_rval(Info, Rval, yes, !IO).
 
-    % Output a float rval, converted to type `MR_Word'
+    % Output a float rval, converted to type `MR_Word'.
     %
 :- pred output_float_rval_as_word(llds_out_info::in, rval::in,
     io::di, io::uo) is det.
@@ -1584,13 +1619,13 @@ output_float_rval_as_data_ptr(Info, Rval, !IO) :-
 output_float_rval_as_word(Info, Rval, !IO) :-
     output_float_rval(Info, Rval, no, !IO).
 
-    % Output a float rval, converted to type `MR_Word' or `MR_Word *'
+    % Output a float rval, converted to type `MR_Word' or `MR_Word *'.
     %
 :- pred output_float_rval(llds_out_info::in, rval::in, bool::in,
     io::di, io::uo) is det.
 
 output_float_rval(Info, Rval, IsPtr, !IO) :-
-    % For float constant expressions, if we're using boxed floats
+    % For float constant expressions, if we are using boxed floats
     % and --static-ground-floats is enabled, we just refer to the static const
     % which we declared earlier.
     UnboxFloat = Info ^ lout_unboxed_float,
@@ -1644,7 +1679,7 @@ output_int64_rval_as_word(Info, Rval, !IO) :-
     io::di, io::uo) is det.
 
 output_int64_rval(Info, Rval, IsPtr, !IO) :-
-    % For int64 constants, if we're using boxed 64-bit integers and
+    % For int64 constants, if we are using boxed 64-bit integers and
     % --static-ground-int64s is enabled, we just refer to the static const
     % which we declared earlier.
     UnboxInt64s = Info ^ lout_unboxed_int64s,
@@ -1676,7 +1711,7 @@ output_int64_rval(Info, Rval, IsPtr, !IO) :-
         io.write_string(")", !IO)
     ).
 
-    % Output a uint64 rval, converted to type `MR_Word *'
+    % Output a uint64 rval, converted to type `MR_Word *'.
     %
 :- pred output_uint64_rval_as_data_ptr(llds_out_info::in, rval::in,
     io::di, io::uo) is det.
@@ -1684,7 +1719,7 @@ output_int64_rval(Info, Rval, IsPtr, !IO) :-
 output_uint64_rval_as_data_ptr(Info, Rval, !IO) :-
     output_uint64_rval(Info, Rval, yes, !IO).
 
-    % Output a uint64 rval, converted to type `MR_Word'
+    % Output a uint64 rval, converted to type `MR_Word'.
     %
 :- pred output_uint64_rval_as_word(llds_out_info::in, rval::in,
     io::di, io::uo) is det.
@@ -1692,13 +1727,13 @@ output_uint64_rval_as_data_ptr(Info, Rval, !IO) :-
 output_uint64_rval_as_word(Info, Rval, !IO) :-
     output_uint64_rval(Info, Rval, no, !IO).
 
-    % Output a uint64 rval, converted to type `MR_Word' or `MR_Word *'
+    % Output a uint64 rval, converted to type `MR_Word' or `MR_Word *'.
     %
 :- pred output_uint64_rval(llds_out_info::in, rval::in, bool::in,
     io::di, io::uo) is det.
 
 output_uint64_rval(Info, Rval, IsPtr, !IO) :-
-    % For uint64 constants, if we're using boxed 64-bit integers and
+    % For uint64 constants, if we are using boxed 64-bit integers and
     % --static-ground-int64s is enabled, we just refer to the static const
     % which we declared earlier.
     UnboxInt64s = Info ^ lout_unboxed_int64s,
@@ -1741,7 +1776,7 @@ is_aligned_dword_ptr(lval(LvalA), lval(LvalB), MemRef) :-
         % number has the lower address.
         MemRef = stackvar_ref(const(llconst_int(N + 1)))
     ;
-        LvalA = field(_MaybeTag, _Address, _Offset),
+        LvalA = field(_MaybePtag, _Address, _Offset),
         % We cannot guarantee that the Address is dword aligned.
         fail
     ).
@@ -1925,41 +1960,44 @@ is_local_stag_test(Test, Rval, Ptag, Stag, Negated) :-
         Negated = yes
     ).
 
-output_tag(Tag, !IO) :-
+output_ptag(Ptag, !IO) :-
     io.write_string("MR_mktag(", !IO),
-    io.write_int(Tag, !IO),
+    io.write_int(Ptag, !IO),
     io.write_string(")", !IO).
 
-direct_field_int_constant(lt_bool) = no.
-direct_field_int_constant(lt_int_least8) = yes.
-direct_field_int_constant(lt_uint_least8) = yes.
-direct_field_int_constant(lt_int_least16) = yes.
-direct_field_int_constant(lt_uint_least16) = yes.
-direct_field_int_constant(lt_int_least32) = yes.
-direct_field_int_constant(lt_uint_least32) = yes.
-direct_field_int_constant(lt_int(IntType)) = Result :-
+direct_field_int_constant(LLDSType) = DirectFieldIntConstant :-
     (
-        ( IntType = int_type_int
-        ; IntType = int_type_uint
-        ; IntType = int_type_int8
-        ; IntType = int_type_uint8
-        ; IntType = int_type_int16
-        ; IntType = int_type_uint16
-        ; IntType = int_type_int32
-        ; IntType = int_type_uint32
+        ( LLDSType = lt_bool
+        ; LLDSType = lt_float
+        ; LLDSType = lt_string
+        ; LLDSType = lt_data_ptr
+        ; LLDSType = lt_code_ptr
+        ; LLDSType = lt_word
         ),
-        Result = yes
+        DirectFieldIntConstant = no
     ;
-        ( IntType = int_type_int64
-        ; IntType = int_type_uint64
-        ),
-        Result = no
+        LLDSType = lt_int_least(_),
+        DirectFieldIntConstant = yes
+    ;
+        LLDSType = lt_int(IntType),
+        (
+            ( IntType = int_type_int
+            ; IntType = int_type_uint
+            ; IntType = int_type_int8
+            ; IntType = int_type_uint8
+            ; IntType = int_type_int16
+            ; IntType = int_type_uint16
+            ; IntType = int_type_int32
+            ; IntType = int_type_uint32
+            ),
+            DirectFieldIntConstant = yes
+        ;
+            ( IntType = int_type_int64
+            ; IntType = int_type_uint64
+            ),
+            DirectFieldIntConstant = no
+        )
     ).
-direct_field_int_constant(lt_float) = no.
-direct_field_int_constant(lt_string) = no.
-direct_field_int_constant(lt_data_ptr) = no.
-direct_field_int_constant(lt_code_ptr) = no.
-direct_field_int_constant(lt_word) = no.
 
 %----------------------------------------------------------------------------%
 %

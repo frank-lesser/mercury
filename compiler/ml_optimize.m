@@ -30,60 +30,8 @@
 :- import_module libs.
 :- import_module libs.globals.
 :- import_module ml_backend.mlds.
-:- import_module parse_tree.
-:- import_module parse_tree.prog_data.
-
-:- import_module list.
 
 :- pred mlds_optimize(globals::in, mlds::in, mlds::out) is det.
-
-    % XXX Temporarily exported to ml_call_gen.m. When tail recursion
-    % optimization is moved completely into the code generator,
-    % this whole predicate will be moved to ml_call_gen.m.
-    %
-    % Assign the given list of rvals (the actual parameter) to the given list
-    % of mlds_arguments (the formal parameter). This is used as part of tail
-    % recursion optimization (see above).
-    %
-    % For each actual parameter that differs from its corresponding formal
-    % parameter, we declare a temporary variable to hold the next value
-    % of the formal parameter, and assign it the value of the actual parameter.
-    % Once this has been done for all parameters, we then assign each formal
-    % parameter its next value. The code we generate looks like this:
-    %
-    %   % These are returned in TempDefns.
-    %   SomeType new_value_of_arg1;
-    %   SomeType new_value_of_arg3;
-    %   SomeType new_value_of_arg3;
-    %
-    %   % These are returned in InitStmts.
-    %   new_value_of_arg1 = <the new value of parameter 1>
-    %   new_value_of_arg2 = <the new value of parameter 2>
-    %   new_value_of_arg3 = <the new value of parameter 3>
-    %
-    %   % These are returned in AssignStmts.
-    %   arg1 = new_value_of_arg1;
-    %   arg2 = new_value_of_arg2;
-    %   arg3 = new_value_of_arg3;
-    %
-    % The temporaries are needed for tail calls such as
-    %
-    % p(In1, In2, ...) :-
-    %   ...
-    %   p(In2, In1, ...).
-    %
-    % We don't want to assign In1 to In2 (in the second parameter position)
-    % after we have already clobbered the value of In1 by assigning it In2
-    % (when processing the first parameter position).
-    %
-    % This predicate doesn't pay attention to the gc statement field
-    % inside the mlds_arguments it is given; it needs only the variable name
-    % and type fields.
-    %
-:- pred tail_rec_call_assign_input_args(mlds_module_name::in, prog_context::in,
-    list(mlds_argument)::in, list(mlds_rval)::in,
-    list(mlds_stmt)::out, list(mlds_stmt)::out,
-    list(mlds_local_var_defn)::out) is det.
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
@@ -96,13 +44,14 @@
 :- import_module mdbcomp.
 :- import_module mdbcomp.builtin_modules.
 :- import_module mdbcomp.prim_data.
-:- import_module ml_backend.ml_code_util.
 :- import_module ml_backend.ml_util.
+:- import_module parse_tree.
+:- import_module parse_tree.prog_data.
 
 :- import_module bool.
 :- import_module int.
+:- import_module list.
 :- import_module maybe.
-:- import_module require.
 :- import_module set.
 
 %---------------------------------------------------------------------------%
@@ -190,9 +139,9 @@ optimize_in_stmt(OptInfo, Stmt0, Stmt) :-
         % XXX We should also optimize in FuncDefns.
         Stmt = ml_stmt_block(LocalVarDefns, FuncDefns, SubStmts, Context)
     ;
-        Stmt0 = ml_stmt_while(Kind, Rval, SubStmts0, Context),
+        Stmt0 = ml_stmt_while(Kind, Rval, SubStmts0, LocalLoopVars, Context),
         optimize_in_stmt(OptInfo, SubStmts0, SubStmts),
-        Stmt = ml_stmt_while(Kind, Rval, SubStmts, Context)
+        Stmt = ml_stmt_while(Kind, Rval, SubStmts, LocalLoopVars, Context)
     ;
         Stmt0 = ml_stmt_if_then_else(Rval, Then0, MaybeElse0, Context),
         optimize_in_stmt(OptInfo, Then0, Then),
@@ -201,7 +150,7 @@ optimize_in_stmt(OptInfo, Stmt0, Stmt) :-
             Then = ml_stmt_block([], [], [], _),
             MaybeElse = yes(Else)
         then
-            NotRval = ml_unop(std_unop(logical_not), Rval),
+            NotRval = ml_unop(logical_not, Rval),
             Stmt = ml_stmt_if_then_else(NotRval, Else, no, Context)
         else
             Stmt = ml_stmt_if_then_else(Rval, Then, MaybeElse, Context)
@@ -331,57 +280,6 @@ optimize_in_call_stmt(_OptInfo, Stmt0, Stmt) :-
 
 %----------------------------------------------------------------------------
 
-tail_rec_call_assign_input_args(_, _, [], [], [], [], []).
-tail_rec_call_assign_input_args(_, _, [_|_], [], [], [], []) :-
-    unexpected($pred, "length mismatch").
-tail_rec_call_assign_input_args(_, _, [], [_|_], [], [], []) :-
-    unexpected($pred, "length mismatch").
-tail_rec_call_assign_input_args(ModuleName, Context,
-        [Arg | Args], [ArgRval | ArgRvals],
-        !:InitStmts, !:AssignStmts, !:TempDefns) :-
-    tail_rec_call_assign_input_args(ModuleName, Context, Args, ArgRvals,
-        !:InitStmts, !:AssignStmts, !:TempDefns),
-
-    Arg = mlds_argument(VarName, Type, _ArgGCStmt),
-    % Don't bother assigning a variable to itself.
-    ( if ArgRval = ml_lval(ml_local_var(VarName, _VarType)) then
-        true
-    else
-        ( if VarName = lvn_prog_var(VarNameStr, VarNum) then
-            NextValueName = lvn_prog_var_next_value(VarNameStr, VarNum)
-        else
-            % This should not happen; the head variables of a procedure
-            % should all be lvn_prog_vars, even the ones representing
-            % the typeinfos and typeclassinfos added by the compiler.
-            % However, better safe than sorry.
-            VarNameStr = ml_local_var_name_to_string(VarName),
-            NextValueName =
-                lvn_comp_var(lvnc_non_prog_var_next_value(VarNameStr))
-        ),
-        % Note that we have to use an assignment rather than an initializer
-        % to initialize the temp, because this pass comes before
-        % ml_elem_nested.m, and ml_elim_nested.m doesn't handle code
-        % containing initializers.
-        % XXX We should teach it to handle them.
-        NextValueInitStmt = ml_stmt_atomic(
-            assign(ml_local_var(NextValueName, Type), ArgRval),
-            Context),
-        !:InitStmts = [NextValueInitStmt | !.InitStmts],
-        AssignStmt = ml_stmt_atomic(
-            assign(
-                ml_local_var(VarName, Type),
-                ml_lval(ml_local_var(NextValueName, Type))),
-            Context),
-        !:AssignStmts = [AssignStmt | !.AssignStmts],
-        % We don't need to trace the temporary variables for GC, since they
-        % are not live across a call or a heap allocation.
-        TempDefn = ml_gen_mlds_var_decl_init(NextValueName, Type,
-            no_initializer, gc_no_stmt, Context),
-        !:TempDefns = [TempDefn | !.TempDefns]
-    ).
-
-%----------------------------------------------------------------------------
-
     % If the list of statements contains a block with no local variables,
     % then bring the block up one level. This optimization is needed to avoid
     % a compiler limit in the Microsoft C compiler (version 13.10.3077) for
@@ -506,7 +404,11 @@ find_rval_component_lvals(Rval, !Components) :-
         Rval = ml_mkword(_, SubRval),
         find_rval_component_lvals(SubRval, !Components)
     ;
-        Rval = ml_unop(_, SubRvalA),
+        ( Rval = ml_box(_, SubRvalA)
+        ; Rval = ml_unbox(_, SubRvalA)
+        ; Rval = ml_cast(_, SubRvalA)
+        ; Rval = ml_unop(_, SubRvalA)
+        ),
         find_rval_component_lvals(SubRvalA, !Components)
     ;
         Rval = ml_binop(_, SubRvalA, SubRvalB),
@@ -550,7 +452,7 @@ statement_affects_lvals(Lvals, Stmt, Affects) :-
         Stmt = ml_stmt_block(_, _, SubStmts, _),
         statements_affect_lvals(Lvals, SubStmts, Affects)
     ;
-        Stmt = ml_stmt_while(_, _, SubStmt, _),
+        Stmt = ml_stmt_while(_, _, SubStmt, _, _),
         statement_affects_lvals(Lvals, SubStmt, Affects)
     ;
         Stmt = ml_stmt_if_then_else(_, Then, MaybeElse, _),
@@ -609,7 +511,7 @@ statement_affects_lvals(Lvals, Stmt, Affects) :-
         ;
             ( AtomicStmt = assign(Lval, _)
             ; AtomicStmt = assign_if_in_heap(Lval, _)
-            ; AtomicStmt = new_object(Lval, _, _, _, _, _, _, _, _, _)
+            ; AtomicStmt = new_object(Lval, _, _, _, _, _, _, _, _)
             ; AtomicStmt = mark_hp(Lval)
             ),
             ( if set.contains(Lvals, Lval) then
@@ -961,13 +863,12 @@ try_to_eliminate_defn(OptInfo, LocalVarDefn0, LocalVarDefns0, LocalVarDefns,
     % or a variable, because duplicating any real operation would be
     % a pessimization.
     ( Count =< 1
-    ; rval_is_cheap_enough_to_duplicate(Rval)
+    ; rval_is_cheap_enough_to_duplicate(Rval) = yes
     ).
 
-:- pred rval_is_cheap_enough_to_duplicate(mlds_rval::in) is semidet.
+:- func rval_is_cheap_enough_to_duplicate(mlds_rval) = bool.
 
-rval_is_cheap_enough_to_duplicate(Rval) :-
-    require_complete_switch [Rval]
+rval_is_cheap_enough_to_duplicate(Rval) = CheapEnough :-
     (
         ( Rval = ml_const(_)
         ; Rval = ml_mem_addr(_)
@@ -975,27 +876,36 @@ rval_is_cheap_enough_to_duplicate(Rval) :-
         ; Rval = ml_scalar_common(_)
         ; Rval = ml_scalar_common_addr(_)
         ; Rval = ml_vector_common_row_addr(_, _)
-        )
+        ),
+        CheapEnough = yes
     ;
         Rval = ml_lval(Lval),
-        require_complete_switch [Lval]
         (
             ( Lval = ml_local_var(_, _)
             ; Lval = ml_global_var(_, _)
-            )
+            ),
+            CheapEnough = yes
         ;
             ( Lval = ml_mem_ref(_, _)
             ; Lval = ml_field(_, _, _, _, _)
             ; Lval = ml_target_global_var_ref(_)
             ),
-            fail
+            CheapEnough = no
         )
     ;
         ( Rval = ml_mkword(_, _)
+        ; Rval = ml_box(_, _)
+        ; Rval = ml_unbox(_, _)
         ; Rval = ml_unop(_, _)
         ; Rval = ml_binop(_, _, _)
         ),
-        fail
+        % NOTE Some instances of the box and unbox operations are zero cost,
+        % but others are not. Since we cannot distinguish between them
+        % using purely local data, we take the conservative approach.
+        CheapEnough = no
+    ;
+        Rval = ml_cast(_, SubRval),
+        CheapEnough = rval_is_cheap_enough_to_duplicate(SubRval)
     ).
 
     % Succeed only if the specified rval definitely won't change in value.
@@ -1030,6 +940,9 @@ rval_will_not_change(Rval) :-
         )
     ;
         ( Rval = ml_mkword(_Tag, SubRval)
+        ; Rval = ml_box(_Type, SubRval)
+        ; Rval = ml_unbox(_Type, SubRval)
+        ; Rval = ml_cast(_Type, SubRval)
         ; Rval = ml_unop(_Op, SubRval)
         ),
         rval_will_not_change(SubRval)
@@ -1062,6 +975,9 @@ rval_cannot_throw(Rval) :-
     ;
         ( Rval = ml_vector_common_row_addr(_, SubRval)
         ; Rval = ml_mkword(_Tag, SubRval)
+        ; Rval = ml_box(_, SubRval)
+        ; Rval = ml_unbox(_, SubRval)
+        ; Rval = ml_cast(_, SubRval)
         ),
         rval_cannot_throw(SubRval)
     ;
@@ -1222,6 +1138,18 @@ eliminate_var_in_initializer(Init0, Init, !VarElimInfo) :-
         Init = init_struct(Type, Members)
     ).
 
+:- pred eliminate_var_in_typed_rvals(
+    list(mlds_typed_rval)::in, list(mlds_typed_rval)::out,
+    var_elim_info::in, var_elim_info::out) is det.
+
+eliminate_var_in_typed_rvals([], [], !VarElimInfo).
+eliminate_var_in_typed_rvals([TypedRval0 | TypedRvals0],
+        [TypedRval | TypedRvals], !VarElimInfo) :-
+    TypedRval0 = ml_typed_rval(Rval0, Type),
+    eliminate_var_in_rval(Rval0, Rval, !VarElimInfo),
+    TypedRval = ml_typed_rval(Rval, Type),
+    eliminate_var_in_typed_rvals(TypedRvals0, TypedRvals, !VarElimInfo).
+
 :- pred eliminate_var_in_rvals(list(mlds_rval)::in, list(mlds_rval)::out,
     var_elim_info::in, var_elim_info::out) is det.
 
@@ -1250,6 +1178,18 @@ eliminate_var_in_rval(Rval0, Rval, !VarElimInfo) :-
         Rval0 = ml_mkword(Tag, ArgRval0),
         eliminate_var_in_rval(ArgRval0, ArgRval, !VarElimInfo),
         Rval = ml_mkword(Tag, ArgRval)
+    ;
+        Rval0 = ml_box(Type, ArgRval0),
+        eliminate_var_in_rval(ArgRval0, ArgRval, !VarElimInfo),
+        Rval = ml_box(Type, ArgRval)
+    ;
+        Rval0 = ml_unbox(Type, ArgRval0),
+        eliminate_var_in_rval(ArgRval0, ArgRval, !VarElimInfo),
+        Rval = ml_unbox(Type, ArgRval)
+    ;
+        Rval0 = ml_cast(Type, ArgRval0),
+        eliminate_var_in_rval(ArgRval0, ArgRval, !VarElimInfo),
+        Rval = ml_cast(Type, ArgRval)
     ;
         Rval0 = ml_unop(Op, ArgRval0),
         eliminate_var_in_rval(ArgRval0, ArgRval, !VarElimInfo),
@@ -1301,15 +1241,7 @@ eliminate_var_in_lval(Lval0, Lval, !VarElimInfo) :-
         Lval = Lval0
     ;
         Lval0 = ml_local_var(VarName, _Type),
-        ( if VarName = !.VarElimInfo ^ var_name then
-            % We found an lvalue occurrence of the variable.
-            % If the variable that we are trying to eliminate has its
-            % address is taken, or is assigned to, or in general if it is
-            % used as an lvalue, then it is NOT safe to eliminate it.
-            !VarElimInfo ^ invalidated := yes
-        else
-            true
-        ),
+        invalidate_if_eliminating_local_loop_var(VarName, !VarElimInfo),
         Lval = Lval0
     ).
 
@@ -1338,10 +1270,12 @@ eliminate_var_in_stmt(Stmt0, Stmt, !VarElimInfo) :-
             FuncDefns0, FuncDefns, SubStmts0, SubStmts, !VarElimInfo),
         Stmt = ml_stmt_block(LocalVarDefns, FuncDefns, SubStmts, Context)
     ;
-        Stmt0 = ml_stmt_while(Kind, Rval0, SubStmts0, Context),
+        Stmt0 = ml_stmt_while(Kind, Rval0, SubStmts0, LocalLoopVars, Context),
+        list.foldl(invalidate_if_eliminating_local_loop_var, LocalLoopVars,
+            !VarElimInfo),
         eliminate_var_in_rval(Rval0, Rval, !VarElimInfo),
         eliminate_var_in_stmt(SubStmts0, SubStmts, !VarElimInfo),
-        Stmt = ml_stmt_while(Kind, Rval, SubStmts, Context)
+        Stmt = ml_stmt_while(Kind, Rval, SubStmts, LocalLoopVars, Context)
     ;
         Stmt0 = ml_stmt_if_then_else(Cond0, Then0, MaybeElse0, Context),
         eliminate_var_in_rval(Cond0, Cond, !VarElimInfo),
@@ -1444,13 +1378,14 @@ eliminate_var_in_atomic_stmt(Stmt0, Stmt, !VarElimInfo) :-
         eliminate_var_in_rval(Rval0, Rval, !VarElimInfo),
         Stmt = delete_object(Rval)
     ;
-        Stmt0 = new_object(Target0, MaybeTag, ExplicitSecTag, Type,
-            MaybeSize, MaybeCtorName, Args0, ArgTypes, MayUseAtomic,
+        Stmt0 = new_object(Target0, Ptag, ExplicitSecTag, Type,
+            MaybeSize, MaybeCtorName, ArgRvalsTypes0, MayUseAtomic,
             MaybeAllocId),
         eliminate_var_in_lval(Target0, Target, !VarElimInfo),
-        eliminate_var_in_rvals(Args0, Args, !VarElimInfo),
-        Stmt = new_object(Target, MaybeTag, ExplicitSecTag, Type,
-            MaybeSize, MaybeCtorName, Args, ArgTypes, MayUseAtomic,
+        eliminate_var_in_typed_rvals(ArgRvalsTypes0, ArgRvalsTypes,
+            !VarElimInfo),
+        Stmt = new_object(Target, Ptag, ExplicitSecTag, Type,
+            MaybeSize, MaybeCtorName, ArgRvalsTypes, MayUseAtomic,
             MaybeAllocId)
     ;
         Stmt0 = mark_hp(Lval0),
@@ -1539,6 +1474,22 @@ eliminate_var_in_trail_op(Op0, Op, !VarElimInfo) :-
         Op0 = prune_tickets_to(Rval0),
         eliminate_var_in_rval(Rval0, Rval, !VarElimInfo),
         Op = prune_tickets_to(Rval)
+    ).
+
+:- pred invalidate_if_eliminating_local_loop_var(mlds_local_var_name::in,
+    var_elim_info::in, var_elim_info::out) is det.
+
+invalidate_if_eliminating_local_loop_var(VarName, !VarElimInfo) :-
+    ( if VarName = !.VarElimInfo ^ var_name then
+        % We found an lvalue occurrence of the variable.
+        % If the variable that we are trying to eliminate
+        % - has its address taken, or
+        % - is assigned to, or
+        % - in general if it is used as an lvalue,
+        % then it is NOT safe to eliminate it.
+        !VarElimInfo ^ invalidated := yes
+    else
+        true
     ).
 
 %---------------------------------------------------------------------------%

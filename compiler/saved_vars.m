@@ -181,7 +181,7 @@ saved_vars_in_goal(Goal0, Goal, !SlotInfo) :-
     ;
         GoalExpr0 = shorthand(_),
         % these should have been expanded out by now
-        unexpected($module, $pred, "shorthand")
+        unexpected($pred, "shorthand")
     ).
 
 %-----------------------------------------------------------------------------%
@@ -249,6 +249,7 @@ ok_to_duplicate(feature_obvious_nontail_rec_call) = no.
 ok_to_duplicate(feature_keep_constant_binding) = no.
 ok_to_duplicate(feature_save_deep_excp_vars) = no.
 ok_to_duplicate(feature_dont_warn_singleton) = yes.
+ok_to_duplicate(feature_state_var_copy) = yes.
 ok_to_duplicate(feature_duplicated_for_switch) = yes.
 ok_to_duplicate(feature_mode_check_clauses_goal) = yes.
 ok_to_duplicate(feature_will_not_modify_trail) = yes.
@@ -347,7 +348,7 @@ can_push(Var, Goal) = CanPush :-
                 ; Reason = from_ground_term(_, from_ground_term_initial)
                 ),
                 % These scopes should have been deleted by now.
-                unexpected($module, $pred, "unexpected scope")
+                unexpected($pred, "unexpected scope")
             )
         ;
             GoalExpr = switch(SwitchVar, _, _),
@@ -359,7 +360,7 @@ can_push(Var, Goal) = CanPush :-
         ;
             GoalExpr = shorthand(_),
             % These should have been expanded out by now.
-            unexpected($module, $pred, "shorthand")
+            unexpected($pred, "shorthand")
         )
     else
         CanPush = yes
@@ -500,7 +501,7 @@ saved_vars_delay_goal([Goal0 | Goals0], Goals, Construct, Var, IsNonLocal,
         ;
             Goal0Expr = shorthand(_),
             % These should have been expanded out by now.
-            unexpected($module, $pred, "shorthand")
+            unexpected($pred, "shorthand")
         )
     else
         saved_vars_delay_goal(Goals0, Goals1, Construct, Var, IsNonLocal,

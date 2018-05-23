@@ -437,6 +437,9 @@ add_scalar_deps(FromScalar, Initializer, !Graph) :-
 add_scalar_deps_rval(FromScalar, Rval, !Graph) :-
     (
         ( Rval = ml_mkword(_, SubRvalA)
+        ; Rval = ml_box(_, SubRvalA)
+        ; Rval = ml_unbox(_, SubRvalA)
+        ; Rval = ml_cast(_, SubRvalA)
         ; Rval = ml_unop(_, SubRvalA)
         ; Rval = ml_vector_common_row_addr(_, SubRvalA)
         ),
@@ -458,7 +461,7 @@ add_scalar_deps_rval(FromScalar, Rval, !Graph) :-
         ( Rval = ml_lval(_Lval)
         ; Rval = ml_mem_addr(_Lval)
         ),
-        unexpected($module, $pred, "lval or mem_addr")
+        unexpected($pred, "lval or mem_addr")
     ).
 
 %---------------------------------------------------------------------------%
@@ -581,7 +584,7 @@ method_ptrs_in_statement(Stmt, !CodeAddrsInConsts) :-
         method_ptrs_in_function_defns(FuncDefns, !CodeAddrsInConsts),
         method_ptrs_in_statements(SubStmts, !CodeAddrsInConsts)
     ;
-        Stmt = ml_stmt_while(_Kind, Rval, SubStmt, _Context),
+        Stmt = ml_stmt_while(_Kind, Rval, SubStmt, _LocalLoopVars, _Context),
         method_ptrs_in_rval(Rval, !CodeAddrsInConsts),
         method_ptrs_in_statement(SubStmt, !CodeAddrsInConsts)
     ;
@@ -641,13 +644,13 @@ method_ptrs_in_statement(Stmt, !CodeAddrsInConsts) :-
         Stmt = ml_stmt_atomic(AtomicStmt, _Context),
         ( if
             AtomicStmt = new_object(Lval, _MaybeTag, _Bool,
-                _Type, _MemRval, _MaybeCtorName, Rvals, _Types, _MayUseAtomic,
+                _Type, _MemRval, _MaybeCtorName, TypedRvals, _MayUseAtomic,
                 _AllocId)
         then
             % We don't need to check "_MemRval" since this just stores
             % the amount of memory needed for the new object.
             method_ptrs_in_lval(Lval, !CodeAddrsInConsts),
-            method_ptrs_in_rvals(Rvals, !CodeAddrsInConsts)
+            method_ptrs_in_typed_rvals(TypedRvals, !CodeAddrsInConsts)
         else if
             AtomicStmt = assign(Lval, Rval)
         then
@@ -709,6 +712,15 @@ method_ptrs_in_initializers([Initializer | Initializers],
     method_ptrs_in_initializer(Initializer, !CodeAddrsInConsts),
     method_ptrs_in_initializers(Initializers, !CodeAddrsInConsts).
 
+:- pred method_ptrs_in_typed_rvals(list(mlds_typed_rval)::in,
+    code_addrs_in_consts::in, code_addrs_in_consts::out) is det.
+
+method_ptrs_in_typed_rvals([], !CodeAddrsInConsts).
+method_ptrs_in_typed_rvals([TypedRval | TypedRvals], !CodeAddrsInConsts) :-
+    TypedRval = ml_typed_rval(Rval, _Type),
+    method_ptrs_in_rval(Rval, !CodeAddrsInConsts),
+    method_ptrs_in_typed_rvals(TypedRvals, !CodeAddrsInConsts).
+
 :- pred method_ptrs_in_rvals(list(mlds_rval)::in,
     code_addrs_in_consts::in, code_addrs_in_consts::out) is det.
 
@@ -767,7 +779,11 @@ method_ptrs_in_rval(Rval, !CodeAddrsInConsts) :-
             )
         )
     ;
-        Rval = ml_unop(_UnaryOp, SubRval),
+        ( Rval = ml_box(_Type, SubRval)
+        ; Rval = ml_unbox(_Type, SubRval)
+        ; Rval = ml_cast(_Type, SubRval)
+        ; Rval = ml_unop(_UnaryOp, SubRval)
+        ),
         method_ptrs_in_rval(SubRval, !CodeAddrsInConsts)
     ;
         Rval = ml_binop(_BinaryOp, SubRvalA, SubRvalB),

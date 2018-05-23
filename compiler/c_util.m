@@ -831,6 +831,9 @@ output_int_expr_cur_stream(N, !IO) :-
 %
 
 output_uint_expr(Stream, N, !IO) :-
+    % We need to cast to (MR_Unsigned) to ensure things like 1 << 32 work
+    % when `MR_Unsigned' is 64 bits but `unsigned int' is 32 bits.
+    io.write_string("(MR_Unsigned) ", !IO),
     io.write_uint(Stream, N, !IO),
     io.write_string(Stream, "U", !IO).
 
@@ -973,6 +976,12 @@ unary_prefix_op(hash_string3,       "MR_hash_string3").
 unary_prefix_op(hash_string4,       "MR_hash_string4").
 unary_prefix_op(hash_string5,       "MR_hash_string5").
 unary_prefix_op(hash_string6,       "MR_hash_string6").
+unary_prefix_op(dword_float_get_word0,  "MR_dword_float_get_word0").
+unary_prefix_op(dword_float_get_word1,  "MR_dword_float_get_word1").
+unary_prefix_op(dword_int64_get_word0,  "MR_dword_int64_get_word0").
+unary_prefix_op(dword_int64_get_word1,  "MR_dword_int64_get_word1").
+unary_prefix_op(dword_uint64_get_word0, "MR_dword_uint64_get_word0").
+unary_prefix_op(dword_uint64_get_word1, "MR_dword_uint64_get_word1").
 
 % The operator strings for array_index, compound_lt and compound_eq are
 % dummies; they should never be used.
@@ -1033,17 +1042,19 @@ binop_category_string(offset_str_eq(N), offset_string_compare_binop(N),
     "MR_offset_streq").
 binop_category_string(body, int_macro_binop, "MR_body").
 
-binop_category_string(float_word_bits, float_macro_binop,
-    "MR_float_word_bits").
 binop_category_string(float_from_dword, float_macro_binop,
     "MR_float_from_dword").
+binop_category_string(int64_from_dword, int_macro_binop,
+    "MR_int64_from_dword").
+binop_category_string(uint64_from_dword, int_macro_binop,
+    "MR_uint64_from_dword").
 
 %---------------------------------------------------------------------------%
 
 output_c_file_intro_and_grade(Globals, SourceFileName, Version, Fullarch,
         !IO) :-
-    globals.lookup_int_option(Globals, num_tag_bits, NumTagBits),
-    string.int_to_string(NumTagBits, NumTagBitsStr),
+    globals.lookup_int_option(Globals, num_ptag_bits, NumPtagBits),
+    string.int_to_string(NumPtagBits, NumPtagBitsStr),
     globals.lookup_bool_option(Globals, unboxed_float, UnboxedFloat),
     UnboxedFloatStr = convert_bool_to_string(UnboxedFloat),
     globals.lookup_bool_option(Globals, unboxed_int64s, UnboxedInt64s),
@@ -1064,7 +1075,7 @@ output_c_file_intro_and_grade(Globals, SourceFileName, Version, Fullarch,
         "** The autoconfigured grade settings governing\n",
         "** the generation of this C file were\n",
         "**\n",
-        "** TAG_BITS=", NumTagBitsStr, "\n",
+        "** TAG_BITS=", NumPtagBitsStr, "\n",
         "** UNBOXED_FLOAT=", UnboxedFloatStr, "\n",
         "** UNBOXED_INT64S=", UnboxedInt64sStr, "\n",
         "** PREGENERATED_DIST=", PregeneratedDistStr, "\n",

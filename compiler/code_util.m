@@ -396,6 +396,7 @@ lvals_in_rval(var(_)) = [].
 lvals_in_rval(mkword(_, Rval)) = lvals_in_rval(Rval).
 lvals_in_rval(mkword_hole(_)) = [].
 lvals_in_rval(const(_)) = [].
+lvals_in_rval(cast(_, Rval)) = lvals_in_rval(Rval).
 lvals_in_rval(unop(_, Rval)) = lvals_in_rval(Rval).
 lvals_in_rval(binop(_, Rval1, Rval2)) =
     lvals_in_rval(Rval1) ++ lvals_in_rval(Rval2).
@@ -467,12 +468,15 @@ size_of_cell_args([]) = 0.
 size_of_cell_args([CellArg | CellArgs]) = Size + Sizes :-
     (
         ( CellArg = cell_arg_full_word(_, _)
-        ; CellArg = cell_arg_take_addr(_, _)
-        ; CellArg = cell_arg_skip
+        ; CellArg = cell_arg_take_addr_one_word(_, _)
+        ; CellArg = cell_arg_skip_one_word
         ),
         Size = 1
     ;
-        CellArg = cell_arg_double_word(_),
+        ( CellArg = cell_arg_double_word(_)
+        ; CellArg = cell_arg_take_addr_two_words(_, _)
+        ; CellArg = cell_arg_skip_two_words
+        ),
         Size = 2
     ),
     Sizes = size_of_cell_args(CellArgs).

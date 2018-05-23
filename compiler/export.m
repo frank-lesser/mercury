@@ -153,7 +153,7 @@ get_foreign_export_decls_loop(ModuleInfo, Preds,
         ; Lang = lang_java
         ; Lang = lang_erlang
         ),
-        sorry($module, $pred,  ":- pragma foreign_export for non-C backends.")
+        sorry($pred,  ":- pragma foreign_export for non-C backends.")
     ),
     HeadExportDecl = foreign_export_decl(Lang, RetType, ExportName, ArgDecls),
     get_foreign_export_decls_loop(ModuleInfo, Preds,
@@ -286,8 +286,7 @@ export_procs_to_c(ModuleInfo, Preds,
 export_proc_to_c(ModuleInfo, Preds, ExportedProc, ExportDefn) :-
     ExportedProc = pragma_exported_proc(Lang, PredId, ProcId, CFunction,
         _Context),
-    expect(unify(Lang, lang_c), $module, $pred,
-        "foreign language other than C"),
+    expect(unify(Lang, lang_c), $pred, "foreign language other than C"),
     get_export_info_for_lang_c(ModuleInfo, Preds, PredId, ProcId,
         DeclareString, CRetType, MaybeDeclareRetval, MaybeFail, MaybeSucceed,
         ArgInfoTypes),
@@ -414,24 +413,24 @@ get_export_info_for_lang_c(ModuleInfo, Preds, PredId, ProcId,
             pred_args_to_func_args(ArgInfoTypes0, ArgInfoTypes1,
                 arg_info(RetArgLoc, RetArgMode) - RetType),
             RetArgMode = top_out,
-            check_dummy_type(ModuleInfo, RetType) = is_not_dummy_type
+            is_type_a_dummy(ModuleInfo, RetType) = is_not_dummy_type
         then
-            ExportRetType = foreign.to_exported_type(ModuleInfo, RetType),
-            CRetType = exported_type_to_string(lang_c, ExportRetType),
+            MaybeForeignRetType = is_this_a_foreign_type(ModuleInfo, RetType),
+            CRetType = maybe_foreign_type_to_c_string(RetType,
+                MaybeForeignRetType),
             arg_loc_to_string(RetArgLoc, RetArgString0),
             convert_type_from_mercury(RetArgLoc, RetArgString0, RetType,
                 RetArgString),
             MaybeDeclareRetval = "\t" ++ CRetType ++ " return_value;\n",
             % We need to unbox non-word-sized foreign types
-            % before returning them to C code
-            ExportRetTypeIsForeign = foreign.is_foreign_type(ExportRetType),
+            % before returning them to C code.
             (
-                ExportRetTypeIsForeign = yes(_),
+                MaybeForeignRetType = yes(_),
                 SetReturnValue = "\tMR_MAYBE_UNBOX_FOREIGN_TYPE("
                     ++ CRetType ++ ", " ++ RetArgString
                     ++ ", return_value);\n"
             ;
-                ExportRetTypeIsForeign = no,
+                MaybeForeignRetType = no,
                 SetReturnValue = "\treturn_value = " ++ RetArgString ++ ";\n"
             ),
             MaybeFail = SetReturnValue,
@@ -461,7 +460,7 @@ get_export_info_for_lang_c(ModuleInfo, Preds, PredId, ProcId,
         ArgInfoTypes2 = ArgInfoTypes0
     ;
         CodeModel = model_non,
-        unexpected($module, $pred, "Attempt to export model_non procedure.")
+        unexpected($pred, "Attempt to export model_non procedure.")
     ),
     list.filter(include_arg(ModuleInfo), ArgInfoTypes2, ArgInfoTypes).
 
@@ -474,7 +473,7 @@ get_export_info_for_lang_c(ModuleInfo, Preds, PredId, ProcId,
 
 include_arg(ModuleInfo, arg_info(_Loc, Mode) - Type) :-
     Mode \= top_unused,
-    check_dummy_type(ModuleInfo, Type) = is_not_dummy_type.
+    is_type_a_dummy(ModuleInfo, Type) = is_not_dummy_type.
 
     % get_argument_declarations(Args, NameThem, DeclString):
     %
@@ -525,7 +524,8 @@ get_argument_declaration(ModuleInfo, NameThem, ArgNum, ArgInfo, Type,
         NameThem = no,
         ArgName = ""
     ),
-    TypeString0 = mercury_exported_type_to_string(ModuleInfo, lang_c, Type),
+    MaybeForeignType = is_this_a_foreign_type(ModuleInfo, Type),
+    TypeString0 = maybe_foreign_type_to_c_string(Type, MaybeForeignType),
     (
         Mode = top_out,
         % output variables are passed as pointers
@@ -550,17 +550,16 @@ pass_input_args(ModuleInfo, LastArgNum, [AT | ATs], PassInputArgs) :-
         ArgName0 = "Mercury__argument" ++ string.int_to_string(CurArgNum),
         arg_loc_to_string(ArgLoc, ArgLocString),
         convert_type_to_mercury(ArgName0, Type, ArgLoc, ArgName),
-        ExportType = foreign.to_exported_type(ModuleInfo, Type),
+        MaybeForeignType = is_this_a_foreign_type(ModuleInfo, Type),
         % We need to box non-word-sized foreign types
         % before passing them to Mercury code.
-        ExportTypeIsForeign = foreign.is_foreign_type(ExportType),
         (
-            ExportTypeIsForeign = yes(_),
-            CType = exported_type_to_string(lang_c, ExportType),
+            MaybeForeignType = yes(ForeignType),
+            CType = foreign_type_to_c_string(ForeignType),
             PassHeadInputArg = "\tMR_MAYBE_BOX_FOREIGN_TYPE(" ++
                 CType ++ ", " ++ ArgName ++ ", " ++ ArgLocString ++ ");\n"
         ;
-            ExportTypeIsForeign = no,
+            MaybeForeignType = no,
             PassHeadInputArg =
                 "\t" ++ ArgLocString ++ " = " ++ ArgName ++ ";\n"
         )
@@ -590,17 +589,16 @@ retrieve_output_args(ModuleInfo, LastArgNum, [AT | ATs], RetrieveOutputArgs) :-
         ArgName = "Mercury__argument" ++ string.int_to_string(CurArgNum),
         arg_loc_to_string(ArgLoc, ArgLocString0),
         convert_type_from_mercury(ArgLoc, ArgLocString0, Type, ArgLocString),
-        ExportType = foreign.to_exported_type(ModuleInfo, Type),
+        MaybeForeignType = is_this_a_foreign_type(ModuleInfo, Type),
         % We need to unbox non-word-sized foreign types
         % before returning them to C code
-        ExportTypeIsForeign = foreign.is_foreign_type(ExportType),
         (
-            ExportTypeIsForeign = yes(_),
-            CType = exported_type_to_string(lang_c, ExportType),
+            MaybeForeignType = yes(ForeignType),
+            CType = foreign_type_to_c_string(ForeignType),
             RetrieveHeadOutputArg = "\tMR_MAYBE_UNBOX_FOREIGN_TYPE(" ++
                 CType ++ ", " ++ ArgLocString ++ ", * " ++ ArgName ++ ");\n"
         ;
-            ExportTypeIsForeign = no,
+            MaybeForeignType = no,
             RetrieveHeadOutputArg =
                 "\t*" ++ ArgName ++ " = " ++ ArgLocString ++ ";\n"
         )
@@ -860,7 +858,7 @@ write_export_decls(Stream, [ExportDecl | ExportDecls], !IO) :-
         ; Lang = lang_java
         ; Lang = lang_erlang
         ),
-        sorry($module, $pred, "foreign languages other than C unimplemented")
+        sorry($pred, "foreign languages other than C unimplemented")
     ),
     write_export_decls(Stream, ExportDecls, !IO).
 
@@ -872,7 +870,7 @@ write_export_decls(Stream, [ExportDecl | ExportDecls], !IO) :-
 output_foreign_decl(Stream, MaybeSetLineNumbers, MaybeThisFileName,
         SourceFileName, MaybeDesiredIsLocal, DeclCode, !IO) :-
     DeclCode = foreign_decl_code(Lang, IsLocal, LiteralOrInclude, Context),
-    expect(unify(Lang, lang_c), $module, $pred, "Lang != lang_c"),
+    expect(unify(Lang, lang_c), $pred, "Lang != lang_c"),
     ( if
         (
             MaybeDesiredIsLocal = no
@@ -922,8 +920,7 @@ output_foreign_literal_or_include(Stream, MaybeSetLineNumbers,
 :- pred exported_enum_is_for_c(exported_enum_info::in) is semidet.
 
 exported_enum_is_for_c(ExportedEnumInfo) :-
-    ExportedEnumInfo = exported_enum_info(Lang, _, _, _, _, _),
-    Lang = lang_c.
+    ExportedEnumInfo ^ eei_language = lang_c.
 
 :- pred output_exported_c_enum(io.text_output_stream::in,
     maybe_set_line_numbers::in, maybe(string)::in,
@@ -931,12 +928,11 @@ exported_enum_is_for_c(ExportedEnumInfo) :-
 
 output_exported_c_enum(Stream, MaybeSetLineNumbers, MaybeThisFileName,
         ExportedEnumInfo, !IO) :-
-    ExportedEnumInfo = exported_enum_info(Lang, Context, TypeCtor,
-        NameMapping, Ctors, ConsIdToTagMap),
-    expect(unify(Lang, lang_c), $module, $pred, "Lang != lang_c"),
-    list.foldl(
-        foreign_const_name_and_tag(TypeCtor, NameMapping, ConsIdToTagMap),
-        Ctors, cord.init, ForeignNamesAndTagsCord),
+    ExportedEnumInfo = exported_enum_info(_TypeCtor, CtorRepns, Lang,
+        NameMapping, Context),
+    expect(unify(Lang, lang_c), $pred, "Lang != lang_c"),
+    list.foldl(foreign_const_name_and_tag(NameMapping),
+        CtorRepns, cord.init, ForeignNamesAndTagsCord),
     ForeignNamesAndTags = cord.list(ForeignNamesAndTagsCord),
     term.context_file(Context, File),
     term.context_line(Context, Line),
@@ -945,91 +941,93 @@ output_exported_c_enum(Stream, MaybeSetLineNumbers, MaybeThisFileName,
     c_util.maybe_reset_line_num(Stream, MaybeSetLineNumbers,
         MaybeThisFileName, !IO).
 
-    % The tags for exported enumerations will either be integers (for normal
-    % enumerations) or strings (for foreign enumerations.)
+    % Values of this type associate the foreign name of an exported
+    % enum constructor with the foreign tag of that constructor.
+    % The tag will either be an integer (for enumerations whose
+    % representations are decided by the Mercury compiler) or strings
+    % (for enumerations whose representations are decide by a
+    % foreign_enum pragma).
     %
-:- type exported_enum_tag_rep
-    --->    ee_tag_rep_int(int)
-    ;       ee_tag_rep_string(string).
+:- type exported_enum_name_and_tag_rep
+    --->    ee_name_and_tag_rep_int(string, int)
+    ;       ee_name_and_tag_rep_string(string, string).
 
 :- pred output_exported_enum_constname_tags(io.text_output_stream::in,
-    list(pair(string, exported_enum_tag_rep))::in, io::di, io::uo) is det.
+    list(exported_enum_name_and_tag_rep)::in, io::di, io::uo) is det.
 
 output_exported_enum_constname_tags(_Stream, [], !IO).
-output_exported_enum_constname_tags(Stream, [ConstNameTag | ConstNameTags],
-        !IO) :-
-    output_exported_enum_constname_tag(Stream, ConstNameTag, !IO),
-    output_exported_enum_constname_tags(Stream, ConstNameTags, !IO).
+output_exported_enum_constname_tags(Stream, [NameAndTag | NameAndTags], !IO) :-
+    output_exported_enum_constname_tag(Stream, NameAndTag, !IO),
+    output_exported_enum_constname_tags(Stream, NameAndTags, !IO).
 
 :- pred output_exported_enum_constname_tag(io.text_output_stream::in,
-    pair(string, exported_enum_tag_rep)::in, io::di, io::uo) is det.
+    exported_enum_name_and_tag_rep::in, io::di, io::uo) is det.
 
-output_exported_enum_constname_tag(Stream, ConstName - Tag, !IO) :-
+output_exported_enum_constname_tag(Stream, NameAndTag, !IO) :-
     (
-        Tag = ee_tag_rep_int(RawIntTag),
-        io.format(Stream, "#define %s %d\n", [s(ConstName), i(RawIntTag)], !IO)
+        NameAndTag = ee_name_and_tag_rep_int(Name, RawIntTag),
+        io.format(Stream, "#define %s %d\n", [s(Name), i(RawIntTag)], !IO)
     ;
-        Tag = ee_tag_rep_string(RawStrTag),
-        io.format(Stream, "#define %s %s\n", [s(ConstName), s(RawStrTag)], !IO)
+        NameAndTag = ee_name_and_tag_rep_string(Name, RawStrTag),
+        io.format(Stream, "#define %s %s\n", [s(Name), s(RawStrTag)], !IO)
     ).
 
-:- pred foreign_const_name_and_tag(type_ctor::in, map(sym_name, string)::in,
-    cons_id_to_tag_map::in, constructor::in,
-    cord(pair(string, exported_enum_tag_rep))::in,
-    cord(pair(string, exported_enum_tag_rep))::out) is det.
+:- pred foreign_const_name_and_tag(map(string, string)::in,
+    constructor_repn::in,
+    cord(exported_enum_name_and_tag_rep)::in,
+    cord(exported_enum_name_and_tag_rep)::out) is det.
 
-foreign_const_name_and_tag(TypeCtor, Mapping, ConsIdToTagMap, Ctor,
-        !NamesAndTagsCord) :-
-    Ctor = ctor(_, QualifiedCtorName, _Args, Arity, _),
-    ConsId = cons(QualifiedCtorName, Arity, TypeCtor),
-    map.lookup(ConsIdToTagMap, ConsId, TagVal),
+foreign_const_name_and_tag(Mapping, CtorRepn, !NamesAndTagsCord) :-
+    CtorRepn = ctor_repn(_, SymName, ConsTag, _, Arity, _),
+    expect(unify(Arity, 0), $pred, "enum constant arity != 0"),
+    Name = unqualify_name(SymName),
+    map.lookup(Mapping, Name, ForeignName),
     (
-        TagVal = int_tag(IntTagType),
+        ConsTag = int_tag(IntTag),
         (
-            IntTagType = int_tag_int(IntTag),
-            Tag = ee_tag_rep_int(IntTag)
+            IntTag = int_tag_int(Int),
+            NameAndTag = ee_name_and_tag_rep_int(ForeignName, Int)
         ;
-            ( IntTagType = int_tag_uint(_)
-            ; IntTagType = int_tag_int8(_)
-            ; IntTagType = int_tag_uint8(_)
-            ; IntTagType = int_tag_int16(_)
-            ; IntTagType = int_tag_uint16(_)
-            ; IntTagType = int_tag_int32(_)
-            ; IntTagType = int_tag_uint32(_)
-            ; IntTagType = int_tag_int64(_)
-            ; IntTagType = int_tag_uint64(_)
+            ( IntTag = int_tag_uint(_)
+            ; IntTag = int_tag_int8(_)
+            ; IntTag = int_tag_uint8(_)
+            ; IntTag = int_tag_int16(_)
+            ; IntTag = int_tag_uint16(_)
+            ; IntTag = int_tag_int32(_)
+            ; IntTag = int_tag_uint32(_)
+            ; IntTag = int_tag_int64(_)
+            ; IntTag = int_tag_uint64(_)
             ),
-            unexpected($module, $pred, "enum constant requires an int tag")
+            unexpected($pred, "enum constant requires an int tag")
         )
     ;
-        TagVal = foreign_tag(_ForeignLang, ForeignTag),
-        Tag = ee_tag_rep_string(ForeignTag)
+        ConsTag = dummy_tag,
+        NameAndTag = ee_name_and_tag_rep_int(ForeignName, 0)
     ;
-        ( TagVal = string_tag(_)
-        ; TagVal = float_tag(_)
-        ; TagVal = closure_tag(_, _, _)
-        ; TagVal = type_ctor_info_tag(_, _, _)
-        ; TagVal = base_typeclass_info_tag(_, _, _)
-        ; TagVal = type_info_const_tag(_)
-        ; TagVal = typeclass_info_const_tag(_)
-        ; TagVal = ground_term_const_tag(_, _)
-        ; TagVal = tabling_info_tag(_, _)
-        ; TagVal = deep_profiling_proc_layout_tag(_, _)
-        ; TagVal = table_io_entry_tag(_, _)
-        ; TagVal = single_functor_tag
-        ; TagVal = unshared_tag(_)
-        ; TagVal = direct_arg_tag(_)
-        ; TagVal = shared_remote_tag(_, _)
-        ; TagVal = shared_local_tag(_, _)
-        ; TagVal = no_tag
+        ConsTag = foreign_tag(_ForeignLang, ForeignTag),
+        NameAndTag = ee_name_and_tag_rep_string(ForeignName, ForeignTag)
+    ;
+        ( ConsTag = string_tag(_)
+        ; ConsTag = float_tag(_)
+        ; ConsTag = closure_tag(_, _, _)
+        ; ConsTag = type_ctor_info_tag(_, _, _)
+        ; ConsTag = base_typeclass_info_tag(_, _, _)
+        ; ConsTag = type_info_const_tag(_)
+        ; ConsTag = typeclass_info_const_tag(_)
+        ; ConsTag = ground_term_const_tag(_, _)
+        ; ConsTag = tabling_info_tag(_, _)
+        ; ConsTag = deep_profiling_proc_layout_tag(_, _)
+        ; ConsTag = table_io_entry_tag(_, _)
+        ; ConsTag = single_functor_tag
+        ; ConsTag = unshared_tag(_)
+        ; ConsTag = direct_arg_tag(_)
+        ; ConsTag = shared_remote_tag(_, _, _)
+        ; ConsTag = shared_local_tag(_, _)
+        ; ConsTag = no_tag
         ),
-        unexpected($module, $pred, "enum constant requires an int tag")
+        unexpected($pred, "enum constant requires an int tag")
     ),
-    % Sanity check.
-    expect(unify(Arity, 0), $module, $pred, "enum constant arity != 0"),
-    UnqualifiedCtorName = unqualified(unqualify_name(QualifiedCtorName)),
-    map.lookup(Mapping, UnqualifiedCtorName, ForeignName),
-    !:NamesAndTagsCord = cord.snoc(!.NamesAndTagsCord, ForeignName - Tag).
+    !:NamesAndTagsCord = cord.snoc(!.NamesAndTagsCord, NameAndTag).
 
 %-----------------------------------------------------------------------------%
 

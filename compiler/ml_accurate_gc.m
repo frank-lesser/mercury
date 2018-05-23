@@ -198,7 +198,7 @@ ml_do_gen_gc_statement(VarName, DeclType, HowToGetTypeInfo, Context, GCStmt,
 
 ml_type_might_contain_pointers_for_gc(Type) = MightContainPointers :-
     (
-        Type = mercury_type(_Type, TypeCategory, _),
+        Type = mercury_type(_, _, TypeCategory),
         MightContainPointers =
             ml_type_category_might_contain_pointers(TypeCategory)
     ;
@@ -380,8 +380,8 @@ ml_gen_trace_var(Info, VarName, Type, TypeInfoRval, Context, TraceStmt) :-
     ProcLabel = mlds_proc_label(PredLabel, ProcId),
     FuncLabel = mlds_func_label(ProcLabel, proc_func),
     QualFuncLabel = qual_func_label(MLDS_Module, FuncLabel),
-    CPointerType = mercury_type(c_pointer_type,
-        ctor_cat_user(cat_user_general), non_foreign_type(c_pointer_type)),
+    CPointerType = mercury_type(c_pointer_type, no,
+        ctor_cat_user(cat_user_general)),
     ArgTypes = [mlds_pseudo_type_info_type, CPointerType],
     Signature = mlds_func_signature(ArgTypes, []),
     FuncAddr = ml_const(mlconst_code_addr(
@@ -389,7 +389,7 @@ ml_gen_trace_var(Info, VarName, Type, TypeInfoRval, Context, TraceStmt) :-
 
     % Generate the call
     % `private_builtin.gc_trace(TypeInfo, (MR_C_Pointer) &Var);'.
-    CastVarAddr = ml_unop(cast(CPointerType), ml_mem_addr(VarLval)),
+    CastVarAddr = ml_cast(CPointerType, ml_mem_addr(VarLval)),
     TraceStmt = ml_stmt_call(Signature, FuncAddr,
         [TypeInfoRval, CastVarAddr], [], ordinary_call, Context).
 
@@ -411,7 +411,7 @@ ml_gen_make_type_info_var(Type, Context, TypeInfoVar, TypeInfoGoals, !Info) :-
         TypeInfoVar, TypeInfoGoals, PolyInfo0, PolyInfo),
     poly_info_extract(PolyInfo, PolySpecs, PredInfo0, PredInfo,
         ProcInfo0, ProcInfo, ModuleInfo1),
-    expect(unify(PolySpecs, []), $module, $pred,
+    expect(unify(PolySpecs, []), $pred,
         "got errors while making type_info_var"),
 
     % Save the new information back in the ml_gen_info.
@@ -459,9 +459,9 @@ fixup_newobj_in_stmt(Stmt0, Stmt, !Fixup) :-
         list.map_foldl(fixup_newobj_in_stmt, SubStmts0, SubStmts, !Fixup),
         Stmt = ml_stmt_block(LocalVarDefns, FuncDefns, SubStmts, Context)
     ;
-        Stmt0 = ml_stmt_while(Kind, Rval, BodyStmt0, Context),
+        Stmt0 = ml_stmt_while(Kind, Rval, BodyStmt0, LoopLocalVars, Context),
         fixup_newobj_in_stmt(BodyStmt0, BodyStmt, !Fixup),
-        Stmt = ml_stmt_while(Kind, Rval, BodyStmt, Context)
+        Stmt = ml_stmt_while(Kind, Rval, BodyStmt, LoopLocalVars, Context)
     ;
         Stmt0 = ml_stmt_if_then_else(Cond, Then0, MaybeElse0, Context),
         fixup_newobj_in_stmt(Then0, Then, !Fixup),
@@ -530,9 +530,9 @@ fixup_newobj_in_default(Default0, Default, !Fixup) :-
 
 fixup_newobj_in_atomic_statement(AtomicStmt0, Context, Stmt, !Fixup) :-
     ( if
-        AtomicStmt0 = new_object(Lval, MaybeTag, _ExplicitSecTag,
+        AtomicStmt0 = new_object(Lval, Ptag, _ExplicitSecTag,
             PointerType, _MaybeSizeInWordsRval, _MaybeCtorName,
-            ArgRvals, _ArgTypes, _MayUseAtomic, _AllocId)
+            ArgRvalsTypes,  _MayUseAtomic, _AllocId)
     then
         % Generate the declaration of the new local variable.
         %
@@ -545,7 +545,7 @@ fixup_newobj_in_atomic_statement(AtomicStmt0, Context, Stmt, !Fixup) :-
         counter.allocate(Id, !.Fixup ^ fnoi_next_id, NextId),
         VarName = lvn_comp_var(lvnc_new_obj(Id)),
         VarType = mlds_array_type(mlds_generic_type),
-        NullPointers = list.duplicate(list.length(ArgRvals),
+        NullPointers = list.duplicate(list.length(ArgRvalsTypes),
             init_obj(ml_const(mlconst_null(mlds_generic_type)))),
         Initializer = init_array(NullPointers),
         % This is used for the type_infos allocated during tracing,
@@ -570,13 +570,17 @@ fixup_newobj_in_atomic_statement(AtomicStmt0, Context, Stmt, !Fixup) :-
         % declaration.
 
         VarLval = ml_local_var(VarName, VarType),
-        PtrRval = ml_unop(cast(PointerType), ml_mem_addr(VarLval)),
+        PtrRval = ml_cast(PointerType, ml_mem_addr(VarLval)),
         list.map_foldl(init_field_n(PointerType, PtrRval, Context),
-            ArgRvals, ArgInitStmts, 0, _NumFields),
+            ArgRvalsTypes, ArgInitStmts, 0, _NumFields),
 
         % Generate code to assign the address of the new local variable
         % to the Lval.
-        TaggedPtrRval = maybe_tag_rval(MaybeTag, PointerType, PtrRval),
+        ( if Ptag = 0 then
+            TaggedPtrRval = PtrRval
+        else
+            TaggedPtrRval = ml_cast(PointerType, ml_mkword(Ptag, PtrRval))
+        ),
         AssignStmt = ml_stmt_atomic(assign(Lval, TaggedPtrRval), Context),
         Stmt = ml_stmt_block([], [], ArgInitStmts ++ [AssignStmt], Context)
     else
@@ -584,22 +588,17 @@ fixup_newobj_in_atomic_statement(AtomicStmt0, Context, Stmt, !Fixup) :-
     ).
 
 :- pred init_field_n(mlds_type::in, mlds_rval::in, prog_context::in,
-    mlds_rval::in, mlds_stmt::out, int::in, int::out) is det.
+    mlds_typed_rval::in, mlds_stmt::out, int::in, int::out) is det.
 
-init_field_n(PointerType, PointerRval, Context, ArgRval, Stmt,
+init_field_n(PointerType, PointerRval, Context, ArgRvalType, Stmt,
         FieldNum, FieldNum + 1) :-
+    ArgRvalType = ml_typed_rval(ArgRval, _ArgType),
     FieldId = ml_field_offset(ml_const(mlconst_int(FieldNum))),
-    % XXX FieldType is wrong for --high-level-data
+    % XXX FieldType is wrong for --high-level-data: should this be _ArgType?
     FieldType = mlds_generic_type,
-    MaybeTag = yes(0),
-    Field = ml_field(MaybeTag, PointerRval, FieldId, FieldType, PointerType),
+    MaybePtag = yes(0),
+    Field = ml_field(MaybePtag, PointerRval, FieldId, FieldType, PointerType),
     Stmt = ml_stmt_atomic(assign(Field, ArgRval), Context).
-
-:- func maybe_tag_rval(maybe(mlds_tag), mlds_type, mlds_rval) = mlds_rval.
-
-maybe_tag_rval(no, _Type, Rval) = Rval.
-maybe_tag_rval(yes(Tag), Type, Rval) = TaggedRval :-
-    TaggedRval = ml_unop(cast(Type), ml_mkword(Tag, Rval)).
 
 %---------------------------------------------------------------------------%
 :- end_module ml_backend.ml_accurate_gc.

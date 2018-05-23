@@ -892,12 +892,10 @@
     --->    func_public
             % Accessible to anyone.
 
-    ;       func_private
+    ;       func_private.
             % Accessible only to the module or class that defines the function.
-
-    ;       func_local.
-            % Accessible only within the block in which this (nested) function
-            % is defined.
+            % Also used for nested functions, which get turned into
+            % separate func_private functions.
 
 :- type constness
     --->    modifiable
@@ -930,12 +928,13 @@
                 % The exact Mercury type.
                 mer_type,
 
-                % What kind of type it is: enum, float, ...
-                type_ctor_category,
+                % If the Mercury type actually defined a foreign language,
+                % then this field should contain the foreign language
+                % type's name, and any assertions on that foreign type.
+                maybe(foreign_type_and_assertions),
 
-                % A representation of the type which can be used to determine
-                % the foreign language representation of the type.
-                exported_type
+                % What kind of type it is: enum, float, ...
+                type_ctor_category
             )
 
     ;       mlds_mercury_array_type(mlds_type)
@@ -977,7 +976,7 @@
             % will keep track of the information needed to unwind the stack,
             % and so variables of this type don't need to be declared at all.
             %
-            % See also the comments in ml_code_gen.m which show how commits
+            % See also the comments in ml_commit_gen.m which show how commits
             % can be implemented for different target languages.
 
     ;       mlds_native_bool_type
@@ -1045,7 +1044,7 @@
             % since C doesn't have first-class function types.
 
     ;       mlds_generic_type
-            % A generic type (e.g. `Word') that can hold any Mercury value.
+            % A generic type (e.g. `MR_Word') that can hold any Mercury value.
             % This is used for implementing polymorphism.
 
     ;       mlds_generic_env_ptr_type
@@ -1102,6 +1101,26 @@
 
                 % The body.
                 mlds_stmt,
+
+                % A list of the local variables that are used in the loop body
+                % *before* being defined there (with their *initial* values
+                % being set before the loop itself), and whose definitions
+                % in the loop body must therefore be kept even if their values
+                % are not used after the loop. This field is used by
+                % ml_unused_assign.m.
+                %
+                % For example, given a loop such as
+                %
+                % i = 0;
+                % while (i < num_rows) {
+                %    ... do something with row[i] ...
+                %    i = i + 1;
+                % }
+                %
+                % where i is not used after the loop, i must be included
+                % in this field to prevent ml_unused_assign.m from optimizing
+                % away the increment of i.
+                list(mlds_local_var_name),
 
                 prog_context
             )
@@ -1204,22 +1223,24 @@
 
     ;       ml_stmt_try_commit(mlds_lval, mlds_stmt, mlds_stmt, prog_context)
     ;       ml_stmt_do_commit(mlds_rval, prog_context)
-            % try_commit(Ref, GoalToTry, CommitHandlerGoal, _Context):
-            %   Execute GoalToTry. If GoalToTry exits via a `commit(Ref)'
-            %   instruction, then execute CommitHandlerGoal.
+            % try_commit(Ref, StmtToTry, CommitHandlerStmt, _Context):
+            %   Execute StmtToTry. If StmtToTry exits via a `do_commit(Ref)'
+            %   instruction, then execute CommitHandlerStmt.
             %
             % do_commit(Ref, _Context):
             %   Unwind the stack to the corresponding `try_commit'
-            %   statement for Ref, and branch to the CommitHandlerGoal
+            %   statement for Ref, and branch to the CommitHandlerStmt
             %   that was specified in that try_commit instruction.
             %
-            % For both try_commit and do_commit instructions, Ref should be
-            % the name of a local variable of type mlds_commit_type.
+            % For both try_commit and do_commit instructions, Ref should
+            % *initially* be the name of a local variable of type
+            % mlds_commit_type, though ml_elim_nested may later replace that
+            % with a reference to that variable in an environment.
             % (This variable can be used by the back-end's implementation
             % of do_commit and try_commit to store information needed to unwind
             % the stack.) There should be exactly one try_commit instruction
             % for each Ref. do_commit(Ref) instructions should only be used
-            % in goals called from the GoalToTry goal in the try_commit
+            % in goals called from the StmtToTry goal in the try_commit
             % instruction with the same Ref.
             %
             % The C back-end requires each try_commit to be put in its own
@@ -1263,7 +1284,7 @@
 :- inst ml_stmt_is_block for mlds_stmt/0
     --->    ml_stmt_block(ground, ground, ground, ground).
 :- inst ml_stmt_is_while for mlds_stmt/0
-    --->    ml_stmt_while(ground, ground, ground, ground).
+    --->    ml_stmt_while(ground, ground, ground, ground, ground).
 :- inst ml_stmt_is_if_then_else for mlds_stmt/0
     --->    ml_stmt_if_then_else(ground, ground, ground, ground).
 :- inst ml_stmt_is_switch for mlds_stmt/0
@@ -1428,12 +1449,12 @@
     % Heap management.
 
     ;       delete_object(mlds_rval)
-            % Compile time garbage collect (ie explicitly
-            % deallocate) the memory used by the lval.
+            % Compile time garbage collect (i.e. explicitly deallocate)
+            % the memory at the address given by the rval.
 
     ;       new_object(
                 % new_object(Target, Tag, Type, Size, CtorName,
-                %   Args, ArgTypes, MayUseAtomic, MaybeAllocId):
+                %   ArgAndTypes, MayUseAtomic, MaybeAllocId):
                 % Allocate a memory block of the given size,
                 % initialize it with a new object of the given
                 % type by calling the constructor with the specified
@@ -1444,9 +1465,14 @@
                 % The target to assign the new object's address to.
                 mlds_lval,
 
-                % A (primary) tag to tag the address with before assigning
-                % the result to the target.
-                maybe(mlds_tag),
+                % A primary tag to tag the address with before assigning
+                % the result to the target. If the primary tag is zero,
+                % then the tagging operation is not required, since
+                % it would be a no-op.
+                %
+                % Needed only by ml_accurate_gc.m; not needed by any of
+                % the code generators.
+                ptag,
 
                 % Indicates whether or not the first argument in the list (see
                 % below) is a secondary tag. For target languages with
@@ -1464,17 +1490,14 @@
                 % The name of the constructor to invoke.
                 maybe(qual_ctor_id),
 
-                % The arguments to the constructor.
+                % The arguments to the constructor, and their types.
                 % Any arguments which are supposed to be packed together should
                 % be packed in this list by the HLDS->MLDS code generator.
-                list(mlds_rval),
-
-                % The types of the arguments to the constructor.
                 %
-                % For boxed fields, the type here should be mlds_generic_type;
+                % For boxed fields, the types here should be mlds_generic_type;
                 % it is the responsibility of the HLDS->MLDS code generator to
                 % insert code to box/unbox the arguments.
-                list(mlds_type),
+                list(mlds_typed_rval),
 
                 % Can we use a cell allocated with GC_malloc_atomic to hold
                 % this object in the C backend?
@@ -1542,7 +1565,7 @@
             ).
 
 :- inst atomic_stmt_is_new_object for mlds_atomic_statement/0
-    --->    new_object(ground, ground, ground, ground, ground, ground, ground,
+    --->    new_object(ground, ground, ground, ground, ground, ground,
                 ground, ground, ground).
 
     % Stores information about each argument to an outline_foreign_proc.
@@ -1637,10 +1660,6 @@
     ;       exception
     ;       gc.
 
-    % A tag should be a small non-negative integer.
-    %
-:- type mlds_tag == int.
-
 %---------------------------------------------------------------------------%
 %
 % Lvals.
@@ -1654,25 +1673,29 @@
     % Values on the heap or fields of a structure.
 
     --->    ml_field(
-                % field(Tag, Address, FieldId, FieldType, PtrType):
-                % Selects a field of a compound term.
-
+                % field(MaybePtag, Address, FieldId, FieldType, PtrType):
+                % Selects one field of a compound term.
+                %
                 % Address is a tagged pointer to a cell on the heap.
                 % The position in the cell, FieldId, is represented either
-                % as a field name or a number of words offset. If Tag is yes,
-                % the arg gives the value of the tag; if it is no, the tag bits
-                % will have to be masked off. The value of the tag should be
-                % given if it is known, since this will lead to faster code.
+                % as a field name or a number of words offset.
+                %
+                % If MaybePtag is yes(Ptag), then the primary tag on Address
+                % is Ptag; if MaybePtag is no, then the primary tag bits will
+                % have to be masked off of Address.
+                %
+                % The value of the primary tag should be given if it is known,
+                % since this will lead to faster code.
+                %
                 % The FieldType is the type of the field. The PtrType is the
                 % type of the pointer from which we are fetching the field.
                 %
                 % For boxed fields, the type here should be mlds_generic_type,
                 % not the actual type of the field. If the actual type is
-                % different, then it is the HLDS->MLDS code generator's
-                % responsibility to insert the necessary code to handle
-                % boxing/unboxing.
+                % different, then it is the HLDS->MLDS code generator's job
+                % to insert the required boxing/unboxing code.
 
-                field_tag       :: maybe(mlds_tag),
+                field_ptag      :: maybe(ptag),
                 field_addr      :: mlds_rval,
                 field_field_id  :: mlds_field_id,
                 field_type      :: mlds_type,
@@ -1714,6 +1737,16 @@
                 mlds_type
             ).
 
+    % The information contained in an ml_local_var mlds_lval.
+    % Use this type when you need a way to store information about
+    % an mlds_lval that is definitely a local variable.
+    %
+:- type mlds_local_var_name_type
+    --->    mlds_local_var_name_type(
+                mlds_local_var_name,
+                mlds_type
+            ).
+
     % An mlds_field_id represents some data within an object.
     %
 :- type mlds_field_id
@@ -1744,6 +1777,9 @@
 % Rvals.
 %
 
+:- type mlds_typed_rval
+    --->    ml_typed_rval(mlds_rval, mlds_type).
+
     % An rval is an expression that represents a value.
     %
 :- type mlds_rval
@@ -1751,16 +1787,29 @@
             % The value of an `lval' rval is just the value stored in
             % the specified lval.
 
-    ;       ml_mkword(mlds_tag, mlds_rval)
-            % Given a pointer and a tag, mkword returns a tagged pointer.
+    ;       ml_mkword(ptag, mlds_rval)
+            % Given a pointer and a primary tag, return a tagged pointer.
             %
             % In theory, we could make `mkword' a binary_op, but this
-            % representation is tighther: it makes clear that the tag
+            % representation is tighter: it makes clear that the tag
             % we want to put on is *always* a constant.
 
     ;       ml_const(mlds_rval_const)
 
-    ;       ml_unop(mlds_unary_op, mlds_rval)
+    ;       ml_box(mlds_type, mlds_rval)
+            % ml_box(MLDSType); convert from MLDSType to mlds_generic_type,
+            % by boxing if necessary, or just casting if not.
+
+    ;       ml_unbox(mlds_type, mlds_rval)
+            % ml_unbox(MLDSType): convert from mlds_generic_type to MLDSType,
+            % applying the inverse transformation to box/1, i.e. unboxing
+            % if boxing was necessary, and just casting otherwise.
+
+    ;       ml_cast(mlds_type, mlds_rval)
+            % ml_cast(MLDSType): Coerce the type of the rval to be MLDSType.
+            % XXX It might be worthwhile adding the type that we cast from.
+
+    ;       ml_unop(unary_op, mlds_rval)
 
     ;       ml_binop(binary_op, mlds_rval, mlds_rval)
 
@@ -1774,6 +1823,8 @@
             % This rval is intended to be used as the name of an array
             % to be indexed into. This is possible because the elements
             % of a scalar common cell are all boxed and thus of the same size.
+            % XXX This need NOT be true in the presence of double-word
+            % float, int64 or uint64 arguments on 32 bit platforms.
 
     ;       ml_scalar_common_addr(mlds_scalar_common)
             % The address of the ml_scalar_common(...) for the same common.
@@ -1865,22 +1916,6 @@
                 mlds_func_signature
             ).
 
-:- type mlds_unary_op
-    --->    box(mlds_type)
-            % box(MLDSType); convert from MLDSType to mlds_generic_type,
-            % by boxing if necessary, or just casting if not.
-
-    ;       unbox(mlds_type)
-            % unbox(MLDSType): convert from mlds_generic_type to MLDSType,
-            % applying the inverse transformation to box/1, i.e. unboxing
-            % if boxing was necessary, and just casting otherwise.
-
-    ;       cast(mlds_type)
-            % cast(MLDSType): Coerce the type of the rval to be MLDSType.
-            % XXX It might be worthwhile adding the type that we cast from.
-
-    ;       std_unop(builtin_ops.unary_op).
-
 :- type ml_scalar_common_type_num
     --->    ml_scalar_common_type_num(int).
 :- type ml_vector_common_type_num
@@ -1936,9 +1971,12 @@
     --->    mlds_exported_enum(
                 exported_enum_lang      :: foreign_language,
                 exported_enum_context   :: prog_context,
+
+                % mlds_to_cs.m and mlds_to_java.m need to know the type_ctor.
                 exported_enum_type_ctor :: type_ctor,
+
+                % The name of each constant plus the value to initialize it to.
                 exported_enum_constants :: list(mlds_exported_enum_constant)
-                % The name of each constant plus a value to initialize it to.
             ).
 
 :- type mlds_exported_enum_constant
@@ -2495,7 +2533,7 @@ mlds_std_tabling_proc_label(ProcLabel0) = ProcLabel :-
             Arity, model_det, no)
     ;
         PredLabel0 = mlds_special_pred_label(_, _, _, _),
-        unexpected($module, $pred, "mlds_special_pred_label")
+        unexpected($pred, "mlds_special_pred_label")
     ),
     ProcLabel = mlds_proc_label(PredLabel, ProcId).
 
@@ -2530,7 +2568,7 @@ foreign_type_to_mlds_type(ModuleInfo, ForeignTypeBody) = MLDSType :-
         ;
             MaybeC = no,
             % This is checked by check_foreign_type in make_hlds.
-            unexpected($module, $pred, "no C foreign type")
+            unexpected($pred, "no C foreign type")
         )
     ;
         Target = target_csharp,
@@ -2541,7 +2579,7 @@ foreign_type_to_mlds_type(ModuleInfo, ForeignTypeBody) = MLDSType :-
         ;
             MaybeCSharp = no,
             % This is checked by check_foreign_type in make_hlds.
-            unexpected($module, $pred, "no C# foreign type")
+            unexpected($pred, "no C# foreign type")
         )
     ;
         Target = target_java,
@@ -2552,11 +2590,11 @@ foreign_type_to_mlds_type(ModuleInfo, ForeignTypeBody) = MLDSType :-
         ;
             MaybeJava = no,
             % This is checked by check_foreign_type in make_hlds.
-            unexpected($module, $pred, "no Java foreign type")
+            unexpected($pred, "no Java foreign type")
         )
     ;
         Target = target_erlang,
-        unexpected($module, $pred, "target erlang")
+        unexpected($pred, "target erlang")
     ),
     MLDSType = mlds_foreign_type(ForeignType).
 
@@ -2608,23 +2646,19 @@ mercury_type_to_mlds_type(ModuleInfo, Type) = MLDSType :-
                         ForeignTypeBody)
                 else if TypeBody = hlds_abstract_type(_) then
                     Category = classify_type_ctor(ModuleInfo, TypeCtor),
-                    ExportedType = non_foreign_type(Type),
-                    MLDSType = mercury_type(Type, Category, ExportedType)
+                    MLDSType = mercury_type(Type, no, Category)
                 else
                     Category = classify_type_defn_body(TypeBody),
-                    ExportedType = non_foreign_type(Type),
-                    MLDSType = mercury_type(Type, Category, ExportedType)
+                    MLDSType = mercury_type(Type, no, Category)
                 )
             else
                 Category = classify_type_ctor(ModuleInfo, TypeCtor),
-                ExportedType = non_foreign_type(Type),
-                MLDSType = mercury_type(Type, Category, ExportedType)
+                MLDSType = mercury_type(Type, no, Category)
             )
         )
     else
         Category = ctor_cat_variable,
-        ExportedType = non_foreign_type(Type),
-        MLDSType = mercury_type(Type, Category, ExportedType)
+        MLDSType = mercury_type(Type, no, Category)
     ).
 %---------------------------------------------------------------------------%
 

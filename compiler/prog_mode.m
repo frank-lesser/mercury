@@ -136,6 +136,9 @@
     % insts of the arguments of the top level functor, failing if the
     % inst could not be bound to the functor.
     %
+    % Note that inst_expand does not expand insts with constrained_inst_vars
+    % at the top level.
+    %
 :- pred get_arg_insts(mer_inst::in, cons_id::in, arity::in,
     list(mer_inst)::out) is semidet.
 
@@ -270,11 +273,11 @@ make_std_mode(Name, Args) = Mode :-
 
 %---------------------------------------------------------------------------%
 
-inst_lists_to_mode_list([], [_ | _], _) :-
-    unexpected($module, $pred, "length mismatch").
-inst_lists_to_mode_list([_ | _], [], _) :-
-    unexpected($module, $pred, "length mismatch").
 inst_lists_to_mode_list([], [], []).
+inst_lists_to_mode_list([], [_ | _], _) :-
+    unexpected($pred, "length mismatch").
+inst_lists_to_mode_list([_ | _], [], _) :-
+    unexpected($pred, "length mismatch").
 inst_lists_to_mode_list([Initial | Initials], [Final | Finals],
         [Mode | Modes]) :-
     insts_to_mode(Initial, Final, Mode),
@@ -441,7 +444,7 @@ inst_apply_substitution(Subst, Inst0, Inst) :-
         ( if set.is_singleton(Vars, Var0) then
             Var = Var0
         else
-            unexpected($module, $pred, "multiple inst_vars found")
+            unexpected($pred, "multiple inst_vars found")
         ),
         ( if map.search(Subst, Var, ReplacementInst) then
             Inst = ReplacementInst
@@ -856,7 +859,7 @@ get_arg_insts_det(Inst, ConsId, Arity, ArgInsts) :-
     ( if get_arg_insts(Inst, ConsId, Arity, ArgInstsPrime) then
         ArgInsts = ArgInstsPrime
     else
-        unexpected($module, $pred, "get_arg_insts failed")
+        unexpected($pred, "get_arg_insts failed")
     ).
 
 :- pred get_arg_insts_2(list(bound_inst)::in, cons_id::in, list(mer_inst)::out)
@@ -1277,7 +1280,7 @@ gather_inconsistent_constrained_inst_vars_in_inst(Inst,
         )
     ;
         Inst = inst_var(_),
-        unexpected($module, $pred, "unconstrained inst_var")
+        unexpected($pred, "unconstrained inst_var")
     ;
         Inst = defined_inst(InstName),
         ( if InstName = user_inst(_, ArgInsts) then

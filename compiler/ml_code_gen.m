@@ -965,8 +965,7 @@ ml_gen_ite(CodeModel, Cond, Then, Else, Context,
         ml_gen_info_set_const_var_map(InitConstVarMap, !Info),
         ml_gen_goal_as_block(CodeModel, Else, ElseStmt, !Info),
         ml_gen_info_set_const_var_map(InitConstVarMap, !Info),
-        IfStmt = ml_stmt_if_then_else(
-            ml_unop(std_unop(logical_not), CondSucceeded),
+        IfStmt = ml_stmt_if_then_else(ml_unop(logical_not, CondSucceeded),
             ElseStmt, no, Context),
 
         % Package it all up in the right order.
@@ -1028,7 +1027,7 @@ ml_gen_negation(Cond, CodeModel, Context, LocalVarDefns, FuncDefns, Stmts,
         ml_gen_goal_as_branch(model_semi, Cond,
             CondLocalVarDefns, CondFuncDefns, CondStmts, !Info),
         ml_gen_test_success(Succeeded, !Info),
-        ml_gen_set_success(ml_unop(std_unop(logical_not), Succeeded),
+        ml_gen_set_success(ml_unop(logical_not, Succeeded),
             Context, InvertSuccess, !Info),
         LocalVarDefns = CondLocalVarDefns,
         FuncDefns = CondFuncDefns,
@@ -1169,7 +1168,7 @@ ml_gen_local_var_decls(VarSet, VarTypes, Context, [Var | Vars], Defns,
         !Info) :-
     lookup_var_type(VarTypes, Var, Type),
     ml_gen_info_get_module_info(!.Info, ModuleInfo),
-    IsDummy = check_dummy_type(ModuleInfo, Type),
+    IsDummy = is_type_a_dummy(ModuleInfo, Type),
     (
         IsDummy = is_dummy_type,
         % No declaration needed for this variable.

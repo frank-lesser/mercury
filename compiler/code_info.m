@@ -123,6 +123,10 @@
 :- pred get_opt_region_ops(code_info::in, bool::out) is det.
 :- pred get_auto_comments(code_info::in, bool::out) is det.
 :- pred get_lcmc_null(code_info::in, bool::out) is det.
+:- pred get_profile_memory(code_info::in, bool::out) is det.
+:- pred get_may_use_atomic_alloc(code_info::in,
+    may_use_atomic_alloc::out) is det.
+:- pred get_gc_method(code_info::in, gc_method::out) is det.
 :- pred get_maybe_containing_goal_map(code_info::in,
     maybe(containing_goal_map)::out) is det.
 :- pred get_const_struct_map(code_info::in, const_struct_map::out) is det.
@@ -265,8 +269,14 @@
                 % The setting of --auto-comments.
                 cis_auto_comments       :: bool,
 
-                % The setting of --optimize-constructor-last-call-null.
+                % The settings of --optimize-constructor-last-call-null,
+                % --profile-memory, and --use-atomic-cells.
                 cis_lcmc_null           :: bool,
+                cis_profile_memory      :: bool,
+                cis_may_use_atomic_alloc :: may_use_atomic_alloc,
+
+                % The GC method.
+                cis_gc_method           :: gc_method,
 
                 cis_containing_goal_map :: maybe(containing_goal_map),
 
@@ -392,6 +402,16 @@ code_info_init(ModuleInfo, PredId, ProcId, PredInfo, ProcInfo,
     globals.lookup_bool_option(Globals, auto_comments, AutoComments),
     globals.lookup_bool_option(Globals, optimize_constructor_last_call_null,
         LCMCNull),
+    globals.lookup_bool_option(Globals, profile_memory, ProfileMemory),
+    globals.lookup_bool_option(Globals, use_atomic_cells, UseAtomicCells),
+    (
+        UseAtomicCells = no,
+        InitMayUseAtomic = may_not_use_atomic_alloc
+    ;
+        UseAtomicCells = yes,
+        InitMayUseAtomic = may_use_atomic_alloc
+    ),
+    globals.get_gc_method(Globals, GCMethod),
     % argument MaybeContainingGoalMap
     % argument ConstStructMap
 
@@ -415,6 +435,9 @@ code_info_init(ModuleInfo, PredId, ProcId, PredInfo, ProcInfo,
         OptRegionOps,
         AutoComments,
         LCMCNull,
+        ProfileMemory,
+        InitMayUseAtomic,
+        GCMethod,
         MaybeContainingGoalMap,
         ConstStructMap
     ),
@@ -644,6 +667,12 @@ get_auto_comments(CI, X) :-
     X = CI ^ code_info_static ^ cis_auto_comments.
 get_lcmc_null(CI, X) :-
     X = CI ^ code_info_static ^ cis_lcmc_null.
+get_profile_memory(CI, X) :-
+    X = CI ^ code_info_static ^ cis_profile_memory.
+get_may_use_atomic_alloc(CI, X) :-
+    X = CI ^ code_info_static ^ cis_may_use_atomic_alloc.
+get_gc_method(CI, X) :-
+    X = CI ^ code_info_static ^ cis_gc_method.
 get_maybe_containing_goal_map(CI, X) :-
     X = CI ^ code_info_static ^ cis_containing_goal_map.
 get_const_struct_map(CI, X) :-
@@ -830,6 +859,9 @@ set_used_env_vars(X, !CI) :-
 :- pred add_vector_static_cell(list(llds_type)::in, list(list(rval))::in,
     data_id::out, code_info::in, code_info::out) is det.
 
+:- pred maybe_add_alloc_site_info(prog_context::in, string::in, int::in,
+    maybe(alloc_site_id)::out, code_info::in, code_info::out) is det.
+
 :- pred add_alloc_site_info(prog_context::in, string::in, int::in,
     alloc_site_id::out, code_info::in, code_info::out) is det.
 
@@ -871,7 +903,7 @@ variable_type(CI, Var) = Type :-
 variable_is_of_dummy_type(CI, Var) = IsDummy :-
     VarType = variable_type(CI, Var),
     get_module_info(CI, ModuleInfo),
-    IsDummy = check_dummy_type(ModuleInfo, VarType).
+    IsDummy = is_type_a_dummy(ModuleInfo, VarType).
 
 search_type_defn(CI, Type, TypeDefn) :-
     get_module_info(CI, ModuleInfo),
@@ -883,7 +915,7 @@ lookup_type_defn(CI, Type) = TypeDefn :-
     ( if search_type_defn(CI, Type, TypeDefnPrime) then
         TypeDefn = TypeDefnPrime
     else
-        unexpected($module, $pred, "type ctor has no definition")
+        unexpected($pred, "type ctor has no definition")
     ).
 
 lookup_cheaper_tag_test(CI, Type) = CheaperTagTest :-
@@ -965,7 +997,7 @@ add_trace_layout_for_label(Label, Context, Port, IsHidden, GoalPath,
         Label = internal_label(LabelNum, _)
     ;
         Label = entry_label(_, _),
-        unexpected($module, $pred, "entry")
+        unexpected($pred, "entry")
     ),
     ( if map.search(Internals0, LabelNum, Internal0) then
         Internal0 = internal_layout_info(Exec0, Resume, Return),
@@ -973,7 +1005,7 @@ add_trace_layout_for_label(Label, Context, Port, IsHidden, GoalPath,
             Exec0 = no
         ;
             Exec0 = yes(_),
-            unexpected($module, $pred, "already known label")
+            unexpected($pred, "already known label")
         ),
         Internal = internal_layout_info(Exec, Resume, Return),
         map.det_update(LabelNum, Internal, Internals0, Internals)
@@ -990,7 +1022,7 @@ add_resume_layout_for_label(Label, LayoutInfo, !CI) :-
         Label = internal_label(LabelNum, _)
     ;
         Label = entry_label(_, _),
-        unexpected($module, $pred, "entry")
+        unexpected($pred, "entry")
     ),
     ( if map.search(Internals0, LabelNum, Internal0) then
         Internal0 = internal_layout_info(Exec, Resume0, Return),
@@ -998,7 +1030,7 @@ add_resume_layout_for_label(Label, LayoutInfo, !CI) :-
             Resume0 = no
         ;
             Resume0 = yes(_),
-            unexpected($module, $pred, "already known label")
+            unexpected($pred, "already known label")
         ),
         Internal = internal_layout_info(Exec, Resume, Return),
         map.det_update(LabelNum, Internal, Internals0, Internals)
@@ -1050,9 +1082,20 @@ add_vector_static_cell(Types, Vector, DataAddr, !CI) :-
         StaticCellInfo0, StaticCellInfo),
     set_static_cell_info(StaticCellInfo, !CI).
 
-add_alloc_site_info(Context, Type, Size, AllocId, !CI) :-
+maybe_add_alloc_site_info(Context, VarTypeMsg, Size, MaybeAllocId, !CI) :-
+    get_profile_memory(!.CI, ProfileMemory),
+    (
+        ProfileMemory = yes,
+        add_alloc_site_info(Context, VarTypeMsg, Size, AllocId, !CI),
+        MaybeAllocId = yes(AllocId)
+    ;
+        ProfileMemory = no,
+        MaybeAllocId = no
+    ).
+
+add_alloc_site_info(Context, VarTypeMsg, Size, AllocId, !CI) :-
     get_proc_label(!.CI, ProcLabel),
-    AllocSite = alloc_site_info(ProcLabel, Context, Type, Size),
+    AllocSite = alloc_site_info(ProcLabel, Context, VarTypeMsg, Size),
     AllocId = alloc_site_id(AllocSite),
     get_alloc_sites(!.CI, AllocSites0),
     set_tree234.insert(AllocSite, AllocSites0, AllocSites),
@@ -1076,7 +1119,7 @@ get_containing_goal_map(CI, ContainingGoalMap) :-
         MaybeContainingGoalMap = yes(ContainingGoalMap)
     ;
         MaybeContainingGoalMap = no,
-        unexpected($module, $pred, "no map")
+        unexpected($pred, "no map")
     ).
 
 add_out_of_line_code(NewCode, !CI) :-
@@ -1120,7 +1163,7 @@ get_variable_slot(CI, Var, Slot) :-
         term.var_to_int(Var, Num),
         string.int_to_string(Num, NumStr),
         Str = "variable `" ++ Name ++ "' " ++ "(" ++ NumStr ++ ") not found",
-        unexpected($module, $pred, Str)
+        unexpected($pred, Str)
     ).
 
 get_total_stackslot_count(CI, NumSlots) :-

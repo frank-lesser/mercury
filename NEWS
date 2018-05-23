@@ -439,11 +439,25 @@ Changes to the Mercury standard library:
 
    - to_list/1     (synonym for the existing list/1 function)
    - to_rev_list/1 (synonym for the existing rev_list/1 function)
+   - rev_cord_list_to_cord/1 (similar to cord_list_to_cord/1)
+   - rev_cord_list_to_list/1 (similar to cord_list_to_list/1)
    - cons/3
    - snoc/3
    - find_first_match/3
 
-* The following function has been added to the array2d module
+* The following function has been added to the array module:
+
+   - det_least_index/1
+   - semidet_least_index/1
+   - det_greatest_index/1
+   - semidet_greatest_index/1
+
+   The following functions in the array module have been deprecated:
+
+   - least_index/1
+   - greatest_index/1
+
+* The following function has been added to the array2d module:
 
    - is_empty/1
 
@@ -577,6 +591,16 @@ Changes to the Mercury compiler:
   using GCC as the C compiler.
   See README.MacOS for further details.
 
+* We have improved support for FreeBSD:
+    - allow architectures other than i*86
+    - allow use of shared libraries
+    - enabled threads support
+    - enabled parallel job support with mmc --make
+
+* We have added support for OpenBSD.
+
+* We have added support for Linux systems using musl libc.
+
 * The compiler now reports an error for binary/octal/hexadecimal integer
   literals that cannot be represented in the compiler's native int type.
 
@@ -603,7 +627,7 @@ Changes to the Mercury compiler:
 
 * We have disabled the old --num-reserved-objects option.
 
-* We have upgraded the bundled Boehm GC and libatomic_ops to 7.6.2.
+* We have upgraded the bundled Boehm GC to v7.6.6 and libatomic_ops to v7.6.2.
 
 Change to the Mercury debugger:
 

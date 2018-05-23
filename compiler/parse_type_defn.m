@@ -80,7 +80,6 @@
 :- import_module maybe.
 :- import_module require.
 :- import_module set.
-:- import_module string.
 :- import_module unit.
 
 parse_solver_type_defn_item(ModuleName, VarSet, ArgTerms, Context, SeqNum,
@@ -186,7 +185,7 @@ parse_du_type_defn(ModuleName, VarSet, HeadTerm, BodyTerm, Context, SeqNum,
         % We asked parse_type_decl_where_term to return an error if
         % WhereTerm contains solver attributes, so we shouldn't get here
         % if SolverTypeDetails is yes(...).
-        expect(unify(SolverTypeDetails, no), $module, $pred,
+        expect(unify(SolverTypeDetails, no), $pred,
             "discriminated union type has solver type details"),
         OneOrMoreCtors = one_or_more(HeadCtor, TailCtors),
         Ctors = [HeadCtor | TailCtors],
@@ -340,8 +339,22 @@ parse_constructor(ModuleName, VarSet, ExistQVars, Term, MaybeConstructor) :-
             )
         ;
             ExistQVars = [_ | _],
-            MaybeExistConstraints = exist_constraints(
-                cons_exist_constraints(ExistQVars, Constraints)),
+            list.map(
+                ( pred(C::in, Ts::out) is det :-
+                    C = constraint(_, Ts)
+                ), Constraints, ConstrainedTypeLists),
+            list.condense(ConstrainedTypeLists, ConstrainedTypes),
+            % We compute ConstrainedQVars in this roundabout way to give it
+            % the same ordering as ExistQVars. Also, the list returned
+            % by type_vars_list may contain duplicates.
+            type_vars_list(ConstrainedTypes, ConstrainedQVars0),
+            list.delete_elems(ExistQVars, ConstrainedQVars0,
+                UnconstrainedQVars),
+            list.delete_elems(ExistQVars, UnconstrainedQVars,
+                ConstrainedQVars),
+            ExistConstraints = cons_exist_constraints(ExistQVars,
+                Constraints, UnconstrainedQVars, ConstrainedQVars),
+            MaybeExistConstraints = exist_constraints(ExistConstraints),
             MCSpecs = []
         ),
         ( if
@@ -477,8 +490,9 @@ process_du_ctors(Params, VarSet, BodyTerm, [Ctor | Ctors], !Specs) :-
         ExistQVars = [],
         Constraints = []
     ;
-        MaybeExistConstraints = exist_constraints(
-            cons_exist_constraints(ExistQVars, Constraints))
+        MaybeExistConstraints = exist_constraints(ExistConstraints),
+        ExistConstraints = cons_exist_constraints(ExistQVars, Constraints,
+            _UnconstrainedExistQVars, _ConstrainedExistQVars)
     ),
     ( if
         % Check that all type variables in the ctor are either explicitly
@@ -1350,8 +1364,7 @@ make_maybe_where_details_2(IsSolverType, TypeIsAbstractNoncanonical,
                         [always(Pieces)])]),
                 MaybeWhereDetails = error3([Spec])
             else
-               unexpected($module, $pred, "make_maybe_where_details_2: " ++
-                    "shouldn't have reached this point! (1)")
+               unexpected($pred, "shouldn't have reached this point! (1)")
             )
         ;
             IsSolverType = non_solver_type,

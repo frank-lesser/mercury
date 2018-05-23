@@ -48,6 +48,7 @@
 
 :- pred search_var_type(vartypes::in, prog_var::in, mer_type::out) is semidet.
 
+:- func lookup_var_type_func(vartypes, prog_var) = mer_type.
 :- pred lookup_var_type(vartypes::in, prog_var::in, mer_type::out) is det.
 :- pred lookup_var_types(vartypes::in, list(prog_var)::in,
     list(mer_type)::out) is det.
@@ -55,7 +56,7 @@
 :- pred vartypes_vars(vartypes::in, list(prog_var)::out) is det.
 :- pred vartypes_types(vartypes::in, list(mer_type)::out) is det.
 
-:- pred vartypes_to_assoc_list(vartypes::in,
+:- pred vartypes_to_sorted_assoc_list(vartypes::in,
     assoc_list(prog_var, mer_type)::out) is det.
 
 :- pred vartypes_from_corresponding_lists(list(prog_var)::in,
@@ -142,6 +143,9 @@ is_in_vartypes(VarTypes, Var) :-
 search_var_type(VarTypes, Var, Type) :-
     map.search(VarTypes, Var, Type).
 
+lookup_var_type_func(VarTypes, Var) = Type :-
+    lookup_var_type(VarTypes, Var, Type).
+
 lookup_var_type(VarTypes, Var, Type) :-
     map.lookup(VarTypes, Var, Type).
 
@@ -156,8 +160,8 @@ vartypes_vars(VarTypes, Vars) :-
 vartypes_types(VarTypes, Types) :-
     map.values(VarTypes, Types).
 
-vartypes_to_assoc_list(VarTypes, AssocList) :-
-    map.to_assoc_list(VarTypes, AssocList).
+vartypes_to_sorted_assoc_list(VarTypes, AssocList) :-
+    map.to_sorted_assoc_list(VarTypes, AssocList).
 
 vartypes_from_corresponding_lists(Vars, Types, VarTypes) :-
     map.from_corresponding_lists(Vars, Types, VarTypes).
@@ -170,9 +174,9 @@ vartypes_add_corresponding_lists(Vars, Types, !VarTypes) :-
 
 vartypes_overlay_corresponding_lists([], [], !VarTypes).
 vartypes_overlay_corresponding_lists([], [_ | _], !VarTypes) :-
-    unexpected($module, $pred, "mismatched list lengths").
+    unexpected($pred, "mismatched list lengths").
 vartypes_overlay_corresponding_lists([_ | _], [], !VarTypes) :-
-    unexpected($module, $pred, "mismatched list lengths").
+    unexpected($pred, "mismatched list lengths").
 vartypes_overlay_corresponding_lists([Var | Vars], [Type | Types],
         !VarTypes) :-
     map.set(Var, Type, !VarTypes),

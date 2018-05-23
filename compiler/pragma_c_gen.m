@@ -378,12 +378,9 @@ generate_foreign_proc_code(CodeModel, Attributes, PredId, ProcId,
             CanOptAwayUnnamedArgs, Code, !CI, !CLD)
     ;
         MaybeTraceRuntimeCond = yes(TraceRuntimeCond),
-        expect(unify(Args, []), $module, $pred,
-            "args runtime cond"),
-        expect(unify(ExtraArgs, []), $module, $pred,
-            "extra args runtime cond"),
-        expect(unify(CodeModel, model_semi), $module, $pred,
-            "non-semi runtime cond"),
+        expect(unify(Args, []), $pred, "args runtime cond"),
+        expect(unify(ExtraArgs, []), $pred, "extra args runtime cond"),
+        expect(unify(CodeModel, model_semi), $pred, "non-semi runtime cond"),
         generate_trace_runtime_cond_foreign_proc_code(TraceRuntimeCond,
             Code, !CI, !CLD)
     ).
@@ -462,7 +459,7 @@ generate_ordinary_foreign_proc_code(CodeModel, Attributes, PredId, ProcId,
         ThreadSafe = proc_thread_safe
     ;
         ThreadSafe = proc_maybe_thread_safe,
-        unexpected($module, $pred, "maybe_thread_safe")
+        unexpected($pred, "maybe_thread_safe")
     ;
         ThreadSafe = proc_not_thread_safe
     ),
@@ -741,7 +738,7 @@ make_proc_label_string(ModuleInfo, PredId, ProcId) = ProcLabelString :-
     else if CodeAddr = code_label(Label) then
         ProcLabelString = label_to_c_string(Label, yes)
     else
-        unexpected($module, $pred, "code_addr")
+        unexpected($pred, "code_addr")
     ).
 
 :- pred make_alloc_id_hash_define(string::in, maybe(prog_context)::in,
@@ -800,6 +797,10 @@ simple_foreign_proc_raw_code(Code) =
     list(c_arg)::out) is det.
 
 make_c_arg_list([], [], []).
+make_c_arg_list([], [_ | _], _) :-
+    unexpected($pred, "length mismatch").
+make_c_arg_list([_ | _], [], _) :-
+    unexpected($pred, "length mismatch").
 make_c_arg_list([Arg | ArgTail], [ArgInfo | ArgInfoTail], [CArg | CArgTail]) :-
     Arg = foreign_arg(Var, MaybeNameMode, Type, BoxPolicy),
     (
@@ -811,10 +812,6 @@ make_c_arg_list([Arg | ArgTail], [ArgInfo | ArgInfoTail], [CArg | CArgTail]) :-
     ),
     CArg = c_arg(Var, MaybeName, Type, BoxPolicy, ArgInfo),
     make_c_arg_list(ArgTail, ArgInfoTail, CArgTail).
-make_c_arg_list([], [_ | _], _) :-
-    unexpected($module, $pred, "length mismatch").
-make_c_arg_list([_ | _], [], _) :-
-    unexpected($module, $pred, "length mismatch").
 
 %---------------------------------------------------------------------------%
 
@@ -851,7 +848,7 @@ make_extra_c_arg_list_seq([ExtraArg | ExtraArgs], ModuleInfo, LastReg,
         mode_to_top_functor_mode(ModuleInfo, Mode, OrigType, TopFunctorMode)
     ;
         MaybeNameMode = no,
-        unexpected($module, $pred, "no name")
+        unexpected($pred, "no name")
     ),
     % Extra args are always input, and passed in regular registers.
     RegType = reg_r,
@@ -965,8 +962,7 @@ make_foreign_proc_decls([Arg | Args], Module, CanOptAwayUnnamedArgs, Decls) :-
         MaybeName = yes(Name),
         (
             BoxPolicy = bp_native_if_possible,
-            OrigTypeString = mercury_exported_type_to_string(Module, lang_c,
-                OrigType)
+            OrigTypeString = exported_type_to_c_string(Module, OrigType)
         ;
             BoxPolicy = bp_always_boxed,
             OrigTypeString = "MR_Word"
@@ -1011,11 +1007,19 @@ get_foreign_proc_input_vars([Arg | Args], Inputs, CanOptAwayUnnamedArgs, Code,
     MaybeName = var_should_be_passed(CanOptAwayUnnamedArgs, Var, MaybeArgName),
     (
         MaybeName = yes(Name),
-        VarType = variable_type(CI, Var),
-        produce_variable(Var, FirstCode, Rval, CI, !CLD),
         get_module_info(CI, ModuleInfo),
+        VarType = variable_type(CI, Var),
+        IsDummy = is_type_a_dummy(ModuleInfo, VarType),
+        (
+            IsDummy = is_not_dummy_type,
+            produce_variable(Var, FirstCode, Rval, CI, !CLD)
+        ;
+            IsDummy = is_dummy_type,
+            % The variable may not have a state.
+            FirstCode = empty,
+            Rval = const(llconst_int(0))
+        ),
         MaybeForeign = get_maybe_foreign_type_info(ModuleInfo, OrigType),
-        IsDummy = check_dummy_type(ModuleInfo, VarType),
         Input = foreign_proc_input(Name, VarType, IsDummy, OrigType, Rval,
             MaybeForeign, BoxPolicy),
         get_foreign_proc_input_vars(Args, Inputs1, CanOptAwayUnnamedArgs,
@@ -1048,7 +1052,7 @@ get_maybe_foreign_type_info(ModuleInfo, Type) = MaybeForeignTypeInfo :-
         ;
             MaybeC = no,
             % This is ensured by check_foreign_type in make_hlds.
-            unexpected($module, $pred, "no c foreign type")
+            unexpected($pred, "no c foreign type")
         )
     else
         MaybeForeignTypeInfo = no
@@ -1097,6 +1101,10 @@ foreign_proc_arg_reg_type(FloatRegType, VarType, BoxPolicy, RegType) :-
     code_info::in, code_loc_dep::in, code_loc_dep::out) is det.
 
 place_foreign_proc_output_args_in_regs([], [], _, [], _CI, !CLD).
+place_foreign_proc_output_args_in_regs([_ | _], [], _, _, _CI, !CLD) :-
+    unexpected($pred, "length mismatch").
+place_foreign_proc_output_args_in_regs([], [_ | _], _, _, _CI, !CLD) :-
+    unexpected($pred, "length mismatch").
 place_foreign_proc_output_args_in_regs([Arg | Args], [Reg | Regs],
         CanOptAwayUnnamedArgs, Outputs, CI, !CLD) :-
     place_foreign_proc_output_args_in_regs(Args, Regs, CanOptAwayUnnamedArgs,
@@ -1112,7 +1120,7 @@ place_foreign_proc_output_args_in_regs([Arg | Args], [Reg | Regs],
         (
             MaybeName = yes(Name),
             VarType = variable_type(CI, Var),
-            IsDummy = check_dummy_type(ModuleInfo, VarType),
+            IsDummy = is_type_a_dummy(ModuleInfo, VarType),
             PragmaCOutput = foreign_proc_output(Reg, VarType, IsDummy,
                 OrigType, Name, MaybeForeign, BoxPolicy),
             Outputs = [PragmaCOutput | OutputsTail]
@@ -1123,10 +1131,6 @@ place_foreign_proc_output_args_in_regs([Arg | Args], [Reg | Regs],
     else
         Outputs = OutputsTail
     ).
-place_foreign_proc_output_args_in_regs([_ | _], [], _, _, _CI, !CLD) :-
-    unexpected($module, $pred, "length mismatch").
-place_foreign_proc_output_args_in_regs([], [_ | _], _, _, _CI, !CLD) :-
-    unexpected($module, $pred, "length mismatch").
 
 %---------------------------------------------------------------------------%
 

@@ -66,6 +66,7 @@
 :- import_module assoc_list.
 :- import_module bool.
 :- import_module int.
+:- import_module int64.
 :- import_module maybe.
 :- import_module pair.
 :- import_module require.
@@ -706,7 +707,7 @@ output_int_const(N, Type, !IO) :-
         ( if ok_int_const(N, Type) then
             io.write_int(N, !IO)
         else
-            unexpected($module, $pred, "constant does not fit in type")
+            unexpected($pred, "constant does not fit in type")
         )
     ;
         Check = no,
@@ -716,30 +717,76 @@ output_int_const(N, Type, !IO) :-
 :- pred ok_int_const(int::in, llds_type::in) is semidet.
 :- pragma inline(ok_int_const/2).
 
-ok_int_const(N, lt_int_least8) :-
-    -128 =< N, N < 128.
-ok_int_const(N, lt_uint_least8) :-
-    0 =< N, N < 256.
-ok_int_const(N, lt_int_least16) :-
-    -32768 =< N, N < 32768.
-ok_int_const(N, lt_uint_least16) :-
-    0 =< N, N < 65536.
-ok_int_const(_N, lt_int_least32).
-ok_int_const(_N, lt_uint_least32).
-ok_int_const(_N, lt_bool) :-
-    unexpected($module, $pred, "not integer constant").
-ok_int_const(_N, lt_int(int_type_int)).
-ok_int_const(_N, lt_int(int_type_uint)).
-ok_int_const(_, lt_float) :-
-    unexpected($module, $pred, "not integer constant").
-ok_int_const(_, lt_word) :-
-    unexpected($module, $pred, "not integer constant").
-ok_int_const(_, lt_string) :-
-    unexpected($module, $pred, "not integer constant").
-ok_int_const(_, lt_data_ptr) :-
-    unexpected($module, $pred, "not integer constant").
-ok_int_const(_, lt_code_ptr) :-
-    unexpected($module, $pred, "not integer constant").
+ok_int_const(N, LLDSType) :-
+    require_complete_switch [LLDSType]
+    (
+        ( LLDSType = lt_bool
+        ; LLDSType = lt_float
+        ; LLDSType = lt_string
+        ; LLDSType = lt_data_ptr
+        ; LLDSType = lt_code_ptr
+        ; LLDSType = lt_word
+        ),
+        unexpected($pred, "not integer constant")
+    ;
+        LLDSType = lt_int_least(IntLeastType),
+        require_complete_switch [IntLeastType]
+        (
+            IntLeastType = int_least8,
+            -128 =< N, N =< 127
+        ;
+            IntLeastType = uint_least8,
+            0 =< N, N =< 255
+        ;
+            IntLeastType = int_least16,
+            -32768 =< N, N =< 32767
+        ;
+            IntLeastType = uint_least16,
+            0 =< N, N =< 65535
+        ;
+            IntLeastType = int_least32,
+            -2147483648 =< N, N =< 2147483647
+        ;
+            IntLeastType = uint_least32,
+            0 =< N,
+            % The test N =< 4294967295 won't work on 32 bit platforms.
+            ( int.bits_per_int = 32
+            ; int64.from_int(N) =< 4294967295_i64
+            )
+        )
+    ;
+        LLDSType = lt_int(IntType),
+        require_complete_switch [IntType]
+        (
+            IntType = int_type_int8,
+            -128 =< N, N =< 127
+        ;
+            IntType = int_type_uint8,
+            0 =< N, N =< 255
+        ;
+            IntType = int_type_int16,
+            -32768 =< N, N =< 32767
+        ;
+            IntType = int_type_uint16,
+            0 =< N, N =< 65535
+        ;
+            IntType = int_type_int32,
+            -2147483648 =< N, N =< 2147483647
+        ;
+            IntType = int_type_uint32,
+            0 =< N,
+            % The test N =< 4294967295 won't work on 32 bit platforms.
+            ( int.bits_per_int = 32
+            ; int64.from_int(N) =< 4294967295_i64
+            )
+        ;
+            ( IntType = int_type_int64
+            ; IntType = int_type_uint64
+            ; IntType = int_type_int
+            ; IntType = int_type_uint
+            )
+        )
+    ).
 
 %---------------------------------------------------------------------------%
 :- end_module ll_backend.llds_out.llds_out_global.

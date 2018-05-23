@@ -744,10 +744,10 @@ ml_maybe_copy_args(Action, Info, [Arg | Args], FuncBody, ClassId,
             qual_field_var_name(EnvModuleName, type_qual,
                 fvn_env_field_from_local_var(VarName)),
             EnvPtrTypeName),
-        Tag = yes(0),
+        MaybePtag = yes(0),
         EnvPtrVarName = env_ptr_var(Action),
         EnvPtr = ml_lval(ml_local_var(EnvPtrVarName, EnvPtrTypeName)),
-        EnvArgLval = ml_field(Tag, EnvPtr, FieldName, FieldType,
+        EnvArgLval = ml_field(MaybePtag, EnvPtr, FieldName, FieldType,
             EnvPtrTypeName),
         ArgRval = ml_lval(ml_local_var(VarName, FieldType)),
         AssignToEnv = assign(EnvArgLval, ArgRval),
@@ -811,7 +811,7 @@ ml_create_env_class_id(EnvClassName, ModuleName, Globals) = ClassId :-
     list(mlds_function_defn)::out) is det.
 
 ml_create_env(Action, EnvClassName, EnvClassId, LocalVars, Context,
-        ModuleName, FuncName, Globals, EnvClassDefn, EnvDefns, InitEnv,
+        ModuleName, FuncName, Globals, EnvClassDefn, EnvDefns, Stmts,
         GCTraceFuncDefns) :-
     % Generate the following type:
     %
@@ -853,7 +853,7 @@ ml_create_env(Action, EnvClassName, EnvClassId, LocalVars, Context,
         Action = chain_gc_stack_frames,
         ml_chain_stack_frames(ModuleName, FuncName, Context,
             GC_Stmts, EnvClassId, Fields1, Fields, EnvInitializer,
-            LinkStackChain, GCTraceFuncDefns),
+            LinkStackChainStmts, GCTraceFuncDefns),
         GCStmtEnv = gc_no_stmt
     ;
         Action = hoist_nested_funcs,
@@ -867,7 +867,7 @@ ml_create_env(Action, EnvClassName, EnvClassId, LocalVars, Context,
         ),
         Fields = Fields1,
         EnvInitializer = no_initializer,
-        LinkStackChain = [],
+        LinkStackChainStmts = [],
         GCTraceFuncDefns = []
     ),
 
@@ -903,21 +903,18 @@ ml_create_env(Action, EnvClassName, EnvClassId, LocalVars, Context,
         % says OnHeap may be "yes" on current backends as well.
         MayUseAtomic = may_not_use_atomic_alloc,
         MaybeAllocId = no,
-        NewObj = [
-            ml_stmt_atomic(
-                new_object(ml_local_var(EnvVarName, EnvTypeName), no, no,
-                    EnvTypeName, no, no, [], [], MayUseAtomic, MaybeAllocId),
-                Context)
-        ]
+        NewObj = new_object(ml_local_var(EnvVarName, EnvTypeName), 0, no,
+            EnvTypeName, no, no, [], MayUseAtomic, MaybeAllocId),
+        NewObjStmts = [ml_stmt_atomic(NewObj, Context)]
     ;
         OnHeap = no,
         EnvVarAddr = ml_mem_addr(ml_local_var(EnvVarName, EnvTypeName)),
-        NewObj = []
+        NewObjStmts = []
     ),
     ml_init_env(Action, EnvClassId, EnvVarAddr, Context,
-        EnvPtrVarDecl, InitEnv0),
+        EnvPtrVarDecl, InitEnvStmt),
     EnvDefns = [EnvVarDecl, EnvPtrVarDecl],
-    InitEnv = NewObj ++ [InitEnv0] ++ LinkStackChain.
+    Stmts = NewObjStmts ++ [InitEnvStmt] ++ LinkStackChainStmts.
 
 :- pred ml_chain_stack_frames(mlds_module_name::in,
     mlds_function_name::in, prog_context::in, list(mlds_stmt)::in,
@@ -937,8 +934,7 @@ ml_chain_stack_frames(ModuleName, FuncName, Context, GCTraceStmts,
     %
     ThisFrameName = lvn_comp_var(lvnc_this_frame),
     ThisFrameRval = ml_lval(ml_local_var(ThisFrameName, mlds_generic_type)),
-    CastThisFrameRval = ml_unop(
-        cast(mlds_ptr_type(mlds_class_type(EnvClassId))),
+    CastThisFrameRval = ml_cast(mlds_ptr_type(mlds_class_type(EnvClassId)),
         ThisFrameRval),
     ml_init_env(chain_gc_stack_frames, EnvClassId, CastThisFrameRval,
         Context, FramePtrDecl, InitFramePtr),
@@ -1162,7 +1158,7 @@ ml_insert_init_env(Action, ClassId, FunctionDefn0, FunctionDefn,
 
         % Insert a cast, to downcast from mlds_generic_env_ptr_type to the
         % specific environment type for this procedure.
-        CastEnvPtrVal = ml_unop(cast(EnvPtrVarType), EnvPtrVal),
+        CastEnvPtrVal = ml_cast(EnvPtrVarType, EnvPtrVal),
 
         ml_init_env(Action, ClassId, CastEnvPtrVal, Context,
             EnvPtrDefn, InitEnvPtr),
@@ -1411,10 +1407,11 @@ flatten_statement(Action, Stmt0, Stmt, !Info) :-
             InitStmts ++ SubStmts0, SubStmts, !Info),
         Stmt = ml_stmt_block(LocalVarDefns, FuncDefns, SubStmts, Context)
     ;
-        Stmt0 = ml_stmt_while(Kind, Rval0, SubStmt0, Context),
+        Stmt0 = ml_stmt_while(Kind, Rval0, SubStmt0, LoopLocalVars0, Context),
         fixup_rval(Action, !.Info, Rval0, Rval),
+        fixup_local_vars(Action, !.Info, LoopLocalVars0, LoopLocalVars),
         flatten_statement(Action, SubStmt0, SubStmt, !Info),
-        Stmt = ml_stmt_while(Kind, Rval, SubStmt, Context)
+        Stmt = ml_stmt_while(Kind, Rval, SubStmt, LoopLocalVars, Context)
     ;
         Stmt0 = ml_stmt_if_then_else(Cond0, Then0, MaybeElse0, Context),
         fixup_rval(Action, !.Info, Cond0, Cond),
@@ -1761,6 +1758,7 @@ ml_need_to_hoist_defn(QualVarName, FuncDefn) :-
 % fixup_target_code_components:
 % fixup_target_code_component:
 % fixup_trail_op:
+% fixup_typed_rvals:
 % fixup_rvals:
 % fixup_rval:
 % fixup_lvals:
@@ -1830,12 +1828,12 @@ fixup_atomic_stmt(Action, Info, Atomic0, Atomic) :-
         Atomic = delete_object(Rval)
     ;
         Atomic0 = new_object(Target0, MaybeTag, ExplicitSecTag, Type,
-            MaybeSize, MaybeCtorName, Args0, ArgTypes, MayUseAtomic,
+            MaybeSize, MaybeCtorName, ArgRvalsTypes0, MayUseAtomic,
             MaybeAllocId),
         fixup_lval(Action, Info, Target0, Target),
-        fixup_rvals(Action, Info, Args0, Args),
+        fixup_typed_rvals(Action, Info, ArgRvalsTypes0, ArgRvalsTypes),
         Atomic = new_object(Target, MaybeTag, ExplicitSecTag, Type,
-            MaybeSize, MaybeCtorName, Args, ArgTypes, MayUseAtomic,
+            MaybeSize, MaybeCtorName, ArgRvalsTypes, MayUseAtomic,
             MaybeAllocId)
     ;
         Atomic0 = mark_hp(Lval0),
@@ -1949,6 +1947,19 @@ fixup_trail_op(Action, Info, Op0, Op) :-
         Op = prune_tickets_to(Rval)
     ).
 
+:- pred fixup_typed_rvals(action, elim_info,
+    list(mlds_typed_rval), list(mlds_typed_rval)).
+:- mode fixup_typed_rvals(in(hoist), in, in, out) is det.
+:- mode fixup_typed_rvals(in(chain), in, in, out) is det.
+
+fixup_typed_rvals(_, _, [], []).
+fixup_typed_rvals(Action, Info,
+        [TypedRval0 | TypedRvals0], [TypedRval | TypedRvals]) :-
+    TypedRval0 = ml_typed_rval(Rval0, Type),
+    fixup_rval(Action, Info, Rval0, Rval),
+    TypedRval = ml_typed_rval(Rval, Type),
+    fixup_typed_rvals(Action, Info, TypedRvals0, TypedRvals).
+
 :- pred fixup_rvals(action, elim_info, list(mlds_rval), list(mlds_rval)).
 :- mode fixup_rvals(in(hoist), in, in, out) is det.
 :- mode fixup_rvals(in(chain), in, in, out) is det.
@@ -1976,14 +1987,26 @@ fixup_rval(Action, Info, Rval0, Rval) :-
         fixup_rval(Action, Info, BaseRval0, BaseRval),
         Rval = ml_mkword(Tag, BaseRval)
     ;
-        Rval0 = ml_unop(UnOp, XRval0),
-        fixup_rval(Action, Info, XRval0, XRval),
-        Rval = ml_unop(UnOp, XRval)
+        Rval0 = ml_box(Type, SubRval0),
+        fixup_rval(Action, Info, SubRval0, SubRval),
+        Rval = ml_box(Type, SubRval)
     ;
-        Rval0 = ml_binop(BinOp, XRval0, YRval0),
-        fixup_rval(Action, Info, XRval0, XRval),
-        fixup_rval(Action, Info, YRval0, YRval),
-        Rval = ml_binop(BinOp, XRval, YRval)
+        Rval0 = ml_unbox(Type, SubRval0),
+        fixup_rval(Action, Info, SubRval0, SubRval),
+        Rval = ml_unbox(Type, SubRval)
+    ;
+        Rval0 = ml_cast(Type, SubRval0),
+        fixup_rval(Action, Info, SubRval0, SubRval),
+        Rval = ml_cast(Type, SubRval)
+    ;
+        Rval0 = ml_unop(UnOp, SubRval0),
+        fixup_rval(Action, Info, SubRval0, SubRval),
+        Rval = ml_unop(UnOp, SubRval)
+    ;
+        Rval0 = ml_binop(BinOp, SubRvalA0, SubRvalB0),
+        fixup_rval(Action, Info, SubRvalA0, SubRvalA),
+        fixup_rval(Action, Info, SubRvalB0, SubRvalB),
+        Rval = ml_binop(BinOp, SubRvalA, SubRvalB)
     ;
         Rval0 = ml_vector_common_row_addr(VectorCommon, RowRval0),
         fixup_rval(Action, Info, RowRval0, RowRval),
@@ -2027,6 +2050,31 @@ fixup_lval(Action, Info, Lval0, Lval) :-
     ;
         Lval0 = ml_local_var(Var0, VarType),
         fixup_var(Action, Info, Var0, VarType, Lval)
+    ).
+
+:- pred fixup_local_vars(action, elim_info,
+    list(mlds_local_var_name), list(mlds_local_var_name)).
+:- mode fixup_local_vars(in(hoist), in, in, out) is det.
+:- mode fixup_local_vars(in(chain), in, in, out) is det.
+
+fixup_local_vars(_, _, [], []).
+fixup_local_vars(Action, Info, [HeadLocalVar0 | TailLocalVars0], LocalVars) :-
+    fixup_local_vars(Action, Info, TailLocalVars0, TailLocalVars),
+    fixup_var(Action, Info, HeadLocalVar0, mlds_unknown_type, HeadLval),
+    (
+        HeadLval = ml_local_var(HeadLvalLocalVar, _),
+        expect(unify(HeadLocalVar0, HeadLvalLocalVar), $pred,
+            "HeadLocalVar0 != HeadLvalLocalVar"),
+        LocalVars = [HeadLocalVar0 | TailLocalVars]
+    ;
+        ( HeadLval = ml_field(_, _, _, _, _)
+        ; HeadLval = ml_mem_ref(_, _)
+        ; HeadLval = ml_global_var(_, _)
+        ; HeadLval = ml_target_global_var_ref(_)
+        ),
+        % HeadLocalVar0 will be transformed into an lval other than a local var
+        % by Action, so delete it from the list of local vars.
+        LocalVars = TailLocalVars
     ).
 
 % fixup_gc_statements:
@@ -2096,8 +2144,8 @@ fixup_var(Action, Info, ThisVarName, ThisVarType, Lval) :-
             qual_field_var_name(EnvModuleName, type_qual,
                 fvn_env_field_from_local_var(ThisVarName)),
             EnvPtrVarType),
-        Tag = yes(0),
-        Lval = ml_field(Tag, EnvPtr, FieldName, FieldType, EnvPtrVarType)
+        MaybePtag = yes(0),
+        Lval = ml_field(MaybePtag, EnvPtr, FieldName, FieldType, EnvPtrVarType)
     else if
         % Check for references to the env_ptr itself.
         % For those, the code generator will have left the type as
@@ -2215,7 +2263,7 @@ statement_contains_matching_defn(Filter, Stmt) :-
         ; statements_contains_matching_defn(Filter, SubStmts)
         )
     ;
-        Stmt = ml_stmt_while(_Kind, _Rval, SubStmt, _Context),
+        Stmt = ml_stmt_while(_Kind, _Rval, SubStmt, _LoopLocalVars, _Context),
         statement_contains_matching_defn(Filter, SubStmt)
     ;
         Stmt = ml_stmt_if_then_else(_Cond, SubThen, MaybeSubElse, _Context),
@@ -2337,9 +2385,9 @@ add_unchain_stack_to_stmt(Action, Stmt0, Stmt, !Info) :-
         add_unchain_stack_to_stmts(Action, SubStmts0, SubStmts, !Info),
         Stmt = ml_stmt_block(LocalVarDefns, FuncDefns, SubStmts, Context)
     ;
-        Stmt0 = ml_stmt_while(Kind, Rval, SubStmt0, Context),
+        Stmt0 = ml_stmt_while(Kind, Rval, SubStmt0, LoopLocalVars, Context),
         add_unchain_stack_to_stmt(Action, SubStmt0, SubStmt, !Info),
-        Stmt = ml_stmt_while(Kind, Rval, SubStmt, Context)
+        Stmt = ml_stmt_while(Kind, Rval, SubStmt, LoopLocalVars, Context)
     ;
         Stmt0 = ml_stmt_if_then_else(Cond, Then0, MaybeElse0, Context),
         add_unchain_stack_to_stmt(Action, Then0, Then, !Info),
@@ -2466,11 +2514,11 @@ ml_gen_unchain_frame(Context, ElimInfo) = UnchainFrame :-
     %   stack_chain = MR_hl_field(stack_chain, 0);
 
     StackChain = ml_stack_chain_var,
-    Tag = yes(0),
+    MaybePtag = yes(0),
     PrevFieldId = ml_field_offset(ml_const(mlconst_int(0))),
     PrevFieldType = mlds_generic_type,
-    PrevFieldRval = ml_lval(ml_field(Tag, ml_lval(StackChain), PrevFieldId,
-        PrevFieldType, EnvPtrTypeName)),
+    PrevFieldRval = ml_lval(ml_field(MaybePtag, ml_lval(StackChain),
+        PrevFieldId, PrevFieldType, EnvPtrTypeName)),
     Assignment = assign(StackChain, PrevFieldRval),
     UnchainFrame = ml_stmt_atomic(Assignment, Context).
 
