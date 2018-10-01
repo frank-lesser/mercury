@@ -3,8 +3,7 @@
 %---------------------------------------------------------------------------%
 % Copyright (C) 2001-2007, 2009-2011 The University of Melbourne.
 % Copyright (C) 2014-2018 The Mercury team.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: rtti_implementation.m.
@@ -141,10 +140,12 @@
 :- import_module array.
 :- import_module bitmap.
 :- import_module bool.
+:- import_module char.
 :- import_module int.
 :- import_module maybe.
 :- import_module require.
 :- import_module string.
+:- import_module term_io.
 :- import_module type_desc.
 
 %---------------------------------------------------------------------------%
@@ -875,14 +876,10 @@ type_info_num_functors(TypeInfo, NumFunctors) :-
         ; TypeCtorRep = tcr_reserved_addr_usereq
         ; TypeCtorRep = tcr_enum
         ; TypeCtorRep = tcr_enum_usereq
-        ),
-        NumFunctors = TypeCtorInfo ^ type_ctor_num_functors
-    ;
-        ( TypeCtorRep = tcr_foreign_enum
+        ; TypeCtorRep = tcr_foreign_enum
         ; TypeCtorRep = tcr_foreign_enum_usereq
         ),
-        % XXX todo
-        fail
+        NumFunctors = TypeCtorInfo ^ type_ctor_num_functors
     ;
         ( TypeCtorRep = tcr_dummy
         ; TypeCtorRep = tcr_notag
@@ -987,8 +984,8 @@ get_functor_impl(TypeInfo, FunctorNumber,
         ( TypeCtorRep = tcr_foreign_enum
         ; TypeCtorRep = tcr_foreign_enum_usereq
         ),
-        % XXX todo
-        fail
+        get_functor_foreign_enum(TypeCtorRep, TypeCtorInfo,
+            FunctorNumber, FunctorName, Arity, PseudoTypeInfoList, Names)
     ;
         ( TypeCtorRep = tcr_notag
         ; TypeCtorRep = tcr_notag_usereq
@@ -1073,10 +1070,12 @@ get_functor_du(TypeCtorRep, TypeInfo, TypeCtorInfo, FunctorNumber,
     Arity = DuFunctorDesc ^ du_functor_arity,
 
     ArgTypes = DuFunctorDesc ^ du_functor_arg_types,
-    F = (func(I) = ArgPseudoTypeInfo :-
-        PseudoTypeInfo = get_pti_from_arg_types(ArgTypes, I),
-        ArgPseudoTypeInfo = create_pseudo_type_info(TypeInfo, PseudoTypeInfo)
-    ),
+    F =
+        ( func(I) = ArgPseudoTypeInfo :-
+            PseudoTypeInfo = get_pti_from_arg_types(ArgTypes, I),
+            ArgPseudoTypeInfo =
+                create_pseudo_type_info(TypeInfo, PseudoTypeInfo)
+        ),
     PseudoTypeInfoList = iterate(0, Arity - 1, F),
 
     ( if get_du_functor_arg_names(DuFunctorDesc, ArgNames) then
@@ -1096,6 +1095,21 @@ get_functor_enum(TypeCtorRep, TypeCtorInfo, FunctorNumber, FunctorName, Arity,
         TypeFunctors),
 
     FunctorName = EnumFunctorDesc ^ enum_functor_name,
+    Arity = 0,
+    PseudoTypeInfoList = [],
+    Names = [].
+
+:- pred get_functor_foreign_enum(type_ctor_rep::in(foreign_enum),
+    type_ctor_info::in, int::in, string::out, int::out,
+    list(pseudo_type_info)::out, list(string)::out) is det.
+
+get_functor_foreign_enum(TypeCtorRep, TypeCtorInfo, FunctorNumber,
+        FunctorName, Arity, PseudoTypeInfoList, Names) :-
+    TypeFunctors = get_type_functors(TypeCtorInfo),
+    ForeignEnumFunctorDesc = get_foreign_enum_functor_desc(TypeCtorRep,
+        FunctorNumber, TypeFunctors),
+
+    FunctorName = ForeignEnumFunctorDesc ^ foreign_enum_functor_name,
     Arity = 0,
     PseudoTypeInfoList = [],
     Names = [].
@@ -1225,8 +1239,10 @@ type_info_get_functor_ordinal(TypeInfo, FunctorNum, Ordinal) :-
         ( TypeCtorRep = tcr_foreign_enum
         ; TypeCtorRep = tcr_foreign_enum_usereq
         ),
-        % XXX todo
-        fail
+        TypeFunctors = get_type_functors(TypeCtorInfo),
+        ForeignEnumFunctorDesc = get_foreign_enum_functor_desc(TypeCtorRep,
+            FunctorNum, TypeFunctors),
+        Ordinal = foreign_enum_functor_ordinal(ForeignEnumFunctorDesc)
     ;
         ( TypeCtorRep = tcr_dummy
         ; TypeCtorRep = tcr_notag
@@ -1625,7 +1641,7 @@ type_ctor_name_and_arity(TypeCtorInfo, ModuleName, Name, Arity) :-
         }
         SUCCESS_INDICATOR = true;
     } else {
-        /* Fail if input is a variable. */
+        // Fail if input is a variable.
         TypeCtorInfo = null;
         ArgPseudoTypeInfos = null;
         SUCCESS_INDICATOR = false;
@@ -1655,7 +1671,7 @@ type_ctor_name_and_arity(TypeCtorInfo, ModuleName, Name, Arity) :-
         }
         SUCCESS_INDICATOR = true;
     } else {
-        /* Fail if input is a variable. */
+        // Fail if input is a variable.
         TypeCtorInfo = null;
         ArgPseudoTypeInfos = null;
         SUCCESS_INDICATOR = false;
@@ -1717,7 +1733,7 @@ is_exist_pseudo_type_info(_, _) :-
         list.List_1 ArgList,
         out univ.Univ_0 Term)
     {
-        /* If type_info is an equivalence type, expand it. */
+        // If type_info is an equivalence type, expand it.
         TypeInfo = ML_collapse_equivalences(TypeInfo);
 
         object new_data = null;
@@ -1741,13 +1757,24 @@ is_exist_pseudo_type_info(_, _) :-
 
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_FOREIGN_ENUM:
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_FOREIGN_ENUM_USEREQ:
+                runtime.ForeignEnumFunctorDesc[] functors_foreign_enum =
+                    tc.type_functors.functors_foreign_enum();
+                if (
+                    FunctorNumber >= 0 &&
+                    FunctorNumber < functors_foreign_enum.Length
+                ) {
+                    new_data = ML_construct_static_member(tc,
+                        functors_foreign_enum[FunctorNumber].foreign_enum_functor_value);
+                }
+                break;
+
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_NOTAG:
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_NOTAG_USEREQ:
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_NOTAG_GROUND:
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_NOTAG_GROUND_USEREQ:
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_RESERVED_ADDR:
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_RESERVED_ADDR_USEREQ:
-                /* These don't exist in the C# backend yet. */
+                // These don't exist in the C# backend yet.
                 break;
 
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_DU:
@@ -1780,43 +1807,83 @@ is_exist_pseudo_type_info(_, _) :-
                 break;
 
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_INT:
-                /* ints don't have functor ordinals. */
+                // ints don't have functor ordinals.
                 throw new System.Exception(
                     ""cannot construct int with construct.construct"");
 
+            case runtime.TypeCtorRep.MR_TYPECTOR_REP_INT8:
+                // int8s don't have functor ordinals.
+                throw new System.Exception(
+                    ""cannot construct int8 with construct.construct"");
+
+            case runtime.TypeCtorRep.MR_TYPECTOR_REP_INT16:
+                // int16s don't have functor ordinals.
+                throw new System.Exception(
+                    ""cannot construct int16 with construct.construct"");
+
+            case runtime.TypeCtorRep.MR_TYPECTOR_REP_INT32:
+                // int32s don't have functor ordinals.
+                throw new System.Exception(
+                    ""cannot construct int32 with construct.construct"");
+
+            case runtime.TypeCtorRep.MR_TYPECTOR_REP_INT64:
+                // int64s don't have functor ordinals.
+                throw new System.Exception(
+                    ""cannot construct int64 with construct.construct"");
+
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_UINT:
-                /* uints don't have functor ordinals. */
+                // uints don't have functor ordinals.
                 throw new System.Exception(
                     ""cannot construct uint with construct.construct"");
 
+            case runtime.TypeCtorRep.MR_TYPECTOR_REP_UINT8:
+                // uint8s don't have functor ordinals.
+                throw new System.Exception(
+                    ""cannot construct uint8 with construct.construct"");
+
+            case runtime.TypeCtorRep.MR_TYPECTOR_REP_UINT16:
+                // uint16s don't have functor ordinals.
+                throw new System.Exception(
+                    ""cannot construct uint16 with construct.construct"");
+
+            case runtime.TypeCtorRep.MR_TYPECTOR_REP_UINT32:
+                // uint32s don't have functor ordinals.
+                throw new System.Exception(
+                    ""cannot construct uint32 with construct.construct"");
+
+            case runtime.TypeCtorRep.MR_TYPECTOR_REP_UINT64:
+                // uint64s don't have functor ordinals.
+                throw new System.Exception(
+                    ""cannot construct uint64 with construct.construct"");
+
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_FLOAT:
-                /* floats don't have functor ordinals. */
+                // floats don't have functor ordinals.
                 throw new System.Exception(
                     ""cannot construct float with construct.construct"");
 
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_CHAR:
-                /* chars don't have functor ordinals. */
+                // chars don't have functor ordinals.
                 throw new System.Exception(
                     ""cannot construct chars with construct.construct"");
 
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_STRING:
-                /* strings don't have functor ordinals. */
+                // strings don't have functor ordinals.
                 throw new System.Exception(
                     ""cannot construct strings with construct.construct"");
 
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_BITMAP:
-                /* bitmaps don't have functor ordinals. */
+                // bitmaps don't have functor ordinals.
                 throw new System.Exception(
                     ""cannot construct bitmaps with construct.construct"");
 
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_EQUIV:
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_EQUIV_GROUND:
-                /* These should be eliminated above. */
+                // These should be eliminated above.
                 throw new System.Exception(
                     ""equiv type in construct.construct"");
 
             case runtime.TypeCtorRep.MR_TYPECTOR_REP_VOID:
-                /* These should be eliminated above. */
+                // These should be eliminated above.
                 throw new System.Exception(
                     ""cannot construct void values with construct.construct"");
 
@@ -1962,7 +2029,7 @@ is_exist_pseudo_type_info(_, _) :-
         object[] args = ML_univ_list_to_array(arg_list, arity);
 
         if (args == null) {
-            /* Argument list length doesn't match arity. */
+            // Argument list length doesn't match arity.
             return null;
         }
 
@@ -2064,7 +2131,7 @@ is_exist_pseudo_type_info(_, _) :-
             }
         }
 
-        /* This is from prog_foreign.name_conversion_table. */
+        // This is from prog_foreign.name_conversion_table.
         if (s.Equals(""\\\\="")) return ""f_not_equal"";
         if (s.Equals("">="")) return ""f_greater_or_equal"";
         if (s.Equals(""=<"")) return ""f_less_or_equal"";
@@ -2110,7 +2177,7 @@ is_exist_pseudo_type_info(_, _) :-
     ML_construct(TypeInfo_Struct TypeInfo, int FunctorNumber,
         list.List_1<univ.Univ_0> ArgList)
     {
-        /* If type_info is an equivalence type, expand it. */
+        // If type_info is an equivalence type, expand it.
         TypeInfo = ML_collapse_equivalences(TypeInfo);
 
         Object new_data = null;
@@ -2139,7 +2206,7 @@ is_exist_pseudo_type_info(_, _) :-
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_NOTAG_GROUND_USEREQ:
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_RESERVED_ADDR:
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_RESERVED_ADDR_USEREQ:
-                /* These don't exist in the Java backend yet. */
+                // These don't exist in the Java backend yet.
                 break;
 
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_DU:
@@ -2171,42 +2238,82 @@ is_exist_pseudo_type_info(_, _) :-
                 break;
 
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_INT:
-                /* ints don't have functor ordinals. */
+                // ints don't have functor ordinals.
                 throw new Error(
                     ""cannot construct int with construct.construct"");
 
+            case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_INT8:
+                // int8s don't have functor ordinals.
+                throw new Error(
+                    ""cannot construct int8 with construct.construct"");
+
+            case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_INT16:
+                // int16s don't have functor ordinals.
+                throw new Error(
+                    ""cannot construct int16 with construct.construct"");
+
+            case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_INT32:
+                // int32s don't have functor ordinals.
+                throw new Error(
+                    ""cannot construct int32 with construct.construct"");
+
+            case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_INT64:
+                // int64s don't have functor ordinals.
+                throw new Error(
+                    ""cannot construct int64 with construct.construct"");
+
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_UINT:
-                /* ints don't have functor ordinals. */
+                // ints don't have functor ordinals.
                 throw new Error(
                     ""cannot construct uint with construct.construct"");
 
+            case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_UINT8:
+                // uint8s don't have functor ordinals.
+                throw new Error(
+                    ""cannot construct uint8 with construct.construct"");
+
+            case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_UINT16:
+                // uint16s don't have functor ordinals.
+                throw new Error(
+                    ""cannot construct uint16 with construct.construct"");
+
+            case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_UINT32:
+                // uint32s don't have functor ordinals.
+                throw new Error(
+                    ""cannot construct uint32 with construct.construct"");
+
+            case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_UINT64:
+                // uint64s don't have functor ordinals.
+                throw new Error(
+                    ""cannot construct uint64 with construct.construct"");
+
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_FLOAT:
-                /* floats don't have functor ordinals. */
+                // floats don't have functor ordinals.
                 throw new Error(
                     ""cannot construct float with construct.construct"");
 
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_CHAR:
-                /* chars don't have functor ordinals. */
+                // chars don't have functor ordinals.
                 throw new Error(
                     ""cannot construct chars with construct.construct"");
 
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_STRING:
-                /* strings don't have functor ordinals. */
+                // strings don't have functor ordinals.
                 throw new Error(
                     ""cannot construct strings with construct.construct"");
 
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_BITMAP:
-                /* bitmaps don't have functor ordinals. */
+                // bitmaps don't have functor ordinals.
                 throw new Error(
                     ""cannot construct bitmaps with construct.construct"");
 
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_EQUIV:
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_EQUIV_GROUND:
-                /* These should be eliminated above. */
+                // These should be eliminated above.
                 throw new Error(""equiv type in construct.construct"");
 
             case jmercury.runtime.TypeCtorRep.MR_TYPECTOR_REP_VOID:
-                /* These should be eliminated above. */
+                // These should be eliminated above.
                 throw new Error(
                     ""cannot construct void values with construct.construct"");
 
@@ -2380,7 +2487,7 @@ is_exist_pseudo_type_info(_, _) :-
         final Object[] args = ML_univ_list_to_array(arg_list, arity);
 
         if (args == null) {
-            /* Argument list length doesn't match arity. */
+            // Argument list length doesn't match arity.
             return null;
         }
 
@@ -2390,7 +2497,7 @@ is_exist_pseudo_type_info(_, _) :-
                 try {
                     return ctor.newInstance(args);
                 } catch (IllegalArgumentException e) {
-                    /* e.g. argument type mismatch */
+                    // e.g. argument type mismatch
                     return null;
                 }
             }
@@ -2463,7 +2570,7 @@ is_exist_pseudo_type_info(_, _) :-
             }
         }
 
-        /* This is from prog_foreign.name_conversion_table. */
+        // This is from prog_foreign.name_conversion_table.
         if (s.equals(""\\\\="")) return ""f_not_equal"";
         if (s.equals("">="")) return ""f_greater_or_equal"";
         if (s.equals(""=<"")) return ""f_less_or_equal"";
@@ -2685,7 +2792,7 @@ deconstruct_2(Term, TypeInfo, TypeCtorInfo, TypeCtorRep, NonCanon,
             Arguments = iterate(0, Arity - 1,
                 get_arg_univ(Term, SecTagLocn, FunctorDesc, TypeInfo))
         ;
-            SecTagLocn = stag_local,
+            SecTagLocn = stag_local_rest_of_word,
             Functor = "some_du_local_sectag",
             % XXX incomplete
             Ordinal = -1,
@@ -2812,9 +2919,27 @@ deconstruct_2(Term, TypeInfo, TypeCtorInfo, TypeCtorRep, NonCanon,
         Arity = 0,
         Arguments = []
     ;
+        % Changes here may need to reflected in the handling of
+        % MR_TYPCTOR_REP_CHAR in runtime/mercury_ml_expand_body.h.
         TypeCtorRep = tcr_char,
         det_dynamic_cast(Term, Char),
-        Functor = string.from_char_list(['\'', Char, '\'']),
+        ( if quote_special_escape_char(Char, EscapedChar) then
+            Functor = EscapedChar
+        else if
+            char.is_control(Char)
+        then
+            char.to_int(Char, Int),
+            string.int_to_base_string(Int, 8, OctalString0),
+            string.pad_left(OctalString0, '0', 3, OctalString),
+            Functor  = "'\\" ++ OctalString ++ "\\'"
+        else if
+            char.is_surrogate(Char)
+        then
+            unexpected($module, $pred,
+                "attempt to deconstruct surrogate code point")
+        else
+            Functor = string.from_char_list(['\'', Char, '\''])
+        ),
         Ordinal = -1,
         Arity = 0,
         Arguments = []
@@ -2828,7 +2953,7 @@ deconstruct_2(Term, TypeInfo, TypeCtorInfo, TypeCtorRep, NonCanon,
     ;
         TypeCtorRep = tcr_string,
         det_dynamic_cast(Term, String),
-        Functor = string.append_list(["\"", String, "\""]),
+        Functor = term_io.quoted_string(String),
         Ordinal = -1,
         Arity = 0,
         Arguments = []
@@ -3010,6 +3135,21 @@ univ_named_arg(Term, NonCanon, Name, Argument) :-
         MaybeArgument),
     MaybeArgument = yes(Argument).
 
+    % Note: changes to this predicate may require changes to the similar
+    % predicate in library/term_io.m.
+    %
+:- pred quote_special_escape_char(character::in, string::out) is semidet.
+
+quote_special_escape_char('\\', "'\\\\'").
+quote_special_escape_char('\'', "'\\''").
+quote_special_escape_char('\a', "'\\a'").
+quote_special_escape_char('\b', "'\\b'").
+quote_special_escape_char('\r', "'\\r'").
+quote_special_escape_char('\f', "'\\f'").
+quote_special_escape_char('\t', "'\\t'").
+quote_special_escape_char('\n', "'\\n'").
+quote_special_escape_char('\v', "'\\v'").
+
 :- pred univ_named_arg_2(T, type_info, type_ctor_info, type_ctor_rep,
     noncanon_handling, string, maybe(univ)).
 :- mode univ_named_arg_2(in, in, in, in, in(do_not_allow), in, out) is det.
@@ -3063,7 +3203,7 @@ univ_named_arg_2(Term, TypeInfo, TypeCtorInfo, TypeCtorRep, NonCanon, Name,
                 MaybeArgument = no
             )
         ;
-            SecTagLocn = stag_local,
+            SecTagLocn = stag_local_rest_of_word,
             MaybeArgument = no
         ;
             SecTagLocn = stag_variable,
@@ -3607,9 +3747,9 @@ get_tuple_subterm(TypeInfo, Term, Index) = SubTerm :-
 ").
 
     % Test whether a (pseudo-) type info is variable.
-    % The argument type is pseudo_type_info because when we call this we have a
-    % pseudo_type_info but aren't sure if it's actually a variable or a
-    % type_info.
+    % The argument type is pseudo_type_info, because when we call this,
+    % we have a pseudo_type_info but aren't sure if it is actually
+    % a variable or a type_info.
     %
 :- pred pseudo_type_info_is_variable(pseudo_type_info::in, int::out)
     is semidet.
@@ -3716,7 +3856,8 @@ public static final int first_exist_quant_varnum = 513;
     enum ptag_layout_field_nums {
         sectag_sharers                      = 0,
         sectag_locn                         = 1,
-        sectag_alternatives                 = 2
+        sectag_alternatives                 = 2,
+        sectag_num_bits                     = 3
     }
 
     enum du_functor_field_nums {
@@ -3729,7 +3870,9 @@ public static final int first_exist_quant_varnum = 513;
         du_functor_ordinal                  = 6,
         du_functor_arg_types                = 7,
         du_functor_arg_names                = 8,
-        du_functor_exist_info               = 9
+        du_functor_exist_info               = 9,
+        du_functor_subtype                  = 10,
+        du_functor_num_sectag_bits          = 11,
     }
 
     enum exist_info_field_nums {
@@ -3845,7 +3988,10 @@ get_remote_secondary_tag(_::in) = (0::out) :-
 :- type sectag_locn
     --->    stag_none
     ;       stag_none_direct_arg
-    ;       stag_local
+    ;       stag_local_rest_of_word
+    % We now use rtti_implementation.m for the C# and Java grades.
+    % Type representations do not use stag_local_bits in those grades.
+    % ;     stag_local_bits             
     ;       stag_remote
     ;       stag_variable.
 
@@ -4664,7 +4810,7 @@ type_ctor_num_functors(_) = _ :-
         FunctorNumber = TypeCtorInfo.type_functor_number_map[Ordinal];
         SUCCESS_INDICATOR = true;
     } else if (Ordinal == 0 && TypeCtorInfo.type_ctor_num_functors == -1) {
-        /* This is for tuples. */
+        // This is for tuples.
         FunctorNumber = 0;
         SUCCESS_INDICATOR = true;
     } else {
@@ -4682,7 +4828,7 @@ type_ctor_num_functors(_) = _ :-
         FunctorNumber = TypeCtorInfo.type_functor_number_map[Ordinal];
         SUCCESS_INDICATOR = true;
     } else if (Ordinal == 0 && TypeCtorInfo.type_ctor_num_functors == -1) {
-        /* This is for tuples. */
+        // This is for tuples.
         FunctorNumber = 0;
         SUCCESS_INDICATOR = true;
     } else {
@@ -5082,6 +5228,31 @@ enum_functor_ordinal(EnumFunctorDesc) = EnumFunctorDesc ^ unsafe_index(1).
 
 %---------------------------------------------------------------------------%
 
+:- func get_foreign_enum_functor_desc(type_ctor_rep, int, type_functors)
+    = foreign_enum_functor_desc.
+:- mode get_foreign_enum_functor_desc(in(foreign_enum), in, in) = out is det.
+
+get_foreign_enum_functor_desc(_, _, _) = _ :-
+    unexpected($module, $pred, "get_foreign_enum_functor_desc").
+
+:- pragma foreign_proc("C#",
+    get_foreign_enum_functor_desc(_TypeCtorRep::in(foreign_enum), X::in,
+        TypeFunctors::in) = (ForeignEnumFunctorDesc::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    ForeignEnumFunctorDesc = TypeFunctors.functors_foreign_enum()[X];
+").
+
+:- pragma foreign_proc("Java",
+    get_foreign_enum_functor_desc(_TypeCtorRep::in(foreign_enum), X::in,
+        TypeFunctors::in) = (ForeignEnumFunctorDesc::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    ForeignEnumFunctorDesc = TypeFunctors.functors_foreign_enum()[X];
+").
+
+%---------------------------------------------------------------------------%
+
 :- func foreign_enum_functor_desc(type_ctor_rep, int, type_functors)
     = foreign_enum_functor_desc.
 :- mode foreign_enum_functor_desc(in(foreign_enum), in, in) = out is det.
@@ -5366,8 +5537,8 @@ unsafe_get_enum_value(_) = _ :-
 unsafe_get_foreign_enum_value(_) = _ :-
     % This version is only used for back-ends for which there is no
     % matching foreign_proc version.
-    % XXX We cannot provide a Java version of this until mlds_to_java.m is
-    % updated to support foreign enumerations.
+    % XXX We cannot provide a Java version of this until mlds_to_java_*.m
+    % are updated to support foreign enumerations.
     private_builtin.sorry(
         "rtti_implementation.unsafe_get_foreign_enum_value/1").
 

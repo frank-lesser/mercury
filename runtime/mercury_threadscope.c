@@ -1,10 +1,9 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
-// Copyright (C) 2009-2011 The University of Melbourne.
 // Copyright (C) 2008-2009 The GHC Team.
-//
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2009-2011 The University of Melbourne.
+// Copyright (C) 2012, 2014-2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // Event log format
 //
@@ -1876,7 +1875,7 @@ MR_open_output_file_and_write_prelude(void)
 
     filename_len = strlen(progname_base) + strlen(MR_TS_FILENAME_FORMAT) + 1;
     MR_threadscope_output_filename = MR_GC_NEW_ARRAY(char, filename_len);
-    snprintf(MR_threadscope_output_filename, filename_len,
+    MR_snprintf(MR_threadscope_output_filename, filename_len,
         MR_TS_FILENAME_FORMAT, progname_base);
     free(progname_copy);
     progname_copy = NULL;

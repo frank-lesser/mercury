@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1998-2004 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_reg_workarounds.h - MR_assign_structure(), MR_memcpy(), MR_fd_zero()
 
@@ -12,6 +12,9 @@
 #include "mercury_conf.h"
 
 #ifdef MR_CAN_DO_PENDING_IO
+  #ifdef MR_HAVE_SYS_SELECT_H
+    #include <sys/select.h>     // for select() -- POSIX
+  #endif
   #include <sys/types.h>        // for fd_set
   #include <sys/time.h>         // for FD_ZERO()
 #endif

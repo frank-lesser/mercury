@@ -29,17 +29,18 @@
 
 %---------------------------------------------------------------------------%
 
-    % ml_gen_closure(PredId, ProcId, Var, ArgVars, ArgModes,
-    %   HowToConstruct, Context, Stmts, !Info):
+    % ml_construct_closure(PredId, ProcId, Var, ArgVars, ArgModes,
+    %   HowToConstruct, Context, Defns, Stmts, !Info):
     %
     % Generate code to construct a closure for the procedure specified
     % by PredId and ProcId, with the partially applied arguments specified
     % by ArgVars (and ArgModes), and to store the pointer to the resulting
     % closure in Var.
     %
-:- pred ml_gen_closure(pred_id::in, proc_id::in, prog_var::in, prog_vars::in,
-    list(unify_mode)::in, how_to_construct::in, prog_context::in,
-    list(mlds_stmt)::out, ml_gen_info::in, ml_gen_info::out) is det.
+:- pred ml_construct_closure(pred_id::in, proc_id::in, prog_var::in,
+    list(prog_var)::in, list(unify_mode)::in, how_to_construct::in,
+    prog_context::in, list(mlds_local_var_defn)::out, list(mlds_stmt)::out,
+    ml_gen_info::in, ml_gen_info::out) is det.
 
     % ml_gen_closure_wrapper(PredId, ProcId, Offset, NumClosureArgs,
     %   Context, WrapperFuncRval, WrapperFuncType):
@@ -80,6 +81,7 @@
 :- import_module check_hlds.
 :- import_module check_hlds.type_util.
 :- import_module hlds.code_model.
+:- import_module hlds.hlds_data.
 :- import_module hlds.hlds_module.
 :- import_module hlds.mark_tail_calls.          % for ntrcr_program
 :- import_module libs.
@@ -95,7 +97,8 @@
 :- import_module ml_backend.ml_call_gen.
 :- import_module ml_backend.ml_code_util.
 :- import_module ml_backend.ml_global_data.
-:- import_module ml_backend.ml_unify_gen.
+:- import_module ml_backend.ml_unify_gen_construct.
+:- import_module ml_backend.ml_unify_gen_util.
 :- import_module ml_backend.rtti_to_mlds.
 :- import_module parse_tree.builtin_lib_types.
 :- import_module parse_tree.prog_type.
@@ -113,8 +116,8 @@
 
 %---------------------------------------------------------------------------%
 
-ml_gen_closure(PredId, ProcId, Var, ArgVars, ArgModes, HowToConstruct, Context,
-        Stmts, !Info) :-
+ml_construct_closure(PredId, ProcId, Var, ArgVars, ArgModes, HowToConstruct,
+        Context, Defns, Stmts, !Info) :-
     % This constructs a closure.
     % The representation of closures for the LLDS backend is defined in
     % runtime/mercury_ho_call.h.
@@ -140,7 +143,7 @@ ml_gen_closure(PredId, ProcId, Var, ArgVars, ArgModes, HowToConstruct, Context,
 
     % Compute the rval which holds the number of arguments
     NumArgsRval0 = ml_const(mlconst_int(NumArgs)),
-    NumArgsType0 = mlds_native_int_type,
+    NumArgsType0 = mlds_builtin_type_int(int_type_int),
 
     % Put all the extra arguments of the closure together
     % Note that we need to box these arguments.
@@ -157,6 +160,7 @@ ml_gen_closure(PredId, ProcId, Var, ArgVars, ArgModes, HowToConstruct, Context,
             apw_full(arg_only_offset(1), cell_offset(1))),
         rval_type_and_width(NumArgsRval, NumArgsType,
             apw_full(arg_only_offset(2), cell_offset(2)))],
+    NumExtraArgRvalsTypes = 3,
 
     % MaybeConsId = no means that the pointer will not be tagged
     % (i.e. its primary tag bits will be zero).
@@ -164,13 +168,18 @@ ml_gen_closure(PredId, ProcId, Var, ArgVars, ArgModes, HowToConstruct, Context,
     % even if we created a cons_id specifically for this purpose.
     MaybeConsId = no,
     MaybeConsName = no,
-    PTag = 0,
-    MaybeSTag = no,
+    Ptag = ptag(0u8),
+    MaybeStag = no,
 
     % Generate a `new_object' statement (or static constant) for the closure.
-    ml_gen_new_object(MaybeConsId, MaybeConsName, PTag, MaybeSTag,
-        Var, ExtraArgRvalsTypes, ArgVars, ArgModes, [],
-        HowToConstruct, Context, Stmts, !Info).
+    ml_variable_type(!.Info, Var, VarType),
+    specified_arg_types_and_consecutive_full_words(ml_make_boxed_type,
+        NumExtraArgRvalsTypes, ArgVars, ArgVarsTypesWidths),
+    FirstArgNum = 1,
+    TakeAddr = [],
+    ml_gen_new_object(MaybeConsId, MaybeConsName, Ptag, MaybeStag,
+        Var, VarType, ExtraArgRvalsTypes, ArgVarsTypesWidths, ArgModes,
+        FirstArgNum, TakeAddr, HowToConstruct, Context, Defns, Stmts, !Info).
 
     % Generate a value for the closure layout struct.
     % See MR_Closure_Layout in ../runtime/mercury_ho_call.h.
@@ -255,7 +264,7 @@ ml_stack_layout_construct_closure_args(ModuleInfo, Target, ClosureArgs,
     Length = list.length(ArgInitsAndTypes),
     LengthRval = ml_const(mlconst_int(Length)),
     CastLengthRval = ml_box(LengthType, LengthRval),
-    LengthType = mlds_native_int_type,
+    LengthType = mlds_builtin_type_int(int_type_int),
     LengthInitAndType = init_obj(CastLengthRval) - LengthType,
     ClosureArgInits = [LengthInitAndType | ArgInitsAndTypes].
 
@@ -323,7 +332,7 @@ ml_gen_pseudo_type_info(ModuleInfo, Target, PseudoTypeInfo, Rval, Type,
         PseudoTypeInfo = type_var(N),
         % Type variables are represented just as integers.
         Rval = ml_const(mlconst_int(N)),
-        Type = mlds_native_int_type
+        Type = mlds_builtin_type_int(int_type_int)
     ;
         ( PseudoTypeInfo = plain_arity_zero_pseudo_type_info(_)
         ; PseudoTypeInfo = plain_pseudo_type_info(_, _)
@@ -445,7 +454,8 @@ arg_type_infos(var_arity_type_info(_VarArityId, ArgTIs)) = ArgTIs.
 
 ml_stack_layout_construct_tvar_vector(ModuleInfo, ConstVarKind, Context,
         TVarLocnMap, TVarVectorAddrRval, ArrayType, !GlobalData) :-
-    ArrayType = mlds_array_type(mlds_native_int_type),
+    IntType = mlds_builtin_type_int(int_type_int),
+    ArrayType = mlds_array_type(IntType),
     ( if map.is_empty(TVarLocnMap) then
         TVarVectorAddrRval = ml_const(mlconst_null(ArrayType))
     else
@@ -468,7 +478,8 @@ ml_stack_layout_construct_tvar_rvals(TVarLocnMap, Vector, VectorTypes) :-
     list.length(TypeParamLocs, TypeParamsLength),
     LengthRval = ml_const(mlconst_int(TypeParamsLength)),
     Vector = [init_obj(LengthRval) | TypeParamLocs],
-    VectorTypes = list.duplicate(TypeParamsLength + 1, mlds_native_int_type).
+    IntType = mlds_builtin_type_int(int_type_int),
+    VectorTypes = list.duplicate(TypeParamsLength + 1, IntType).
 
     % Given a association list of type variables and their locations sorted
     % on the type variables, represent them in an array of location
@@ -1194,8 +1205,9 @@ ml_gen_closure_field_lvals(ClosureLval, Offset, ArgNum, NumClosureArgs,
         % Generate `MR_field(MR_mktag(0), closure, <N>)'.
         FieldId = ml_field_offset(ml_const(mlconst_int(ArgNum + Offset))),
         % XXX These types might not be right.
-        FieldLval = ml_field(yes(0), ml_lval(ClosureLval), FieldId,
-            mlds_generic_type, mlds_generic_type),
+        FieldLval = ml_field(yes(ptag(0u8)),
+            ml_lval(ClosureLval), mlds_generic_type,
+            FieldId, mlds_generic_type),
         % Recursively handle the remaining fields.
         ml_gen_closure_field_lvals(ClosureLval, Offset, ArgNum + 1,
             NumClosureArgs, ClosureArgLvals0, !Info),

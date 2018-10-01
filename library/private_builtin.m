@@ -3,8 +3,7 @@
 %---------------------------------------------------------------------------%
 % Copyright (C) 1994-2007, 2012 The University of Melbourne.
 % Copyright (C) 2013-2018 The Mercury team.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: private_builtin.m.
@@ -618,7 +617,7 @@ public static /* typeclass_info */ Object[] MR_typeclass_info_superclass_info(
     /* typeclass_info */ Object[] base_tcinfo;
     int t1;
 
-    /* The zeroth argument is num_extra_instance_args. */
+    // The zeroth argument is num_extra_instance_args.
     base_tcinfo = (Object[]) tcinfo[0];
     t1 = ((Integer) base_tcinfo[0]).intValue() + index;
     return (/* typeclass_info */ Object[]) tcinfo[t1];
@@ -1201,7 +1200,7 @@ __Compare____base_typeclass_info_1_0(
     store_ticket(Ticket::out),
     [will_not_call_mercury, thread_safe],
 "
-    /* XXX No trailing for the Java back-end, so take no action. */
+    // XXX No trailing for the Java back-end, so take no action.
     Ticket = null;
 ").
 
@@ -1209,42 +1208,42 @@ __Compare____base_typeclass_info_1_0(
     reset_ticket_undo(_Ticket::in),
     [will_not_call_mercury, thread_safe],
 "
-    /* XXX No trailing for the Java back-end, so take no action. */
+    // XXX No trailing for the Java back-end, so take no action.
 ").
 
 :- pragma foreign_proc("Java",
     reset_ticket_commit(_Ticket::in),
     [will_not_call_mercury, thread_safe],
 "
-    /* XXX No trailing for the Java back-end, so take no action. */
+    // XXX No trailing for the Java back-end, so take no action.
 ").
 
 :- pragma foreign_proc("Java",
     reset_ticket_solve(_Ticket::in),
     [will_not_call_mercury, thread_safe],
 "
-    /* XXX No trailing for the Java back-end, so take no action. */
+    // XXX No trailing for the Java back-end, so take no action.
 ").
 
 :- pragma foreign_proc("Java",
     discard_ticket,
     [will_not_call_mercury, thread_safe],
 "
-    /* XXX No trailing for the Java back-end, so take no action. */
+    // XXX No trailing for the Java back-end, so take no action.
 ").
 
 :- pragma foreign_proc("Java",
     prune_ticket,
     [will_not_call_mercury, thread_safe],
 "
-    /* XXX No trailing for the Java back-end, so take no action. */
+    // XXX No trailing for the Java back-end, so take no action.
 ").
 
 :- pragma foreign_proc("Java",
     mark_ticket_stack(TicketCounter::out),
     [will_not_call_mercury, thread_safe],
 "
-    /* XXX No trailing for the Java back-end, so take no action. */
+    // XXX No trailing for the Java back-end, so take no action.
     TicketCounter = null;
 ").
 
@@ -1252,7 +1251,7 @@ __Compare____base_typeclass_info_1_0(
     prune_tickets_to(_TicketCounter::in),
     [will_not_call_mercury, thread_safe],
 "
-    /* XXX No trailing for the Java back-end, so take no action. */
+    // XXX No trailing for the Java back-end, so take no action.
 ").
 
 :- pragma foreign_proc("Erlang",
@@ -1385,7 +1384,7 @@ __Compare____base_typeclass_info_1_0(
 :- pragma inline(restore_hp/1).
 
 :- pragma foreign_decl("C", "
-    #include ""mercury_heap.h"" /* for MR_free_heap() */
+    #include ""mercury_heap.h"" // for MR_free_heap()
 ").
 
 :- pragma foreign_proc("C",
@@ -1418,7 +1417,7 @@ __Compare____base_typeclass_info_1_0(
 #ifndef MR_CONSERVATIVE_GC
     MR_mark_hp(SavedHeapPointer);
 #else
-    /* We can't do heap reclamation with conservative GC. */
+    // We can't do heap reclamation with conservative GC.
     SavedHeapPointer = 0;
 #endif
 ").
@@ -1437,7 +1436,7 @@ __Compare____base_typeclass_info_1_0(
     mark_hp(SavedHeapPointer::out),
     [will_not_call_mercury, thread_safe],
 "
-    /* We can't do heap reclamation on failure in the .NET back-end. */
+    // We can't do heap reclamation on failure in the .NET back-end.
     SavedHeapPointer = null;
 ").
 
@@ -1445,34 +1444,30 @@ __Compare____base_typeclass_info_1_0(
     restore_hp(_SavedHeapPointer::in),
     [will_not_call_mercury, thread_safe],
 "
-    /* We can't do heap reclamation on failure in the .NET back-end. */
+    // We can't do heap reclamation on failure in the .NET back-end.
 ").
 
 :- pragma foreign_proc("Java",
     gc_trace(_Pointer::in),
     [will_not_call_mercury, thread_safe],
 "
-    /*
-    ** For the Java back-end, we use the Java garbage collector, so we
-    ** take no action here.
-    */
+    // For the Java back-end, we use the Java garbage collector,
+    // so we take no action here.
 ").
 
 :- pragma foreign_proc("Java",
     free_heap(_Val::di),
     [will_not_call_mercury, thread_safe],
 "
-    /*
-    ** For the Java back-end, as for the .NET back-end, we don't define
-    ** our own heaps. So take no action here.
-    */
+    // For the Java back-end, we don't define our own heaps.
+    // So take no action here.
 ").
 
 :- pragma foreign_proc("Java",
     mark_hp(SavedHeapPointer::out),
     [will_not_call_mercury, thread_safe],
 "
-    /* We can't do heap reclamation on failure in the Java back-end. */
+    // We can't do heap reclamation on failure in the Java back-end.
     SavedHeapPointer = null;
 ").
 
@@ -1480,7 +1475,7 @@ __Compare____base_typeclass_info_1_0(
     restore_hp(_SavedHeapPointer::in),
     [will_not_call_mercury, thread_safe],
 "
-    /* We can't do heap reclamation on failure in the Java back-end. */
+    // We can't do heap reclamation on failure in the Java back-end.
 ").
 
 :- pragma foreign_proc("Erlang",
@@ -1578,14 +1573,9 @@ __Compare__private_builtin__ref_1_0(
     %
 :- impure pred store_at_ref_impure(store_at_ref_type(T)::in, T::in) is det.
 
-    % This is deprecated. The compiler should now generate calls to
-    % store_at_ref_impure.
-    %
-:- pred store_at_ref(store_at_ref_type(T)::in, T::in) is det.
-
     % This type should be used only by the program transformation that
-    % introduces calls to store_at_ref. Any other use is will cause bad things
-    % to happen.
+    % introduces calls to store_at_ref_impure. Any other use is will cause
+    % bad things to happen.
 :- type store_at_ref_type(T)
     --->    store_at_ref_type(int).
 
@@ -1838,17 +1828,22 @@ const MR_FA_TypeInfo_Struct1 ML_type_info_for_list_of_pseudo_type_info = {
         // XXX stub only
     }
 
-    public static final int MR_SECTAG_NONE              = 0;
-    public static final int MR_SECTAG_NONE_DIRECT_ARG   = 1;
-    public static final int MR_SECTAG_LOCAL             = 2;
-    public static final int MR_SECTAG_REMOTE            = 3;
-    public static final int MR_SECTAG_VARIABLE          = 4;
+    public static final int MR_SECTAG_NONE               = 0;
+    public static final int MR_SECTAG_NONE_DIRECT_ARG    = 1;
+    public static final int MR_SECTAG_LOCAL              = 2;
+    public static final int MR_SECTAG_LOCAL_REST_OF_WORD = 2;   // synonym
+    public static final int MR_SECTAG_REMOTE             = 3;
+    public static final int MR_SECTAG_REMOTE_FULL_WORD   = 3;   // synonym
+    public static final int MR_SECTAG_VARIABLE           = 4;
+    // These are never used in Java grades.
+    // public static final int MR_SECTAG_LOCAL_BITS      = 5;
+    // public static final int MR_SECTAG_REMOTE_BITS     = 6;
 
-    public static final int MR_FUNCTOR_SUBTYPE_NONE     = 0;
-    public static final int MR_FUNCTOR_SUBTYPE_EXISTS   = 1;
+    public static final int MR_FUNCTOR_SUBTYPE_NONE      = 0;
+    public static final int MR_FUNCTOR_SUBTYPE_EXISTS    = 1;
 
-    public static final int MR_PREDICATE    = 0;
-    public static final int MR_FUNCTION     = 1;
+    public static final int MR_PREDICATE = 0;
+    public static final int MR_FUNCTION  = 1;
 
     // The dummy_var is used to represent io.states and values of other types
     // (dummy types) that contain no information. Occasionally a dummy variable
@@ -1867,7 +1862,7 @@ const MR_FA_TypeInfo_Struct1 ML_type_info_for_list_of_pseudo_type_info = {
 
 :- pragma foreign_code("Java", "
     //
-    // Type-specific unification and comparison routines
+    // Type-specific unification and comparison routines.
     //
 
     public static boolean

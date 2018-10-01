@@ -193,6 +193,7 @@
     ;       inform_incomplete_switch_threshold
     ;       warn_unresolved_polymorphism
     ;       warn_suspicious_foreign_procs
+    ;       warn_suspicious_foreign_code
     ;       warn_state_var_shadowing
     ;       inform_inferred
     ;       inform_inferred_types
@@ -345,6 +346,7 @@
     ;       mode_constraints
     ;       simple_mode_constraints
     ;       prop_mode_constraints
+    ;       compute_goal_modes
     ;       benchmark_modes
     ;       benchmark_modes_repeat
 
@@ -486,9 +488,13 @@
     ;       unboxed_no_tag_types
     ;       arg_pack_bits
     ;       allow_double_word_fields
-    ;       allow_double_word_ints      % XXX bootstrapping option
-    ;       allow_packing_dummies       % XXX bootstrapping option
-    ;       allow_packing_ints          % XXX bootstrapping option
+    ;       allow_double_word_ints          % XXX bootstrapping option
+    ;       allow_packing_dummies           % XXX bootstrapping option
+    ;       allow_packing_ints              % XXX bootstrapping option
+    ;       allow_packing_chars             % XXX bootstrapping option
+    ;       allow_packing_local_sectags     % XXX bootstrapping option
+    ;       allow_packing_remote_sectags    % XXX bootstrapping option
+    ;       allow_packing_mini_types        % XXX bootstrapping option
     ;       sync_term_size % in words
 
     % LLDS back-end compilation model options
@@ -863,9 +869,6 @@
     ;       everything_in_one_c_function
     ;       local_thread_engine_base
 
-    %   - IL
-    %   (none yet)
-
     %   - Erlang
     ;       erlang_switch_on_strings_as_atoms
 
@@ -1207,6 +1210,7 @@ option_defaults_2(warning_option, [
     inform_incomplete_switch_threshold  -   int(0),
     warn_unresolved_polymorphism        -   bool(yes),
     warn_suspicious_foreign_procs       -   bool(no),
+    warn_suspicious_foreign_code        -   bool(no),
     warn_state_var_shadowing            -   bool(yes),
     inform_inferred                     -   bool_special,
     inform_inferred_types               -   bool(yes),
@@ -1341,6 +1345,7 @@ option_defaults_2(aux_output_option, [
     mode_constraints                    -   bool(no),
     simple_mode_constraints             -   bool(no),
     prop_mode_constraints               -   bool(no),
+    compute_goal_modes                  -   bool(no),
     benchmark_modes                     -   bool(no),
     benchmark_modes_repeat              -   int(1)
 ]).
@@ -1455,6 +1460,10 @@ option_defaults_2(compilation_model_option, [
     allow_double_word_ints              -   bool(no),
     allow_packing_dummies               -   bool(no),
     allow_packing_ints                  -   bool(no),
+    allow_packing_chars                 -   bool(no),
+    allow_packing_local_sectags         -   bool(no),
+    allow_packing_remote_sectags        -   bool(no),
+    allow_packing_mini_types            -   bool(no),
     sync_term_size                      -   int(8),
                                         % 8 is the size on linux (at the time
                                         % of writing) - will usually be
@@ -2114,6 +2123,7 @@ long_option("inform-incomplete-switch-threshold",
                     inform_incomplete_switch_threshold).
 long_option("warn-unresolved-polymorphism", warn_unresolved_polymorphism).
 long_option("warn-suspicious-foreign-procs", warn_suspicious_foreign_procs).
+long_option("warn-suspicious-foreign-code", warn_suspicious_foreign_code).
 long_option("warn-state-var-shadowing", warn_state_var_shadowing).
 long_option("inform-inferred",          inform_inferred).
 long_option("inform-inferred-types",    inform_inferred_types).
@@ -2284,6 +2294,7 @@ long_option("verbose-mlds-dump",        verbose_dump_mlds).
 long_option("mode-constraints",         mode_constraints).
 long_option("simple-mode-constraints",  simple_mode_constraints).
 long_option("prop-mode-constraints",    prop_mode_constraints).
+long_option("compute-goal-modes",       compute_goal_modes).
 long_option("propagate-mode-constraints",   prop_mode_constraints).
 long_option("benchmark-modes",          benchmark_modes).
 long_option("benchmark-modes-repeat",   benchmark_modes_repeat).
@@ -2408,6 +2419,10 @@ long_option("allow-double-word-fields", allow_double_word_fields).
 long_option("allow-double-word-ints", allow_double_word_ints).
 long_option("allow-packing-dummies", allow_packing_dummies).
 long_option("allow-packing-ints",   allow_packing_ints).
+long_option("allow-packing-chars",  allow_packing_chars).
+long_option("allow-packing-local-sectags",  allow_packing_local_sectags).
+long_option("allow-packing-remote-sectags", allow_packing_remote_sectags).
+long_option("allow-packing-mini-types",     allow_packing_mini_types).
 long_option("sync-term-size",       sync_term_size).
 long_option("highlevel-data",       highlevel_data).
 long_option("high-level-data",      highlevel_data).
@@ -3930,6 +3945,9 @@ options_help_warning -->
         "--warn-suspicious-foreign-procs",
         "\tWarn about possible errors in the bodies of foreign",
         "\tprocedures.",
+        "--warn-suspicious-foreign-code",
+        "\tWarn about possible errors in the bodies of foreign code",
+        "\tpragmas.",
         "--no-warn-state-var-shadowing",
         "\tDo not warn about one state variable shadowing another.",
         "--no-inform-inferred",
@@ -4425,6 +4443,8 @@ options_help_aux_output -->
 %       "--prop-mode-constraints",
 %       "\tUse the new propagation solver for constraints based",
 %       "\tmode analysis.",
+%       "--compute-goal-modes",
+%       "\tCompute goal modes.",
     ]).
 
 :- pred options_help_semantics(io::di, io::uo) is det.

@@ -1,7 +1,7 @@
+// vim: ts=4 sw=4 expandtab ft=java
 //
-// Copyright (C) 2014 The Mercury Team 
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2018 The Mercury Team
+// This file is distributed under the terms specified in COPYING.LIB.
 //
 
 package jmercury.runtime;
@@ -17,4 +17,3 @@ public enum ThreadStatus {
      */
     OTHER
 }
-

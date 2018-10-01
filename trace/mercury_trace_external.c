@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1998-2008,2011-2012 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // This file contains the code that interfaces between the Mercury program
 // being debugged and the external trace analysis process.
@@ -1036,7 +1036,7 @@ MR_trace_make_var_list(void)
     for (i = var_count; i > 0; i--) {
         problem = MR_trace_return_var_info(i, NULL, &type_info, &value);
         if (problem != NULL) {
-            MR_fatal_error(problem);
+            MR_fatal_error("%s", problem);
         }
 
         MR_TRACE_USE_HP(
@@ -1076,7 +1076,7 @@ MR_trace_make_var_names_list(void)
     for (i = var_count; i > 0; i--) {
         problem = MR_trace_return_var_info(i, &name, NULL, NULL);
         if (problem != NULL) {
-            MR_fatal_error(problem);
+            MR_fatal_error("%s", problem);
         }
 
         MR_TRACE_USE_HP(
@@ -1113,7 +1113,7 @@ MR_trace_make_type_list(void)
     for (i = var_count; i > 0; i--) {
         problem = MR_trace_return_var_info(i, NULL, &type_info, NULL);
         if (problem != NULL) {
-            MR_fatal_error(problem);
+            MR_fatal_error("%s", problem);
         }
 
         MR_TRACE_CALL_MERCURY(
@@ -1152,7 +1152,7 @@ MR_trace_make_nth_var(MR_Word debugger_request)
         // Should never occur since we check in the external debugger process
         // if a variable is live before retrieving it.
 
-        MR_fatal_error(problem);
+        MR_fatal_error("%s", problem);
     }
 
     return univ;

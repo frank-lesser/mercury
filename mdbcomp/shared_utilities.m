@@ -2,8 +2,8 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2012 The University of Melbourne.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2014, 2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % This module contains utility predicates that may be useful in several
@@ -52,9 +52,11 @@
 #if defined(MR_HAVE_SETRLIMIT)
     struct rlimit   limit_struct;
     rlim_t          max_value;
+    char            errbuf[MR_STRERROR_BUF_SIZE];
 
     if (getrlimit(RLIMIT_STACK, &limit_struct) != 0) {
-        MR_fatal_error(""could not get current stack limit"");
+        MR_fatal_error(""could not get current stack limit: %s"",
+            MR_strerror(errno, errbuf, sizeof(errbuf)));
     }
 
     max_value = limit_struct.rlim_max;

@@ -54,6 +54,7 @@
 :- import_module hlds.hlds_out.hlds_out_goal.
 :- import_module hlds.hlds_out.hlds_out_mode.
 :- import_module hlds.hlds_out.hlds_out_pred.
+:- import_module hlds.status.
 % XXX :- import_module hlds.pred_table.
 % We actually use a type equivalence from pred_table.m (specifically,
 % the fact that pred_table is a map), but we get an unused import warning
@@ -140,10 +141,15 @@ write_hlds(Indent, ModuleInfo, !IO) :-
             true
         ),
         ( if string.contains_char(DumpOptions, 'T') then
+            ( if string.contains_char(DumpOptions, 'L') then
+                LocalOnly = yes
+            else
+                LocalOnly = no
+            ),
             module_info_get_type_table(ModuleInfo, TypeTable),
             module_info_get_instance_table(ModuleInfo, InstanceTable),
             module_info_get_class_table(ModuleInfo, ClassTable),
-            write_types(Info, Indent, TypeTable, !IO),
+            write_type_table(Info, Indent, LocalOnly, TypeTable, !IO),
             write_classes(Info, Indent, ClassTable, !IO),
             write_instances(Info, Indent, InstanceTable, !IO)
         else
@@ -254,15 +260,31 @@ write_avail_entry(Indent, ModuleName, Entry, !IO) :-
 % Write out the type table.
 %
 
-:- pred write_types(hlds_out_info::in, int::in, type_table::in,
-    io::di, io::uo) is det.
+:- pred write_type_table(hlds_out_info::in, int::in, bool::in,
+    type_table::in, io::di, io::uo) is det.
 
-write_types(Info, Indent, TypeTable, !IO) :-
+write_type_table(Info, Indent, LocalOnly, TypeTable, !IO) :-
     write_indent(Indent, !IO),
     io.write_string("%-------- Types --------\n", !IO),
     get_all_type_ctor_defns(TypeTable, TypeAssocList),
-    write_type_table_entries(Info, Indent, TypeAssocList, !IO),
+    list.sort(TypeAssocList, SortedTypeAssocList),
+    (
+        LocalOnly = no,
+        PrintedTypeAssocList = SortedTypeAssocList
+    ;
+        LocalOnly = yes,
+        list.filter(type_table_entry_is_local, SortedTypeAssocList,
+            PrintedTypeAssocList)
+    ),
+    write_type_table_entries(Info, Indent, PrintedTypeAssocList, !IO),
     io.nl(!IO).
+
+:- pred type_table_entry_is_local(pair(type_ctor, hlds_type_defn)::in)
+    is semidet.
+
+type_table_entry_is_local(_TypeCtor - TypeDefn) :-
+    hlds_data.get_type_defn_status(TypeDefn, TypeStatus),
+    type_status_defined_in_this_module(TypeStatus) = yes.
 
 :- pred write_type_table_entries(hlds_out_info::in, int::in,
     assoc_list(type_ctor, hlds_type_defn)::in, io::di, io::uo) is det.
@@ -555,10 +577,10 @@ write_ctor(TVarSet, MaybePeriodNL, Ctor, !IO) :-
     io::di, io::uo) is det.
 
 write_ctor_repn(TVarSet, Indent, MaybePeriodNL, CtorRepn, !IO) :-
-    CtorRepn = ctor_repn(MaybeExistConstraints, Name, Tag, ArgRepns,
+    CtorRepn = ctor_repn(Ordinal, MaybeExistConstraints, Name, Tag, ArgRepns,
         Arity, Context),
     Args = list.map(discard_repn_from_ctor_arg, ArgRepns),
-    Ctor = ctor(MaybeExistConstraints, Name, Args, Arity, Context),
+    Ctor = ctor(Ordinal, MaybeExistConstraints, Name, Args, Arity, Context),
     mercury_output_ctor(TVarSet, Ctor, !IO),
     io.write_string(MaybePeriodNL, !IO),
     write_indent(Indent, !IO),
@@ -625,30 +647,25 @@ write_arg_widths(Indent, CurArgNum, [Arg | Args], !IO) :-
             [i(CurArgNum), s(KindStr), i(AOWordNum), i(CellWordNum),
             i(AOWordNum+1), i(CellWordNum + 1)], !IO)
     ;
-        PosWidth = apw_partial_first(ArgOnlyOffset, CellOffset,
-            NumBits, Mask, FillKind),
-        ArgOnlyOffset = arg_only_offset(AOWordNum),
-        CellOffset = cell_offset(CellWordNum),
-        NumBits = arg_num_bits(NumBitsInt),
-        Mask = arg_mask(MaskInt),
-        FillStr = fill_kind_to_string(FillKind),
-        io.format("%% arg %d: partial word first " ++
-            "at offset %d/%d, #bits %d, mask %x, %s\n",
-            [i(CurArgNum), i(AOWordNum), i(CellWordNum),
-            i(NumBitsInt), i(MaskInt), s(FillStr)], !IO)
-    ;
-        PosWidth = apw_partial_shifted(ArgOnlyOffset, CellOffset, Shift,
-            NumBits, Mask, FillKind),
+        (
+            PosWidth = apw_partial_first(ArgOnlyOffset, CellOffset, Shift,
+                NumBits, Mask, FillKind),
+            FirstShifted = "first"
+        ;
+            PosWidth = apw_partial_shifted(ArgOnlyOffset, CellOffset, Shift,
+                NumBits, Mask, FillKind),
+            FirstShifted = "shifted"
+        ),
         ArgOnlyOffset = arg_only_offset(AOWordNum),
         CellOffset = cell_offset(CellWordNum),
         Shift = arg_shift(ShiftInt),
         NumBits = arg_num_bits(NumBitsInt),
         Mask = arg_mask(MaskInt),
         FillStr = fill_kind_to_string(FillKind),
-        io.format("%% arg %d: partial word shifted " ++
+        io.format("%% arg %d: partial word %s " ++
             "at offset %d/%d, shift %d, #bits %d, mask %x, %s\n",
-            [i(CurArgNum), i(AOWordNum), i(CellWordNum), i(ShiftInt),
-            i(NumBitsInt), i(MaskInt), s(FillStr)], !IO)
+            [i(CurArgNum), s(FirstShifted), i(AOWordNum), i(CellWordNum),
+            i(ShiftInt), i(NumBitsInt), i(MaskInt), s(FillStr)], !IO)
     ;
         PosWidth = apw_none_shifted(ArgOnlyOffset, CellOffset),
         ArgOnlyOffset = arg_only_offset(AOWordNum),
@@ -670,6 +687,7 @@ fill_kind_to_string(fill_int32) = "fill int32".
 fill_kind_to_string(fill_uint8) = "fill uint8".
 fill_kind_to_string(fill_uint16) = "fill uint16".
 fill_kind_to_string(fill_uint32) = "fill uint32".
+fill_kind_to_string(fill_char21) = "fill char21".
 
 %-----------------------------------------------------------------------------%
 %

@@ -1290,6 +1290,25 @@ AC_ARG_WITH(csharp-compiler,
     mercury_cv_with_csharp_compiler="")
 MERCURY_CHECK_DOTNET
 
+# The Roslyn (i.e. Microsoft) C# compiler does not support signing assmblies
+# with a strong name on non-Windows platforms.  If we are using that compiler
+# on a non-Windows platform then only delay sign the assembly.
+
+CSHARP_DELAYSIGN_FLAG=
+if test "$CSHARP_COMPILER_TYPE" = "microsoft"; then
+    case "$host" in
+        *cygwin* | *mingw*)
+            CSHARP_DELAYSIGN_FLAG=
+        ;;
+
+        *)
+            CSHARP_DELAYSIGN_FLAG="--csharp-flag -delaysign"
+        ;;
+    esac
+fi
+
+AC_SUBST([CSHARP_DELAYSIGN_FLAG])
+
 #-----------------------------------------------------------------------------#
 # Java configuration
 #
@@ -1401,7 +1420,7 @@ MERCURY_CHECK_FOR_HEADERS( \
         sys/types.h sys/stat.h fcntl.h termios.h sys/ioctl.h \
         sys/resource.h sys/stropts.h windows.h dirent.h getopt.h malloc.h \
         semaphore.h pthread.h time.h spawn.h fenv.h sys/mman.h sys/sem.h \
-        sched.h utmpx.h dispatch/dispatch.h stdint.h)
+        sched.h utmpx.h dispatch/dispatch.h stdint.h sys/select.h )
 
 if test "$MR_HAVE_GETOPT_H" = 1; then
     GETOPT_H_AVAILABLE=yes
@@ -2407,6 +2426,9 @@ AC_MSG_CHECKING(to see if we can handle contexts blocking on IO)
 AC_CACHE_VAL(mercury_cv_can_do_pending_io,
     AC_TRY_RUN(
         [
+            #ifdef MR_HAVE_SYS_SELECT_H
+            #include <sys/select.h>
+            #endif
             #include <sys/types.h>
             #include <sys/time.h>
             int main() {
@@ -5227,10 +5249,11 @@ AC_SUBST(USE_MSVCRT)
 
 #-----------------------------------------------------------------------------#
 #
-# Check for readline
+# Check for readline and editline.
 #
 
 MERCURY_CHECK_READLINE
+MERCURY_CHECK_EDITLINE
 
 #-----------------------------------------------------------------------------#
 #

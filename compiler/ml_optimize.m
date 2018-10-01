@@ -1,4 +1,4 @@
-%---------------------------------------------------------------------------%
+% ---------------------------------------------------------------------------%
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2000-2011 The University of Melbourne.
@@ -45,6 +45,7 @@
 :- import_module mdbcomp.builtin_modules.
 :- import_module mdbcomp.prim_data.
 :- import_module ml_backend.ml_util.
+:- import_module ml_backend.mlds_dump.
 :- import_module parse_tree.
 :- import_module parse_tree.prog_data.
 
@@ -92,6 +93,12 @@ optimize_in_function_body(OptInfo, !Body) :-
     ;
         !.Body = body_defined_here(Stmt0),
         optimize_in_stmt(OptInfo, Stmt0, Stmt),
+        trace [compile_time(flag("debug_ml_optimize")), io(!IO)] (
+            io.write_string("\nfunction body before\n\n", !IO),
+            dump_mlds_stmt(1, Stmt0, !IO),
+            io.write_string("\nfunction body after\n\n", !IO),
+            dump_mlds_stmt(1, Stmt, !IO)
+        ),
         !:Body = body_defined_here(Stmt)
     ).
 
@@ -388,6 +395,50 @@ peephole_opt_statement(Stmt0, Stmt1, Stmts2, Stmts) :-
         ),
         Stmt = ml_stmt_if_then_else(TestRval, Then, MaybeElse, Context0),
         Stmts = [Stmt | Stmts2]
+    else if
+        % This pattern optimizes code like this, which we generate often
+        % in automatically defined type-specific comparison predicates:
+        %
+        % succeeded = (X == Y);
+        % succeeded = !(succeeded);
+        %
+        % This pattern replaces that with
+        %
+        % succeeded = (X != Y);
+        %
+        % because it reduces .c file size, because it may yield a speedup
+        % (depending on C compiler optimizations), and because it is easier
+        % to read when debugging generated C code.
+        %
+        % We do this only if the assignment operation is assign itself.
+        % We could do the same with assign_if_in_heap operations as well,
+        % but I (zs) have seen no need for that.
+        %
+        % Likewise, we could check for {float,str}_{eq,ne,lt,le,gt,ge}
+        % as well as for their integer versions, but again, I have seen
+        % no need for that.
+
+        % We test for the negation operation first, since we want to fail fast
+        % in the usual case where the pattern does not apply, and unary ops,
+        % and self-negations in particular, occur less frequently than
+        % binary ops and comparisons.
+        Stmt1 = ml_stmt_atomic(Atomic1, _Context1),
+        Atomic1 = assign(Lval, ml_unop(logical_not, ml_lval(Lval))),
+
+        Stmt0 = ml_stmt_atomic(Atomic0, Context0),
+        Atomic0 = assign(Lval, ml_binop(CompareOp, CmpRvalA, CmpRvalB)),
+
+        ( CompareOp = eq(IntType), NegCompareOp = ne(IntType)
+        ; CompareOp = ne(IntType), NegCompareOp = eq(IntType)
+        ; CompareOp = int_lt(IntType), NegCompareOp = int_ge(IntType)
+        ; CompareOp = int_le(IntType), NegCompareOp = int_gt(IntType)
+        ; CompareOp = int_gt(IntType), NegCompareOp = int_le(IntType)
+        ; CompareOp = int_ge(IntType), NegCompareOp = int_lt(IntType)
+        )
+    then
+        Atomic = assign(Lval, ml_binop(NegCompareOp, CmpRvalA, CmpRvalB)),
+        Stmt = ml_stmt_atomic(Atomic, Context0),
+        Stmts = [Stmt | Stmts2]
     else
         fail
     ).
@@ -432,10 +483,9 @@ find_rval_component_lvals(Rval, !Components) :-
 
 find_lval_component_lvals(Lval, !Components) :-
     (
-        Lval = ml_field(_, Rval, _, _, _),
-        find_rval_component_lvals(Rval, !Components)
-    ;
-        Lval = ml_mem_ref(Rval, _),
+        ( Lval = ml_field(_, Rval, _, _, _)
+        ; Lval = ml_mem_ref(Rval, _)
+        ),
         find_rval_component_lvals(Rval, !Components)
     ;
         ( Lval = ml_target_global_var_ref(_)
@@ -928,10 +978,10 @@ rval_will_not_change(Rval) :-
             ; Lval = ml_global_var(_, _)
             )
         ;
-            ( Lval = ml_mem_ref(Address, _Type)
-            ; Lval = ml_field(_, Address, _, _, _)
+            ( Lval = ml_mem_ref(SubRval, _Type)
+            ; Lval = ml_field(_, SubRval, _, _, _)
             ),
-            rval_will_not_change(Address)
+            rval_will_not_change(SubRval)
         ;
             Lval = ml_target_global_var_ref(_),
             % XXX How can the address of a target language global variable
@@ -1227,9 +1277,9 @@ eliminate_var_in_lvals(!Lvals, !VarElimInfo) :-
 
 eliminate_var_in_lval(Lval0, Lval, !VarElimInfo) :-
     (
-        Lval0 = ml_field(MaybeTag, Rval0, FieldId, FieldType, PtrType),
+        Lval0 = ml_field(MaybeTag, Rval0, PtrType, FieldId, FieldType),
         eliminate_var_in_rval(Rval0, Rval, !VarElimInfo),
-        Lval = ml_field(MaybeTag, Rval, FieldId, FieldType, PtrType)
+        Lval = ml_field(MaybeTag, Rval, PtrType, FieldId, FieldType)
     ;
         Lval0 = ml_mem_ref(Rval0, Type),
         eliminate_var_in_rval(Rval0, Rval, !VarElimInfo),

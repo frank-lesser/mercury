@@ -2,8 +2,8 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1994-2006, 2009, 2011-2012 The University of Melbourne.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2014-2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: term_io.m.
@@ -728,8 +728,9 @@ write_escaped_char(Char, !IO) :-
 write_escaped_char(Stream, Char, !State) :-
     % Note: the code of add_escaped_char and write_escaped_char
     % should be kept in sync. The code of both is similar to code in
-    % compiler/mercury_to_mercury.m; any changes here may require
-    % similar changes there.
+    % compiler/parse_tree_out_pragma.m and MR_escape_string_quote
+    % in runtime/mercury_string.c; any changes here may require similar
+    % changes in those spots.
     ( if mercury_escape_special_char(Char, QuoteChar) then
         stream.put(Stream, ('\\'), !State),
         stream.put(Stream, QuoteChar, !State)
@@ -773,20 +774,24 @@ string_is_escaped_char(Char::out, String::in) :-
     % Succeed if Char is a character which is allowed in Mercury string
     % and character literals.
     %
-    % Note: the code here is similar to code in compiler/mercury_to_mercury.m;
-    % any changes here may require similar changes there.
+    % Note: the code here is similar to code in the following spots:
+    %
+    %   - compiler/parse_tree_out_pragma.m.
+    %   - runtime/mercury_trace_base.c
+    %
+    % Any changes here may require similar changes there.
     %
 :- pred is_mercury_source_char(char::in) is semidet.
 
 is_mercury_source_char(Char) :-
     ( char.is_alnum(Char)
     ; is_mercury_punctuation_char(Char)
-    ; char.to_int(Char) >= 0x80
+    ; char.to_int(Char) >= 0xA0  % 0x7f - 0x9f are control characters.
     ).
 
 %---------------------------------------------------------------------------%
 
-% Note: the code here is similar to code in compiler/mercury_to_mercury.m;
+% Note: the code here is similar to code in compiler/parse_tree_out_pragma.m;
 % any changes here may require similar changes there.
 
 quote_string(S, !IO) :-
@@ -817,7 +822,7 @@ escaped_string(String) =
 add_escaped_char(Char, Strings0) = Strings :-
     % Note: the code of add_escaped_char and write_escaped_char
     % should be kept in sync. The code of both is similar to code in
-    % compiler/mercury_to_mercury.m; any changes here may require
+    % compiler/parse_tree_out_pragma.m; any changes here may require
     % similar changes there.
     ( if mercury_escape_special_char(Char, QuoteChar) then
         Strings = [from_char_list(['\\', QuoteChar]) | Strings0]
@@ -938,39 +943,43 @@ mercury_escape_char(Char) = EscapeCode :-
     % Note: the code here is similar to code in runtime/mercury_trace_base.c;
     % any changes here may require similar changes there.
 
+% Codepoints in 0x20..0x2f.
 is_mercury_punctuation_char(' ').
 is_mercury_punctuation_char('!').
-is_mercury_punctuation_char('@').
+is_mercury_punctuation_char('"').
 is_mercury_punctuation_char('#').
 is_mercury_punctuation_char('$').
 is_mercury_punctuation_char('%').
-is_mercury_punctuation_char('^').
 is_mercury_punctuation_char('&').
-is_mercury_punctuation_char('*').
+is_mercury_punctuation_char('''').
 is_mercury_punctuation_char('(').
 is_mercury_punctuation_char(')').
-is_mercury_punctuation_char('-').
-is_mercury_punctuation_char('_').
+is_mercury_punctuation_char('*').
 is_mercury_punctuation_char('+').
-is_mercury_punctuation_char('=').
-is_mercury_punctuation_char('`').
-is_mercury_punctuation_char('~').
-is_mercury_punctuation_char('{').
-is_mercury_punctuation_char('}').
-is_mercury_punctuation_char('[').
-is_mercury_punctuation_char(']').
-is_mercury_punctuation_char(';').
-is_mercury_punctuation_char(':').
-is_mercury_punctuation_char('''').
-is_mercury_punctuation_char('"').
-is_mercury_punctuation_char('<').
-is_mercury_punctuation_char('>').
-is_mercury_punctuation_char('.').
 is_mercury_punctuation_char(',').
+is_mercury_punctuation_char('-').
+is_mercury_punctuation_char('.').
 is_mercury_punctuation_char('/').
+% Codepoints in 0x3a..0x40.
+is_mercury_punctuation_char(':').
+is_mercury_punctuation_char(';').
+is_mercury_punctuation_char('<').
+is_mercury_punctuation_char('=').
+is_mercury_punctuation_char('>').
 is_mercury_punctuation_char('?').
+is_mercury_punctuation_char('@').
+% Codepoints in 0x5b..0x60.
+is_mercury_punctuation_char('[').
 is_mercury_punctuation_char('\\').
+is_mercury_punctuation_char(']').
+is_mercury_punctuation_char('^').
+is_mercury_punctuation_char('_').
+is_mercury_punctuation_char('`').
+% Codpoints in 0x7b..0x7e.
+is_mercury_punctuation_char('{').
 is_mercury_punctuation_char('|').
+is_mercury_punctuation_char('~').
+is_mercury_punctuation_char('}').
 
 %---------------------------------------------------------------------------%
 
@@ -1000,17 +1009,22 @@ encode_escaped_char(Char::out, Str::in) :-
     %
     % Note: the code here is similar to code in compiler/mercury_to_mercury.m;
     % any changes here may require similar changes there.
+    % Likewise for the similar code in library/rtti_implementation.m.
     %
 :- pred mercury_escape_special_char(char, char).
 :- mode mercury_escape_special_char(in, out) is semidet.
 :- mode mercury_escape_special_char(out, in) is semidet.
 
+mercury_escape_special_char('\a', 'a').
+mercury_escape_special_char('\b', 'b').
+mercury_escape_special_char('\f', 'f').
+mercury_escape_special_char('\n', 'n').
+mercury_escape_special_char('\r', 'r').
+mercury_escape_special_char('\t', 't').
+mercury_escape_special_char('\v', 'v').
+mercury_escape_special_char('\\', '\\').
 mercury_escape_special_char('''', '''').
 mercury_escape_special_char('"', '"').
-mercury_escape_special_char('\\', '\\').
-mercury_escape_special_char('\n', 'n').
-mercury_escape_special_char('\t', 't').
-mercury_escape_special_char('\b', 'b').
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%

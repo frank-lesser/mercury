@@ -36,6 +36,7 @@
 :- import_module hlds.hlds_goal.
 :- import_module hlds.hlds_pred.
 :- import_module hlds.hlds_promise.
+:- import_module hlds.passes_aux.
 :- import_module hlds.status.
 :- import_module hlds.vartypes.
 :- import_module mdbcomp.
@@ -85,18 +86,29 @@ check_promises_in_pred(PredId, !ToInvalidatePredIds, !ModuleInfo, !Specs) :-
     pred_info_get_goal_type(PredInfo, GoalType),
     (
         GoalType = goal_type_promise(PromiseType),
-
-        % Store the declaration in the appropriate table and get the goal
-        % for the promise.
-        store_promise(PredId, PredInfo, PromiseType, !ModuleInfo, Goal),
-
-        !:ToInvalidatePredIds = [PredId | !.ToInvalidatePredIds],
-
-        ( if pred_info_is_exported(PredInfo) then
-            check_in_interface_promise_goal(!.ModuleInfo, PredInfo, Goal,
-                !Specs)
-        else
+        ( if pred_info_is_imported(PredInfo) then
+            % We won't have run typechecking on this predicate. This means that
+            % the pred_ids and proc_ids fields in plain_call goals won't be
+            % filled in, which means store_promise cannot do its job.
             true
+        else
+            trace [io(!IO)] (
+                write_pred_progress_message("Checking promises in ", PredId,
+                    !.ModuleInfo, !IO)
+            ),
+
+            % Store the declaration in the appropriate table and get the goal
+            % for the promise.
+            store_promise(PredId, PredInfo, PromiseType, !ModuleInfo, Goal),
+
+            !:ToInvalidatePredIds = [PredId | !.ToInvalidatePredIds],
+
+            ( if pred_info_is_exported(PredInfo) then
+                check_in_interface_promise_goal(!.ModuleInfo, PredInfo, Goal,
+                    !Specs)
+            else
+                true
+            )
         )
     ;
         ( GoalType = goal_type_clause
@@ -130,9 +142,9 @@ store_promise(PredId, PredInfo, PromiseType, !ModuleInfo, Goal) :-
         ; PromiseType = promise_type_exclusive_exhaustive
         ),
         get_promise_ex_goal(PredInfo, Goal),
-        predids_from_goal(Goal, PredIds),
+        pred_ids_called_from_goal(Goal, CalleePredIds),
         module_info_get_exclusive_table(!.ModuleInfo, Table0),
-        list.foldl(exclusive_table_add(PredId), PredIds, Table0, Table),
+        list.foldl(exclusive_table_add(PredId), CalleePredIds, Table0, Table),
         module_info_set_exclusive_table(Table, !ModuleInfo)
     ;
         % Exhaustiveness promises -- XXX not yet implemented.
@@ -176,8 +188,8 @@ check_in_interface_promise_goal(ModuleInfo, PredInfo, Goal, !Specs) :-
             Context = goal_info_get_context(GoalInfo),
             PredOrFunc = pred_info_is_pred_or_func(CallPredInfo),
             Arity = pred_info_orig_arity(CallPredInfo),
-            IdPieces =
-                [simple_call(simple_call_id(PredOrFunc, SymName, Arity))],
+            SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
+            IdPieces = [simple_call(SimpleCallId)],
             report_assertion_interface_error(ModuleInfo, Context, IdPieces,
                 !Specs)
         ;
@@ -202,8 +214,8 @@ check_in_interface_promise_goal(ModuleInfo, PredInfo, Goal, !Specs) :-
             Name = pred_info_name(PragmaPredInfo),
             SymName = unqualified(Name),
             Arity = pred_info_orig_arity(PragmaPredInfo),
-            IdPieces =
-                [simple_call(simple_call_id(PredOrFunc, SymName, Arity))],
+            SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
+            IdPieces = [simple_call(SimpleCallId)],
             report_assertion_interface_error(ModuleInfo, Context, IdPieces,
                 !Specs)
         ;

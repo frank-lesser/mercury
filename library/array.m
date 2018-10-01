@@ -3,8 +3,7 @@
 %---------------------------------------------------------------------------%
 % Copyright (C) 1993-1995, 1997-2012 The University of Melbourne.
 % Copyright (C) 2013-2018 The Mercury team.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: array.m.
@@ -474,10 +473,12 @@
     % each of the elements of `OldArray' to create `NewArray'.
     %
 :- pred map(pred(T1, T2), array(T1), array(T2)).
-:- mode map(pred(in, out) is det, array_di, array_uo) is det.
+%:- mode map(pred(in, out) is det, array_ui, array_uo) is det.
+:- mode map(pred(in, out) is det, in, array_uo) is det.
 
 :- func map(func(T1) = T2, array(T1)) = array(T2).
-:- mode map(func(in) = out is det, array_di) = array_uo is det.
+%:- mode map(func(in) = out is det, array_ui) = array_uo is det.
+:- mode map(func(in) = out is det, in) = array_uo is det.
 
 :- func array_compare(array(T), array(T)) = comparison_result.
 :- mode array_compare(in, in) = uo is det.
@@ -596,6 +597,8 @@
     pred(in, in, out, in, out, in, out, in, out, di, uo) is semidet,
     in, in, out, in, out, in, out, in, out, di, uo) is semidet.
 
+%---------------------%
+
     % foldr(Fn, Array, X) is equivalent to
     %   list.foldr(Fn, to_list(Array), X)
     % but more efficient.
@@ -691,6 +694,47 @@
     pred(in, in, out, in, out, in, out, in, out, di, uo) is semidet,
     in, in, out, in, out, in, out, in, out, di, uo) is semidet.
 
+%---------------------%
+
+    % foldl_corresponding(P, A, B, !Acc):
+    %
+    % Does the same job as foldl, but works on two arrays in parallel.
+    % Throws an exception if the array arguments differ in size.
+    %
+:- pred foldl_corresponding(pred(T1, T2, T3, T3), array(T1), array(T2),
+    T3, T3).
+:- mode foldl_corresponding(in(pred(in, in, in, out) is det), in, in,
+    in, out) is det.
+:- mode foldl_corresponding(in(pred(in, in, mdi, muo) is det), in, in,
+    mdi, muo) is det.
+:- mode foldl_corresponding(in(pred(in, in, di, uo) is det), in, in,
+    di, uo) is det.
+:- mode foldl_corresponding(in(pred(in, in, in, out) is semidet), in, in,
+    in, out) is semidet.
+:- mode foldl_corresponding(in(pred(in, in, mdi, muo) is semidet), in, in,
+    mdi, muo) is semidet.
+:- mode foldl_corresponding(in(pred(in, in, di, uo) is semidet), in, in,
+    di, uo) is semidet.
+
+    % As above, but with two accumulators.
+    %
+:- pred foldl2_corresponding(pred(T1, T2, T3, T3, T4, T4),
+    array(T1), array(T2), T3, T3, T4, T4).
+:- mode foldl2_corresponding(in(pred(in, in, in, out, in, out) is det),
+    in, in, in, out, in, out) is det.
+:- mode foldl2_corresponding(in(pred(in, in, in, out, mdi, muo) is det),
+    in, in, in, out, mdi, muo) is det.
+:- mode foldl2_corresponding(in(pred(in, in, in, out, di, uo) is det),
+    in, in, in, out, di, uo) is det.
+:- mode foldl2_corresponding(in(pred(in, in, in, out, in, out) is semidet),
+    in, in, in, out, in, out) is semidet.
+:- mode foldl2_corresponding(in(pred(in, in, in, out, mdi, muo) is semidet),
+    in, in, in, out, mdi, muo) is semidet.
+:- mode foldl2_corresponding(in(pred(in, in,in, out,  di, uo) is semidet),
+    in, in, in, out, di, uo) is semidet.
+
+%---------------------%
+
     % map_foldl(P, A, B, !Acc):
     % Invoke P(Aelt, Belt, !Acc) on each element of the A array,
     % and construct array B from the resulting values of Belt.
@@ -705,6 +749,8 @@
 :- mode map_foldl(in(pred(in, out, in, out) is semidet),
     in, array_uo, in, out) is semidet.
 
+%---------------------%
+
     % map_corresponding_foldl(P, A, B, C, !Acc):
     %
     % Given two arrays A and B, invoke P(Aelt, Belt, Celt, !Acc) on
@@ -712,8 +758,7 @@
     % from the result Celt values. Return C and the final value of the
     % accumulator.
     %
-    % C will have as many elements as A does. In most uses, B will also have
-    % this many elements, but may have more; it may NOT have fewer.
+    % Throws an exception if A and B differ in size.
     %
 :- pred map_corresponding_foldl(pred(T1, T2, T3, T4, T4),
     array(T1), array(T2), array(T3), T4, T4).
@@ -729,6 +774,14 @@
 :- mode map_corresponding_foldl(
     in(pred(in, in, out, in, out) is semidet),
     in, in, array_uo, in, out) is semidet.
+:- mode map_corresponding_foldl(
+    in(pred(in, in, out, mdi, muo) is semidet),
+    in, in, array_uo, mdi, muo) is semidet.
+:- mode map_corresponding_foldl(
+    in(pred(in, in, out, di, uo) is semidet),
+    in, in, array_uo, di, uo) is semidet.
+
+%---------------------%
 
     % all_true(Pred, Array):
     % True iff Pred is true for every element of Array.
@@ -789,7 +842,7 @@
 %
 % Define the array type appropriately for the different targets.
 % Note that the definitions here should match what is output by
-% mlds_to_c.m, mlds_to_il.m, or mlds_to_java.m for mlds.mercury_array_type.
+% mlds_to_c.m, mlds_to_csharp.m, or mlds_to_java.m for mlds.mercury_array_type.
 %
 
     % MR_ArrayPtr is defined in runtime/mercury_types.h.
@@ -823,22 +876,22 @@ array_equal(Array1, Array2) :-
         array.size(Array1, Size),
         array.size(Array2, Size)
     then
-        array.equal_elements(0, Size, Array1, Array2)
+        equal_elements(0, Size, Array1, Array2)
     else
         fail
     ).
 
-:- pred array.equal_elements(int, int, array(T), array(T)).
-:- mode array.equal_elements(in, in, in, in) is semidet.
+:- pred equal_elements(int, int, array(T), array(T)).
+:- mode equal_elements(in, in, in, in) is semidet.
 
 equal_elements(N, Size, Array1, Array2) :-
     ( if N = Size then
         true
     else
-        array.lookup(Array1, N, Elem),
-        array.lookup(Array2, N, Elem),
+        array.unsafe_lookup(Array1, N, Elem),
+        array.unsafe_lookup(Array2, N, Elem),
         N1 = N + 1,
-        array.equal_elements(N1, Size, Array1, Array2)
+        equal_elements(N1, Size, Array1, Array2)
     ).
 
 array_compare(A1, A2) = C :-
@@ -856,7 +909,7 @@ array_compare(Result, Array1, Array2) :-
     compare(SizeResult, Size1, Size2),
     (
         SizeResult = (=),
-        array.compare_elements(0, Size1, Array1, Array2, Result)
+        compare_elements(0, Size1, Array1, Array2, Result)
     ;
         ( SizeResult = (<)
         ; SizeResult = (>)
@@ -871,13 +924,13 @@ compare_elements(N, Size, Array1, Array2, Result) :-
     ( if N = Size then
         Result = (=)
     else
-        array.lookup(Array1, N, Elem1),
-        array.lookup(Array2, N, Elem2),
+        array.unsafe_lookup(Array1, N, Elem1),
+        array.unsafe_lookup(Array2, N, Elem2),
         compare(ElemResult, Elem1, Elem2),
         (
             ElemResult = (=),
             N1 = N + 1,
-            array.compare_elements(N1, Size, Array1, Array2, Result)
+            compare_elements(N1, Size, Array1, Array2, Result)
         ;
             ( ElemResult = (<)
             ; ElemResult = (>)
@@ -932,21 +985,19 @@ compare_elements(N, Size, Array1, Array2, Result) :-
 %---------------------------------------------------------------------------%
 
 :- pragma foreign_decl("C", "
-#include ""mercury_heap.h""             /* for MR_maybe_record_allocation() */
-#include ""mercury_library_types.h""    /* for MR_ArrayPtr */
+#include ""mercury_heap.h""             // for MR_maybe_record_allocation()
+#include ""mercury_library_types.h""    // for MR_ArrayPtr
 
-/*
-** We do not yet record term sizes for arrays in term size profiling
-** grades. Doing so would require
-**
-** - modifying ML_alloc_array to allocate an extra word for the size;
-** - modifying all the predicates that call ML_alloc_array to compute the
-**   size of the array (the sum of the sizes of the elements and the size of
-**   the array itself);
-** - modifying all the predicates that update array elements to compute the
-**   difference between the sizes of the terms being added to and deleted from
-**   the array, and updating the array size accordingly.
-*/
+// We do not yet record term sizes for arrays in term size profiling
+// grades. Doing so would require
+//
+// - modifying ML_alloc_array to allocate an extra word for the size;
+// - modifying all the predicates that call ML_alloc_array to compute the
+//   size of the array (the sum of the sizes of the elements and the size of
+//   the array itself);
+// - modifying all the predicates that update array elements to compute the
+//   difference between the sizes of the terms being added to and deleted from
+//   the array, and updating the array size accordingly.
 
 #define ML_alloc_array(newarray, arraysize, alloc_id)                   \
     do {                                                                \
@@ -962,10 +1013,8 @@ void ML_init_array(MR_ArrayPtr, MR_Integer size, MR_Word item);
 ").
 
 :- pragma foreign_code("C", "
-/*
-** The caller is responsible for allocating the memory for the array.
-** This routine does the job of initializing the already-allocated memory.
-*/
+// The caller is responsible for allocating the memory for the array.
+// This routine does the job of initializing the already-allocated memory.
 void
 ML_init_array(MR_ArrayPtr array, MR_Integer size, MR_Word item)
 {
@@ -1337,7 +1386,7 @@ init(N, X) = A :-
 
 init(Size, Item, Array) :-
     ( if Size < 0 then
-        error("array.init: negative size")
+        unexpected($pred, "negative size")
     else
         array.init_2(Size, Item, Array)
     ).
@@ -1422,7 +1471,7 @@ generate(Size, GenFunc) = Array :-
     compare(Result, Size, 0),
     (
         Result = (<),
-        error("array.generate: negative size")
+        unexpected($pred, "negative size")
     ;
         Result = (=),
         make_empty_array(Array)
@@ -1441,11 +1490,9 @@ generate(Size, GenFunc) = Array :-
 "
     ML_alloc_array(Array, Size + 1, MR_ALLOC_ID);
 
-    /*
-    ** In debugging grades we fill the array with the first element
-    ** in case the return value of a call to this predicate is examined
-    ** in the debugger.
-    */
+    // In debugging grades, we fill the array with the first element,
+    // in case the return value of a call to this predicate is examined
+    // in the debugger.
     #if defined(MR_EXEC_TRACE)
         ML_init_array(Array, Size, FirstElem);
     #else
@@ -1489,7 +1536,7 @@ generate_foldl(Size, GenPred, Array, !Acc) :-
     compare(Result, Size, 0),
     (
         Result = (<),
-        error("array.generate_foldl: negative size")
+        unexpected($pred, "negative size")
     ;
         Result = (=),
         make_empty_array(Array)
@@ -1534,7 +1581,7 @@ min(A) = N :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "
-    /* Array not used */
+    // Array not used.
     Min = 0;
 ").
 
@@ -1542,7 +1589,7 @@ min(A) = N :-
     min(_Array::in, Min::out),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    /* Array not used */
+    // Array not used.
     Min = 0;
 ").
 
@@ -1558,7 +1605,7 @@ min(A) = N :-
     min(_Array::in, Min::out),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    /* Array not used */
+    // Array not used.
     Min = 0;
 ").
 
@@ -1780,7 +1827,7 @@ set(Index, Item, !Array) :-
         ])
     ],
 "
-    Array0->elements[Index] = Item; /* destructive update! */
+    Array0->elements[Index] = Item; // destructive update!
     Array = Array0;
 ").
 
@@ -1788,7 +1835,7 @@ set(Index, Item, !Array) :-
     unsafe_set(Index::in, Item::in, Array0::array_di, Array::array_uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "{
-    Array0.SetValue(Item, Index);   /* destructive update! */
+    Array0.SetValue(Item, Index);   // destructive update!
     Array = Array0;
 }").
 
@@ -1822,7 +1869,7 @@ set(Index, Item, !Array) :-
     } else {
         ((Object[]) Array0)[Index] = Item;
     }
-    Array = Array0;         /* destructive update! */
+    Array = Array0;         // destructive update!
 ").
 
 %---------------------------------------------------------------------------%
@@ -1841,12 +1888,10 @@ ML_resize_array(MR_ArrayPtr new_array, MR_ArrayPtr old_array,
 ").
 
 :- pragma foreign_code("C", "
-/*
-** The caller is responsible for allocating the storage for the new array.
-** This routine does the job of copying the old array elements to the
-** new array, initializing any additional elements in the new array,
-** and deallocating the old array.
-*/
+// The caller is responsible for allocating the storage for the new array.
+// This routine does the job of copying the old array elements to the
+// new array, initializing any additional elements in the new array,
+// and deallocating the old array.
 void
 ML_resize_array(MR_ArrayPtr array, MR_ArrayPtr old_array,
     MR_Integer array_size, MR_Word item)
@@ -1867,10 +1912,8 @@ ML_resize_array(MR_ArrayPtr array, MR_ArrayPtr old_array,
         array->elements[i] = item;
     }
 
-    /*
-    ** Since the mode on the old array is `array_di', it is safe to
-    ** deallocate the storage for it.
-    */
+    // Since the mode on the old array is `array_di', it is safe to
+    // deallocate the storage for it.
 #ifdef MR_CONSERVATIVE_GC
     MR_GC_free_attrib(old_array);
 #endif
@@ -1938,11 +1981,9 @@ ML_shrink_array(MR_ArrayPtr array, MR_ArrayPtr old_array,
 ").
 
 :- pragma foreign_code("C", "
-/*
-** The caller is responsible for allocating the storage for the new array.
-** This routine does the job of copying the old array elements to the
-** new array and deallocating the old array.
-*/
+// The caller is responsible for allocating the storage for the new array.
+// This routine does the job of copying the old array elements to the
+// new array and deallocating the old array.
 void
 ML_shrink_array(MR_ArrayPtr array, MR_ArrayPtr old_array,
     MR_Integer array_size)
@@ -1954,10 +1995,8 @@ ML_shrink_array(MR_ArrayPtr array, MR_ArrayPtr old_array,
         array->elements[i] = old_array->elements[i];
     }
 
-    /*
-    ** Since the mode on the old array is `array_di', it is safe to
-    ** deallocate the storage for it.
-    */
+    // Since the mode on the old array is `array_di', it is safe to
+    // deallocate the storage for it.
 #ifdef MR_CONSERVATIVE_GC
     MR_GC_free_attrib(old_array);
 #endif
@@ -1970,7 +2009,7 @@ shrink(!.Array, N) = !:Array :-
 shrink(Size, !Array) :-
     OldSize = array.size(!.Array),
     ( if Size > OldSize then
-        error("array.shrink: can't shrink to a larger size")
+        unexpected($pred, "cannot shrink to a larger size")
     else if Size = OldSize then
         true
     else
@@ -2037,18 +2076,14 @@ ML_copy_array(MR_ArrayPtr array, MR_ConstArrayPtr old_array);
 ").
 
 :- pragma foreign_code("C", "
-/*
-** The caller is responsible for allocating the storage for the new array.
-** This routine does the job of copying the array elements.
-*/
+// The caller is responsible for allocating the storage for the new array.
+// This routine does the job of copying the array elements.
 void
 ML_copy_array(MR_ArrayPtr array, MR_ConstArrayPtr old_array)
 {
-    /*
-    ** Any changes to this function will probably also require changes to
-    ** - array.append below, and
-    ** - MR_deep_copy() in runtime/mercury_deep_copy.[ch].
-    */
+    // Any changes to this function will probably also require changes to
+    // - array.append below, and
+    // - MR_deep_copy() in runtime/mercury_deep_copy.[ch].
 
     MR_Integer i;
     MR_Integer array_size;
@@ -2195,7 +2230,7 @@ fetch_items(Array, Low, High, List) :-
     then
         List = do_foldr_func(func(X, Xs) = [X | Xs], Array, [], Low, High)
     else
-        error("array.fetch_items/4: One or more index is out of bounds")
+        unexpected($pred, "one or more indexes is out-of-bounds")
     ).
 
 %---------------------------------------------------------------------------%
@@ -2791,6 +2826,72 @@ do_foldr5(P, Min, I, A, !Acc1, !Acc2, !Acc3, !Acc4, !Acc5) :-
 
 %---------------------------------------------------------------------------%
 
+foldl_corresponding(P, A, B, !Acc) :-
+    MaxA = array.max(A),
+    MaxB = array.max(B),
+    ( if MaxA = MaxB then
+        do_foldl_corresponding(P, 0, MaxA, A, B, !Acc)
+    else
+        unexpected($pred, "mismatched array sizes")
+    ).
+
+:- pred do_foldl_corresponding(pred(T1, T2, T3, T3), int, int,
+    array(T1), array(T2), T3, T3).
+:- mode do_foldl_corresponding(in(pred(in, in, in, out) is det), in, in,
+    in, in, in, out) is det.
+:- mode do_foldl_corresponding(in(pred(in, in, mdi, muo) is det), in, in,
+    in, in, mdi, muo) is det.
+:- mode do_foldl_corresponding(in(pred(in, in, di, uo) is det), in, in,
+    in, in, di, uo) is det.
+:- mode do_foldl_corresponding(in(pred(in, in, in, out) is semidet), in, in,
+    in, in, in, out) is semidet.
+:- mode do_foldl_corresponding(in(pred(in, in, mdi, muo) is semidet), in, in,
+    in, in, mdi, muo) is semidet.
+:- mode do_foldl_corresponding(in(pred(in, in, di, uo) is semidet), in, in,
+    in, in, di, uo) is semidet.
+
+do_foldl_corresponding(P, I, Max, A, B, !Acc) :-
+    ( if Max < I then
+        true
+    else
+        P(A ^ unsafe_elem(I), B ^ unsafe_elem(I), !Acc),
+        do_foldl_corresponding(P, I + 1, Max, A, B, !Acc)
+    ).
+
+foldl2_corresponding(P, A, B, !Acc1, !Acc2) :-
+    MaxA = array.max(A),
+    MaxB = array.max(B),
+    ( if MaxA = MaxB then
+        do_foldl2_corresponding(P, 0, MaxA, A, B, !Acc1, !Acc2)
+    else
+        unexpected($pred, "mismatched array sizes")
+    ).
+
+:- pred do_foldl2_corresponding(pred(T1, T2, T3, T3, T4, T4), int, int,
+    array(T1), array(T2), T3, T3, T4, T4).
+:- mode do_foldl2_corresponding(in(pred(in, in, in, out, in, out) is det),
+    in, in, in, in, in, out, in, out) is det.
+:- mode do_foldl2_corresponding(in(pred(in, in, in, out, mdi, muo) is det),
+    in, in, in, in, in, out, mdi, muo) is det.
+:- mode do_foldl2_corresponding(in(pred(in, in, in, out, di, uo) is det),
+    in, in, in, in, in, out, di, uo) is det.
+:- mode do_foldl2_corresponding(in(pred(in, in, in, out, in, out) is semidet),
+    in, in, in, in, in, out, in, out) is semidet.
+:- mode do_foldl2_corresponding(in(pred(in, in, in, out, mdi, muo) is semidet),
+    in, in, in, in, in, out, mdi, muo) is semidet.
+:- mode do_foldl2_corresponding(in(pred(in, in, in, out, di, uo) is semidet),
+    in, in, in, in, in, out, di, uo) is semidet.
+
+do_foldl2_corresponding(P, I, Max, A, B, !Acc1, !Acc2) :-
+    ( if Max < I then
+        true
+    else
+        P(A ^ unsafe_elem(I), B ^ unsafe_elem(I), !Acc1, !Acc2),
+        do_foldl2_corresponding(P, I + 1, Max, A, B, !Acc1, !Acc2)
+    ).
+
+%---------------------------------------------------------------------------%
+
 map_foldl(P, A, B, !Acc) :-
     N = array.size(A),
     ( if N =< 0 then
@@ -2798,7 +2899,7 @@ map_foldl(P, A, B, !Acc) :-
     else
         array.unsafe_lookup(A, 0, X),
         P(X, Y, !Acc),
-        B1 = array.init(N, Y),
+        B1 = unsafe_init(N, Y, 0),
         map_foldl_2(P, 1, A, B1, B, !Acc)
     ).
 
@@ -2823,16 +2924,21 @@ map_foldl_2(P, I, A, !B, !Acc) :-
         true
     ).
 
+%---------------------------------------------------------------------------%
+
 map_corresponding_foldl(P, A, B, C, !Acc) :-
-    N = array.size(A),
-    ( if N =< 0 then
+    SizeA = array.size(A),
+    SizeB = array.size(B),
+    ( if SizeA \= SizeB then
+        unexpected($pred, "mismatched array sizes")
+    else if SizeA =< 0 then
         C = array.make_empty_array
     else
         array.unsafe_lookup(A, 0, X),
         array.unsafe_lookup(B, 0, Y),
         P(X, Y, Z, !Acc),
-        C1 = array.init(N, Z),
-        map_corresponding_foldl_2(P, 1, N, A, B, C1, C, !Acc)
+        C1 = unsafe_init(SizeA, Z, 0),
+        map_corresponding_foldl_2(P, 1, SizeA, A, B, C1, C, !Acc)
     ).
 
 :- pred map_corresponding_foldl_2(pred(T1, T2, T3, T4, T4),
@@ -2849,6 +2955,12 @@ map_corresponding_foldl(P, A, B, C, !Acc) :-
 :- mode map_corresponding_foldl_2(
     in(pred(in, in, out, in, out) is semidet),
     in, in, in, in, array_di, array_uo, in, out) is semidet.
+:- mode map_corresponding_foldl_2(
+    in(pred(in, in, out, mdi, muo) is semidet),
+    in, in, in, in, array_di, array_uo, mdi, muo) is semidet.
+:- mode map_corresponding_foldl_2(
+    in(pred(in, in, out, di, uo) is semidet),
+    in, in, in, in, array_di, array_uo, di, uo) is semidet.
 
 map_corresponding_foldl_2(P, I, N, A, B, !C, !Acc) :-
     ( if I < N then
@@ -3179,7 +3291,7 @@ least_index(A) = array.min(A).
 
 det_least_index(A) = Index :-
     ( if array.is_empty(A) then
-        error("array.det_least_index: empty array")
+        unexpected($pred, "empty array")
     else
         Index = array.min(A)
     ).
@@ -3197,7 +3309,7 @@ greatest_index(A) = array.max(A).
 
 det_greatest_index(A) = Index :-
     ( if array.is_empty(A) then
-        error("array.det_greatest_index: empty array")
+        unexpected($pred, "empty array")
     else
         Index = array.max(A)
     ).

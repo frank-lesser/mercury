@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1996-2000,2002, 2006, 2010-2011 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 #include    "mercury_conf.h"
 #ifndef MR_HIGHLEVEL_CODE
@@ -11,7 +11,6 @@
 #include    "mercury_string.h"
 #include    "mercury_misc.h"
 #include    "mercury_array_macros.h"
-#include    "mercury_runtime_util.h"
 
 #include    <stdio.h>
 #include    <stdarg.h>
@@ -82,15 +81,9 @@ void
 MR_fatal_error(const char *fmt, ...)
 {
     va_list args;
-    int error = errno;
-    char errbuf[MR_STRERROR_BUF_SIZE];
 
     fflush(stdout);     // In case stdout and stderr are the same.
 
-    if (error != 0) {
-        fprintf(stderr, "Errno = %d: %s\n", error,
-            MR_strerror(error, errbuf, sizeof(errbuf)));
-    }
     fprintf(stderr, "Mercury runtime: ");
     va_start(args, fmt);
     vfprintf(stderr, fmt, args);

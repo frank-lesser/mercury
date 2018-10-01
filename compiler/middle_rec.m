@@ -38,7 +38,7 @@
 :- import_module ll_backend.code_util.
 :- import_module ll_backend.opt_util.
 :- import_module ll_backend.proc_gen.
-:- import_module ll_backend.unify_gen.
+:- import_module ll_backend.unify_gen_test.
 :- import_module parse_tree.prog_data.
 
 :- import_module assoc_list.
@@ -261,11 +261,13 @@ middle_rec_generate_switch(Var, BaseConsId, Base, Recursive, SwitchGoalInfo,
     EntryLabel = make_local_entry_label(ModuleInfo, PredId, ProcId, no),
 
     pre_goal_update(SwitchGoalInfo, has_subgoals, !CLD),
+    produce_variable(Var, VarCode, VarRval, !.CI, !CLD),
+    VarName = variable_name(!.CI, Var),
     VarType = variable_type(!.CI, Var),
     CheaperTagTest = lookup_cheaper_tag_test(!.CI, VarType),
-    generate_tag_test(Var, BaseConsId, CheaperTagTest, branch_on_success,
-        BaseLabel, EntryTestCode, !CI, !CLD),
-    EntryTestInstrs = cord.list(EntryTestCode),
+    generate_test_var_has_cons_id(VarRval, VarName, BaseConsId,
+        CheaperTagTest, branch_on_success, BaseLabel, TestCode, !CI),
+    EntryTestInstrs = cord.list(VarCode ++ TestCode),
 
     goal_info_get_store_map(SwitchGoalInfo, StoreMap),
     remember_position(!.CLD, BranchStart),

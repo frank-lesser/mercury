@@ -1,20 +1,66 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 2000-2002, 2006, 2011-2012 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2015-2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_string.c - string handling
 
 #include "mercury_imp.h"
 #include "mercury_string.h"
 
-#if defined(MR_HAVE__VSNPRINTF) && ! defined(MR_HAVE_VSNPRINTF)
-  #define vsnprintf _vsnprintf
+#ifdef _MSC_VER
+    // Disable warnings about using _vsnprintf being deprecated.
+    #pragma warning(disable:4996)
+
+    // va_copy is available from VC 2013 onwards.
+    #if _MSC_VER < 1800
+        #define va_copy(a, b)   ((a) = (b))
+    #endif
 #endif
 
-#if defined(MR_HAVE_VSNPRINTF) || defined(MR_HAVE__VSNPRINTF)
-  #define MR_HAVE_A_VSNPRINTF
+#if defined(MR_HAVE__VSNPRINTF)
+int
+MR_vsnprintf(char *str, size_t size, const char *format, va_list ap)
+{
+    va_list     ap_copy;
+    int         n;
+
+    if (size == 0) {
+        return _vsnprintf(NULL, 0, format, ap);
+    }
+
+    // _vsnprintf does not append a null terminator if the output is truncated.
+    // Follow the MS advice of initialising the buffer to null before calling
+    // _vsnprintf with a count strictly less than the buffer length.
+    memset(str, 0, size);
+    va_copy(ap_copy, ap);
+    n = _vsnprintf(str, size - 1, format, ap_copy);
+    va_end(ap_copy);
+
+    if (n == -1) {
+        // Return the number of characters that would have been written
+        // without truncation, to match the behaviour of C99 vsnprintf.
+        n = _vsnprintf(NULL, 0, format, ap);
+    }
+
+    return n;
+}
+#endif
+
+#if defined(MR_HAVE__SNPRINTF)
+int
+MR_snprintf(char *str, size_t size, const char *format, ...)
+{
+    va_list     ap;
+    int         n;
+
+    va_start(ap, format);
+    n = MR_vsnprintf(str, size, format, ap);
+    va_end(ap);
+
+    return n;
+}
 #endif
 
 #define BUFFER_SIZE 4096
@@ -27,7 +73,6 @@ MR_make_string(MR_AllocSiteInfoPtr alloc_id, const char *fmt, ...)
     int         n;
     char        *p;
 
-#ifdef MR_HAVE_A_VSNPRINTF
     int         size = BUFFER_SIZE;
     char        fixed[BUFFER_SIZE];
     MR_bool     dynamically_allocated = MR_FALSE;
@@ -42,7 +87,7 @@ MR_make_string(MR_AllocSiteInfoPtr alloc_id, const char *fmt, ...)
     while (1) {
         // Try to print in the allocated space.
         va_start(ap, fmt);
-        n = vsnprintf(p, size, fmt, ap);
+        n = MR_vsnprintf(p, size, fmt, ap);
         va_end(ap);
 
         // If that worked, return the string.
@@ -65,30 +110,137 @@ MR_make_string(MR_AllocSiteInfoPtr alloc_id, const char *fmt, ...)
         }
     }
 
-#else
-    // It is possible for this buffer to overflow,
-    // and then bad things may happen.
-
-    char fixed[40960];
-
-    va_start(ap, fmt);
-    n = vsprintf(fixed, fmt, ap);
-    va_end(ap);
-
-    p = fixed;
-#endif
     MR_restore_transient_hp();
     MR_allocate_aligned_string_msg(result, strlen(p), alloc_id);
     MR_save_transient_hp();
     strcpy(result, p);
 
-#ifdef MR_HAVE_A_VSNPRINTF
     if (dynamically_allocated) {
         MR_free(p);
     }
-#endif
 
     return result;
+}
+
+// The code for this function should be kept in sync with that of the
+// quote_string predicates in library/term_io.m.
+MR_bool
+MR_escape_string_quote(MR_String *ptr, const char * string)
+{
+    MR_Integer pos = 0;
+    size_t  num_code_units = 0;
+    MR_Char ch;
+    MR_bool must_escape = MR_FALSE;
+
+    // Check if we need to add character escapes to the string.
+    //
+    while ((ch = MR_utf8_get_next((MR_String) string, &pos)) > 0) {
+        switch (ch) {
+            case '\a':
+            case '\b':
+            case '\f':
+            case '\n':
+            case '\t':
+            case '\r':
+            case '\v':
+            case '\"':
+            case '\\':
+                num_code_units += 2;
+                must_escape = MR_TRUE;
+                break;
+            default:
+                if (MR_is_control(ch)) {
+                    // All control characters that do not have a specific
+                    // backslash escape are octal escaped.
+                    // This takes five code units.
+                    num_code_units += 5;
+                    must_escape = MR_TRUE;
+                } else {
+                    num_code_units += MR_utf8_width(ch);
+                }
+        }
+    }
+
+    // Check that the string's encoding was valid.
+    if (ch < 0) {
+        *ptr = NULL;
+        return MR_FALSE;
+    }
+
+    if (must_escape) {
+        char *dst;
+   
+        MR_allocate_aligned_string_saved_hp(*ptr,
+            num_code_units + 2 /* quotes */ + 1 /* \0 */,
+            NULL);
+
+        dst = *ptr;
+        dst[0] = '\"';
+        dst++;
+        pos = 0;
+        while ((ch = MR_utf8_get_next((MR_String) string, &pos)) > 0) {
+            switch (ch) {
+                case '\a':
+                    dst[0] = '\\';
+                    dst[1] = 'a';
+                    dst += 2;
+                    break; 
+                case '\b':
+                    dst[0] = '\\';
+                    dst[1] = 'b';
+                    dst += 2;
+                    break; 
+                case '\f':
+                    dst[0] = '\\';
+                    dst[1] = 'f';
+                    dst += 2;
+                    break; 
+                case '\n':
+                    dst[0] = '\\';
+                    dst[1] = 'n';
+                    dst += 2;
+                    break; 
+                case '\t':
+                    dst[0] = '\\';
+                    dst[1] = 't';
+                    dst += 2;
+                    break; 
+                case '\r':
+                    dst[0] = '\\';
+                    dst[1] = 'r';
+                    dst += 2;
+                    break; 
+                case '\v':
+                    dst[0] = '\\';
+                    dst[1] = 'v';
+                    dst += 2;
+                    break; 
+                case '\"':
+                    dst[0] = '\\';
+                    dst[1] = '\"';
+                    dst += 2;
+                    break; 
+                case '\\':
+                    dst[0] = '\\';
+                    dst[1] = '\\';
+                    dst += 2;
+                    break;
+                default:
+                    if (MR_is_control(ch)) {
+                        sprintf(dst, "\\%03" MR_INTEGER_LENGTH_MODIFIER "o\\",
+                            (MR_Integer) ch);
+                        dst += 5;
+                    } else {
+                        dst += MR_utf8_encode(dst, ch);
+                    }
+             }
+        }
+        dst[0] = '\"';
+        dst[1] = '\0';
+    } else {
+        MR_make_aligned_string_copy_saved_hp_quote(*ptr, string, NULL);
+    }
+    return MR_TRUE;
 }
 
 // Note that MR_hash_string{,2,3,4,5,6} are actually defined as macros in

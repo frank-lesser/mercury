@@ -60,11 +60,11 @@
 %   (
 %       A == [],
 %       C := B,
-%       store_at_ref(AddrC, C)
+%       store_at_ref_impure(AddrC, C)
 %   ;
 %       A => [H | T],
 %       C <= [H | _HT] capture &HT in AddrHT
-%       store_at_ref(AddrC, C)
+%       store_at_ref_impure(AddrC, C)
 %       app'(T, B, AddrHT)
 %   )
 %
@@ -102,12 +102,12 @@
 %
 %   p'(In1, ... InN, Ref1, ... OutM) :-
 %       Out1 = ground,
-%       store_at_ref(Ref1, Out1)
+%       store_at_ref_impure(Ref1, Out1)
 %   p'(In1, ... InN, Ref1, Out2... OutM) :-
 %       ...
 %       Out1 = f1(...Mid1...)
 %           capture addr of Mid1 in Addr1
-%       store_at_ref(Ref1, Out1)
+%       store_at_ref_impure(Ref1, Out1)
 %       p'(In1, ... InN, Addr1, Out2... OutM)
 %
 %-----------------------------------------------------------------------------%
@@ -147,7 +147,7 @@
 %   instead of store_at_ref_type(T) arguments.
 %
 % 2 The holes in the output arguments are filled in with unifications
-%   instead of a store_at_ref builtin.
+%   instead of a store_at_ref_impure builtin.
 %
 % 3 Variant procedures need to know the functor and position of the argument in
 %   the partially instantiated structures, so many more variants could be
@@ -815,13 +815,12 @@ acceptable_construct_unification(DelayForVars, Goal, !UnifyInputVars, !Info) :-
     all_true(acceptable_construct_mode(ModuleInfo), ArgModes),
     get_cons_repn_defn(ModuleInfo, ConsId, CtorRepn),
     ConsTag = CtorRepn ^ cr_tag,
-    % The code generator can't handle some kinds of tags. For example, it does
-    % not make sense to take the address of the field of a function symbol of a
-    % `notag' type. These are the kinds it CAN handle.
-    ( ConsTag = single_functor_tag
-    ; ConsTag = unshared_tag(_)
-    ; ConsTag = shared_remote_tag(_, _, _)
-    ),
+    % Our optimization is inapplicable to constants, and its implementation
+    % in the code generator can handle only some kinds of functors with args.
+    % For example, it does not make sense to take the address of the field
+    % of a function symbol of a `notag' type. The only functors it can handle
+    % are the ones whose representation is remote_args_tag().
+    ConsTag = remote_args_tag(_),
     % If the construction unification has any existential constraints,
     % then ConstructArgVars will have more elements than the number of
     % arguments in ConsRepn ^ cr_args (the extra variables will be the
@@ -884,7 +883,7 @@ all_delayed_arg_vars_are_full_words([ArgVar | ArgVars], [ArgRepn | ArgRepns],
         % is as rare as hen's teeth, this is not a great loss.
         fail
     ;
-        ( ArgWidth = apw_partial_first(_, _, _, _, _)
+        ( ArgWidth = apw_partial_first(_, _, _, _, _, _)
         ; ArgWidth = apw_partial_shifted(_, _, _, _, _, _)
         ),
         % It is ok for the cell to have subword arguments (packed two or more

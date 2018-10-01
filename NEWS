@@ -117,6 +117,9 @@ Changes that may break compatibility:
   if its argument is equal to int.min_int.  The old behaviour of this function
   is provided by the the new function int.unchecked_abs/1.
 
+* We have changed the semantics of array.map_corresponding_foldl/6 so that it
+  throws an exception if the input arrays differ in size.
+
 Changes to the Mercury language:
 
 * We have added a new primitive type, uint, which is an unsigned integer type
@@ -314,6 +317,9 @@ Changes to the Mercury standard library:
 
 * We have reduced the memory allocated by string.to_lower and string.to_upper.
 
+* string.string_to_doc/1 now replaces characters in its input argument with
+  backslash escapes when required.
+
 * The following classification predicates have been added to the float module:
 
    - is_finite/1
@@ -445,12 +451,14 @@ Changes to the Mercury standard library:
    - snoc/3
    - find_first_match/3
 
-* The following function has been added to the array module:
+* The following functions and predicates have been added to the array module:
 
    - det_least_index/1
    - semidet_least_index/1
    - det_greatest_index/1
    - semidet_greatest_index/1
+   - foldl_corresponding/5
+   - foldl2_corresponding/7
 
    The following functions in the array module have been deprecated:
 
@@ -524,6 +532,10 @@ Changes to the Mercury standard library:
   - det_from_string/1
   - get_uint8/1, unsafe_get_uint8/1
   - set_uint8/4, unsafe_set_uint8/4
+
+* The functor/4 predicate in the deconstruct module has been modified so
+  that for character and string data, any control characters in the functor
+  representation are escaped.
 
 Changes to the Mercury compiler:
 

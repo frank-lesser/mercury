@@ -321,7 +321,6 @@
 
 :- import_module backend_libs.
 :- import_module backend_libs.builtin_ops.
-:- import_module backend_libs.foreign.
 :- import_module backend_libs.rtti.
 :- import_module hlds.
 :- import_module hlds.code_model.
@@ -605,8 +604,9 @@
                 mcd_tparams         :: list(type_param),
 
                 % Contains these members.
-                % The mcd_member_methods field is used only by mlds_to_java.m;
-                % it should be set to the empty list everywhere else.
+                % The mcd_member_methods field is used only
+                % by mlds_to_java_*.m; it should be set to the empty list
+                % everywhere else.
                 mcd_member_fields   :: list(mlds_field_var_defn),
                 mcd_member_classes  :: list(mlds_class_defn),
                 mcd_member_methods  :: list(mlds_function_defn),
@@ -922,18 +922,33 @@
 %
 
 :- type mlds_type
-    --->    mercury_type(
-                % A Mercury data type.
+    --->    mercury_nb_type(
+                % A Mercury data type that is not a builtin type
+                % (the nb is short for "not builtin"). Builtin types should
+                % be represented using one of the mlds_builtin_type_*
+                % function symbols.
 
-                % The exact Mercury type.
+                % The exact Mercury type. It cannot be builtin_type(_).
+                %
+                % Most places that process mercury_nb_types need only the type
+                % constructor, and not the whole type. However, there are some
+                % places in mlds_to_{cs,java}_*.m that need the types of the
+                % type constructor's arguments too. Nevertheless, we *could*
+                % replace this field with two fields holding the type_ctor
+                % and the argument types. That would require a separate
+                % function symbol in mlds_type for representing type variables
+                % (the only kind of mer_type that has no type_ctor), but
+                % it would allow us to dispense with repeated invocations
+                % of type_to_ctor on the mer_type field here.
                 mer_type,
 
-                % If the Mercury type actually defined a foreign language,
-                % then this field should contain the foreign language
-                % type's name, and any assertions on that foreign type.
-                maybe(foreign_type_and_assertions),
-
-                % What kind of type it is: enum, float, ...
+                % What kind of type it is: enum, dummy, notag, ...
+                % It cannot be ctor_cat_builtin(_).
+                %
+                % We could use a bespoke type here that would be isomorphic
+                % to type_ctor_category except for disallowing builtins,
+                % and maybe type variables (see above). However, that would
+                % require us to duplicate a nontrivial amount of code.
                 type_ctor_category
             )
 
@@ -979,15 +994,19 @@
             % See also the comments in ml_commit_gen.m which show how commits
             % can be implemented for different target languages.
 
+    ;       mlds_builtin_type_int(int_type)
+    ;       mlds_builtin_type_float
+    ;       mlds_builtin_type_string
+    ;       mlds_builtin_type_char
+            % The representations of the builtin types in the target language.
+            %
+            % Note that some target languages do not have types corresponding
+            % *exactly* to each Mercury builtin type. For these, we generate
+            % the closest type available in the target language, e.g. "int"
+            % for mlds_builtin_type_int(int_type_uint) in Java.
+
     ;       mlds_native_bool_type
-    ;       mlds_native_int_type
-    ;       mlds_native_uint_type
-    ;       mlds_native_float_type
-    ;       mlds_native_char_type
-            % MLDS native builtin types.
-            % These are the builtin types of the MLDS target language,
-            % whatever that may be.
-            % Currently we don't actually use many of these.
+            % The representation of booleans in the MLDS target language.
 
     ;       mlds_foreign_type(
                 % This is a type of the target language.
@@ -996,7 +1015,6 @@
 
     ;       mlds_class_type(
                 % MLDS types defined using mlds_class_defn.
-
                 mlds_class_id
             )
 
@@ -1455,12 +1473,24 @@
     ;       new_object(
                 % new_object(Target, Tag, Type, Size, CtorName,
                 %   ArgAndTypes, MayUseAtomic, MaybeAllocId):
+                %
                 % Allocate a memory block of the given size,
-                % initialize it with a new object of the given
-                % type by calling the constructor with the specified
-                % arguments, and put its address in the given lval,
-                % possibly after tagging the address with a given tag.
-                % (Some targets might not support tags.)
+                % initialize it with a new object of the given type
+                % by calling the constructor with the specified arguments,
+                % and put its address in the given lval, possibly after
+                % putting the given ptag on the address. The low level
+                % data representation support ptags; the high level data
+                % representation does not.
+                %
+                % XXX ARG_PACK Some of the following fields are meaningful
+                % only for the low level data representation, some are
+                % meaningful only for the high level data representation.
+                % We should encode these invariants in the data structure,
+                % either by putting each set of such arguments into one
+                % or other alternative of a type such as
+                % :- type t ---> low_level_data(...) ; high_level_data(...).
+                % or by having separate new_object_lld and new_object_hld
+                % atomic statements.
 
                 % The target to assign the new object's address to.
                 mlds_lval,
@@ -1478,6 +1508,8 @@
                 % below) is a secondary tag. For target languages with
                 % constructors, secondary tags are implicitly initialised by
                 % the constructor, not passed in.
+                % XXX update me
+                % XXX document relationship with the maybe(qual_ctor_id) field.
                 bool,
 
                 % The type of the object being allocated.
@@ -1673,16 +1705,16 @@
     % Values on the heap or fields of a structure.
 
     --->    ml_field(
-                % field(MaybePtag, Address, FieldId, FieldType, PtrType):
+                % field(MaybePtag, Ptr, PtrType, FieldId, FieldType):
                 % Selects one field of a compound term.
                 %
-                % Address is a tagged pointer to a cell on the heap.
+                % Ptr is a tagged pointer to a cell on the heap.
                 % The position in the cell, FieldId, is represented either
                 % as a field name or a number of words offset.
                 %
-                % If MaybePtag is yes(Ptag), then the primary tag on Address
+                % If MaybePtag is yes(Ptag), then the primary tag on Ptr
                 % is Ptag; if MaybePtag is no, then the primary tag bits will
-                % have to be masked off of Address.
+                % have to be masked off of Ptr.
                 %
                 % The value of the primary tag should be given if it is known,
                 % since this will lead to faster code.
@@ -1695,11 +1727,11 @@
                 % different, then it is the HLDS->MLDS code generator's job
                 % to insert the required boxing/unboxing code.
 
-                field_ptag      :: maybe(ptag),
-                field_addr      :: mlds_rval,
-                field_field_id  :: mlds_field_id,
-                field_type      :: mlds_type,
-                field_ptr_type  :: mlds_type
+                field_ptag          :: maybe(ptag),
+                field_ptr           :: mlds_rval,
+                field_ptr_type      :: mlds_type,
+                field_field_id      :: mlds_field_id,
+                field_field_type    :: mlds_type
             )
 
     % Values somewhere in memory.
@@ -1972,7 +2004,8 @@
                 exported_enum_lang      :: foreign_language,
                 exported_enum_context   :: prog_context,
 
-                % mlds_to_cs.m and mlds_to_java.m need to know the type_ctor.
+                % mlds_to_cs_*.m and mlds_to_java_*.m need to know
+                % the type_ctor.
                 exported_enum_type_ctor :: type_ctor,
 
                 % The name of each constant plus the value to initialize it to.
@@ -2071,11 +2104,6 @@
             % field types for which we generate static arrays of rows),
             % while the second just gives the position of the field
             % in that list. Field numbers start at 0.
-
-    ;       fvn_reserved_obj_name(string, int)
-            % This field_var is the specially reserved static class member
-            % variable whose address is used to represent the function symbol
-            % with the given name and arity.
 
     ;       fvn_du_ctor_field_hld(string)
             % When compiling with --high-level-data, we generate a type
@@ -2381,7 +2409,7 @@
             % This variable is used by the Java backend.
             % I (zs) don't know what its semantics is.
 
-    ;       lvnc_aux_var(mlds_compiler_aux_var, int).
+    ;       lvnc_aux_var(mlds_compiler_aux_var, int)
             % These MLDS variables contain values (most, but not all of which
             % are very short-lived) used to implement Mercury constructs
             % such as commits and switches. They contain such information
@@ -2390,6 +2418,33 @@
             % The integer is a sequence number (unique within the procedure)
             % allocated from a counter that is shared between all
             % lvnc_aux_vars.
+
+    ;       lvnc_packed_word(int).
+            % Each of these MLDS variables contains a copy of a word that
+            % contains the values of tags and/or arguments packed together.
+            % The idea is that for HLDS code such as
+            %
+            % ...
+            % X0 = f(A0, B0, C0),   % deconstruction
+            % ...
+            % X  = f(A , B0, C0),   % construction
+            % ...
+            %
+            % where the B0 and C0 arguments are packed together into one word,
+            % we should generate code that copies B0 and C0 from X0 to X
+            % using just one load and one store. The shifts and masks needed
+            % to compute the values of B0 and C0 should be needed only if
+            % the HLDS code actually uses those variables in their own right.
+            %
+            % When the MLDS code generator sees a deconstruction such as the
+            % above, which contains a word containing two or more entities
+            % (tags and/or arguments), all of which are being generated,
+            % it allocates a unique integer for a new lvnc_packed_word variable
+            % and assigns that word to it. Later code that needs the contents
+            % of a word with the same bitfields, filled with some of the same
+            % values, may use this new variable instead. As its name indicates,
+            % the ml_unused_assign optimization will delete the unused
+            % assignments.
 
 :- type mlds_compiler_aux_var
     --->    mcav_commit
@@ -2645,21 +2700,44 @@ mercury_type_to_mlds_type(ModuleInfo, Type) = MLDSType :-
                     MLDSType = foreign_type_to_mlds_type(ModuleInfo,
                         ForeignTypeBody)
                 else if TypeBody = hlds_abstract_type(_) then
-                    Category = classify_type_ctor(ModuleInfo, TypeCtor),
-                    MLDSType = mercury_type(Type, no, Category)
+                    CtorCat = classify_type_ctor(ModuleInfo, TypeCtor),
+                    MLDSType = type_and_category_to_mlds_type(Type, CtorCat)
                 else
-                    Category = classify_type_defn_body(TypeBody),
-                    MLDSType = mercury_type(Type, no, Category)
+                    CtorCat = classify_type_defn_body(TypeBody),
+                    MLDSType = type_and_category_to_mlds_type(Type, CtorCat)
                 )
             else
-                Category = classify_type_ctor(ModuleInfo, TypeCtor),
-                MLDSType = mercury_type(Type, no, Category)
+                CtorCat = classify_type_ctor(ModuleInfo, TypeCtor),
+                MLDSType = type_and_category_to_mlds_type(Type, CtorCat)
             )
         )
     else
         Category = ctor_cat_variable,
-        MLDSType = mercury_type(Type, no, Category)
+        MLDSType = mercury_nb_type(Type, Category)
     ).
+
+:- func type_and_category_to_mlds_type(mer_type, type_ctor_category)
+    = mlds_type.
+
+type_and_category_to_mlds_type(Type, CtorCat) = MLDSType :-
+    ( if CtorCat = ctor_cat_builtin(BuiltinTypeCat) then
+        (
+            BuiltinTypeCat = cat_builtin_int(IntType),
+            MLDSType = mlds_builtin_type_int(IntType)
+        ;
+            BuiltinTypeCat = cat_builtin_float,
+            MLDSType = mlds_builtin_type_float
+        ;
+            BuiltinTypeCat = cat_builtin_string,
+            MLDSType = mlds_builtin_type_string
+        ;
+            BuiltinTypeCat = cat_builtin_char,
+            MLDSType = mlds_builtin_type_char
+        )
+    else
+        MLDSType = mercury_nb_type(Type, CtorCat)
+    ).
+
 %---------------------------------------------------------------------------%
 
 ml_global_const_var_name_to_string(ConstVar, Num) = Str :-
@@ -2689,9 +2767,6 @@ ml_global_const_var_name_to_string(ConstVar, Num) = Str :-
 
 ml_field_var_name_to_string(FieldVar) = Str :-
     (
-        FieldVar = fvn_reserved_obj_name(CtorName, CtorArity),
-        Str = string.format("obj_%s_%d", [s(CtorName), i(CtorArity)])
-    ;
         FieldVar = fvn_global_data_field(TypeRawNum, FieldNum),
         Str = string.format("vct_%d_f_%d", [i(TypeRawNum), i(FieldNum)])
     ;
@@ -2942,6 +3017,9 @@ ml_local_var_name_to_string(LocalVar) = Str :-
                 AuxVarStr = "case_num"
             ),
             Str = string.format("%s_%d", [s(AuxVarStr), i(Num)])
+        ;
+            CompVar = lvnc_packed_word(Id),
+            Str = string.format("packed_word_%d", [i(Id)])
         )
     ).
 

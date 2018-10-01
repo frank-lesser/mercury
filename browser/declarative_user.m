@@ -2,8 +2,8 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1999-2007, 2009, 2011 The University of Melbourne.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2014-2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: declarative_user.m.
@@ -208,16 +208,16 @@
                 % answer the question (such as an `info' command).
                 display_question    :: bool,
 
-                help_system         :: help.system,
-
-                % If this following flag is set to yes then user responses
+                % If this following flag is set to, yes then user responses
                 % will be simulated and will always be `no', except when
                 % confirming a bug in which case the response will be `yes'.
-                testing             :: bool
+                testing             :: bool,
+
+                help_system         :: help.system
             ).
 
-user_state_init(InStr, OutStr, Browser, HelpSystem,
-    user_state(InStr, OutStr, Browser, yes, HelpSystem, no)).
+user_state_init(InStr, OutStr, Browser, HelpSystem, State) :-
+    State = user_state(InStr, OutStr, Browser, yes, no, HelpSystem).
 
 %---------------------------------------------------------------------------%
 

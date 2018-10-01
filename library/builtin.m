@@ -1,9 +1,9 @@
 %---------------------------------------------------------------------------%
-% vim: ft=mercury ts=4 sw=4 et wm=0 tw=0
+% vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1994-2007, 2010-2012 The University of Melbourne.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2014-2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: builtin.m.
@@ -875,19 +875,17 @@ __Compare____tuple_0_0(object x, object y)
 
 :- pragma foreign_code("Java",
 "
-    /*
-    ** Two other approaches to implement deep copy might be:
-    **
-    ** 1. Get all mercury objects to implement the Serializable interface.
-    **    Then this whole function could be replaced with code that writes
-    **    the Object out via an ObjectOutputStream into a byte array (or
-    **    something), then reads it back in again, thus creating a copy.
-    **    This would copy non-Mercury objects as well, though.
-    **
-    ** 2. Get all mercury objects to implement a clone() method (either the
-    **    one in Object or our own). The MLDS doesn't have method calls
-    **    and probably we wouldn't want to clutter it up just for this.
-    */
+    // Two other approaches to implement deep copy might be:
+    //
+    // 1. Get all mercury objects to implement the Serializable interface.
+    //    Then this whole function could be replaced with code that writes
+    //    the Object out via an ObjectOutputStream into a byte array (or
+    //    something), then reads it back in again, thus creating a copy.
+    //    This would copy non-Mercury objects as well, though.
+    //
+    // 2. Get all mercury objects to implement a clone() method (either the
+    //    one in Object or our own). The MLDS doesn't have method calls
+    //    and probably we wouldn't want to clutter it up just for this.
 
     public static <T> T
     deep_copy(final T original) throws

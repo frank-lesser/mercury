@@ -1,9 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1994-2011 The University of Melbourne.
-// Copyright (C) 2014 The Mercury team.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014-2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // file: mercury_wrapper.c
 // main authors: zs, fjh
@@ -38,11 +37,6 @@ ENDINIT
 #ifdef MR_HAVE_SYS_STAT_H
 #include    <sys/stat.h>
 #endif
-#if 0 // XXX the following code breaks on Win32
-#include    <sys/types.h>
-#include    <fcntl.h>
-#include    <sys/resource.h>
-#endif // breaks on Win32
 
 #ifdef MR_MSVC_STRUCTURED_EXCEPTIONS
   #include <excpt.h>
@@ -63,10 +57,6 @@ ENDINIT
 #include    "mercury_memory_handlers.h" // for MR_default_handler
 #include    "mercury_thread.h"          // for MR_debug_threads
 #include    "mercury_threadscope.h"
-
-#if defined(MR_HAVE__SNPRINTF) && ! defined(MR_HAVE_SNPRINTF)
-  #define snprintf  _snprintf
-#endif
 
 // global variables concerned with testing (i.e. not with the engine)
 
@@ -302,7 +292,6 @@ static  MR_bool     use_own_timer = MR_FALSE;
 static  int         repeats = 1;
 
 #define MAX_MEM_USAGE_REPORT_ATTEMPTS       100
-#define MAX_MEM_USAGE_REPORT_CMD_SIZE       1024
 
 static  char        *MR_mem_usage_report_prefix = NULL;
 
@@ -786,11 +775,6 @@ mercury_runtime_init(int argc, char **argv)
 
 #ifdef MR_CONSERVATIVE_GC
 
-  #ifdef MR_HIGHTAGS
-    // MR_HIGHTAGS disguises pointers and hides them from gc.
-    #error "MR_HIGHTAGS is incompatible with MR_CONSERVATIVE_GC"
-  #endif
-
 // Boehm will call this callback when it runs out of memory, We print an error
 // and abort. Our error is printed after Boehm GC's on error, so we don't need
 // to say much.
@@ -1095,8 +1079,6 @@ MR_process_environment_options(void)
         prog_env_options = (char *) "";
     }
 
-    MR_GC_free(prog_env_option_name);
-
     if (gen_env_options[0] != '\0' || prog_env_options[0] != '\0'
         || MR_runtime_flags[0] != '\0')
     {
@@ -1167,33 +1149,32 @@ MR_process_environment_options(void)
             &option_argv, &option_argc);
         if (error_msg != NULL) {
             char    *where_buf;
-            int     where_buf_next;
+            int     where_buf_cur;
 
             where_buf = MR_GC_NEW_ARRAY(char, WHERE_BUF_SIZE);
             where_buf[0] = '\0';
-            where_buf_next = strlen(where_buf);
+            where_buf_cur = 0;
 
             if (gen_env_options[0] != '\0') {
-                snprintf(where_buf + where_buf_next, WHERE_BUF_SIZE,
-                    "%sthe %s environment variable",
-                    where_buf_next == 0 ? "" : " and/or ",
-                    MERCURY_OPTIONS);
-                where_buf_next = strlen(where_buf);
+                MR_snprintf(where_buf, WHERE_BUF_SIZE,
+                    "the %s environment variable", MERCURY_OPTIONS);
             }
 
             if (prog_env_options[0] != '\0') {
-                snprintf(where_buf + where_buf_next, WHERE_BUF_SIZE,
+                where_buf_cur = strlen(where_buf);
+                MR_snprintf(where_buf + where_buf_cur,
+                    WHERE_BUF_SIZE - where_buf_cur,
                     "%sthe %s environment variable",
-                    where_buf_next == 0 ? "" : " and/or ",
+                    where_buf_cur == 0 ? "" : " and/or ",
                     prog_env_option_name);
-                where_buf_next = strlen(where_buf);
             }
 
             if (MR_runtime_flags[0] != '\0') {
-                snprintf(where_buf + where_buf_next, WHERE_BUF_SIZE,
+                where_buf_cur = strlen(where_buf);
+                MR_snprintf(where_buf + where_buf_cur,
+                    WHERE_BUF_SIZE - where_buf_cur,
                     "%sthe runtime options built into the executable",
-                    where_buf_next == 0 ? "" : " and/or ");
-                where_buf_next = strlen(where_buf);
+                    where_buf_cur == 0 ? "" : " and/or ");
             }
 
             MR_fatal_error("error parsing %s:\n%s\n", where_buf, error_msg);
@@ -1204,6 +1185,8 @@ MR_process_environment_options(void)
         MR_GC_free(option_arg_str);
         MR_GC_free(option_argv);
     }
+
+    MR_GC_free(prog_env_option_name);
 }
 
 enum MR_long_option {
@@ -1877,7 +1860,7 @@ MR_process_options(int argc, char **argv)
 
             case MR_FORCE_READLINE:
                 MR_force_readline = MR_TRUE;
-#ifdef MR_NO_USE_READLINE
+#if !defined(MR_USE_READLINE) && !defined(MR_USE_EDITLINE)
                 printf("Mercury runtime: `--force-readline' is specified "
                     "in MERCURY_OPTIONS\n");
                 printf("but readline() is not available.\n");
@@ -3051,66 +3034,26 @@ mercury_runtime_terminate(void)
 #ifdef MR_HAVE_SYS_STAT_H
     if (MR_mem_usage_report_prefix != NULL) {
         struct stat statbuf;
-        char        filename_buf[MAX_MEM_USAGE_REPORT_CMD_SIZE];
-        char        cmd_buf[MAX_MEM_USAGE_REPORT_CMD_SIZE];
+        char        *filename;
+        char        *cmd;
         int         i;
 
         for (i = 1; i < MAX_MEM_USAGE_REPORT_ATTEMPTS; i++) {
-            snprintf(filename_buf, MAX_MEM_USAGE_REPORT_CMD_SIZE,
+            filename = MR_make_string(MR_ALLOC_SITE_RUNTIME,
                 "%s%02d", MR_mem_usage_report_prefix, i);
-
-            if (stat(filename_buf, &statbuf) == 0) {
-                // Filename_buf exists; try next name.
+            if (stat(filename, &statbuf) == 0) {
+                // Filename exists; try next name.
                 continue;
             }
-
-            snprintf(cmd_buf, MAX_MEM_USAGE_REPORT_CMD_SIZE,
-                "cp /proc/%d/status %s", getpid(), filename_buf);
-            if (system(cmd_buf) != 0) {
+            cmd = MR_make_string(MR_ALLOC_SITE_RUNTIME,
+                "cp /proc/%d/status %s", getpid(), filename);
+            if (system(cmd) != 0) {
                 fprintf(stderr, "%s: cannot write memory usage report\n",
                     MR_progname);
                 // There is no point in aborting.
-            };
+            }
             break;
         }
-
-#if 0
-        // XXX This alternative implementation breaks on Win32 and Linux.
-        char    buf[MAX_MEM_USAGE_REPORT_CMD_SIZE];
-        int     i;
-        int     fd;
-        FILE    *fp;
-
-        fp = NULL;
-        for (i = 1; i < MAX_MEM_USAGE_REPORT_ATTEMPTS; i++) {
-            sprintf(buf, "%s%02d", MR_mem_usage_report_prefix, i);
-
-            do {
-                fd = open(buf, O_WRONLY | O_CREAT | O_EXCL, 0600);
-            } while (fd == -1 && MR_is_eintr(errno));
-            if (fd >= 0) {
-                fp = fdopen(fd, "w");
-                break;
-            }
-        }
-
-        if (fp != NULL) {
-            struct rusage   rusage;
-
-            fprintf(fp, "io actions        %10d\n", MR_io_tabling_counter_hwm);
-            if (getrusage(RUSAGE_SELF, &rusage) == 0) {
-                fprintf(fp, "max resident      %10ld\n", rusage.ru_maxrss);
-                fprintf(fp, "integral shared   %10ld\n", rusage.ru_ixrss);
-                fprintf(fp, "integral unshared %10ld\n", rusage.ru_idrss);
-                fprintf(fp, "integral stack    %10ld\n", rusage.ru_isrss);
-                fprintf(fp, "page reclaims     %10ld\n", rusage.ru_minflt);
-                fprintf(fp, "page faults       %10ld\n", rusage.ru_majflt);
-                fprintf(fp, "swaps             %10ld\n", rusage.ru_nswap);
-            }
-
-            (void) fclose(fp);
-        }
-#endif // breaks on Win32
     }
 #endif // MR_HAVE_SYS_STAT_H
 

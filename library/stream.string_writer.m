@@ -3,8 +3,7 @@
 %---------------------------------------------------------------------------%
 % Copyright (C) 2006-2007, 2011 The University of Melbourne.
 % Copyright (C) 2014-2018 The Mercury team.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: stream.string_writer.m.
@@ -125,14 +124,16 @@
     % valid Mercury syntax whenever possible.
     %
     % Strings and characters are always printed out in quotes, using backslash
-    % escapes if necessary.  For higher-order types, or for types defined using
-    % the foreign language interface (pragma foreign_type), the text output
-    % will only describe the type that is being printed, not the value, and the
-    % result may not be parsable by `read'.  For the types containing
-    % existential quantifiers, the type `type_desc' and closure types, the
-    % result may not be parsable by `read', either.  But in all other cases the
-    % format used is standard Mercury syntax, and if you append a period and
-    % newline (".\n"), then the results can be read in again using `read'.
+    % escapes if necessary and backslash or octal escapes for all characters
+    % for which char.is_control/1 is true. For higher-order types, or for types
+    % defined using the foreign language interface (pragma foreign_type), the
+    % text output will only describe the type that is being printed, not the
+    % value, and the result may not be parsable by `read'.  For the types
+    % containing existential quantifiers, the type `type_desc' and closure
+    % types, the result may not be parsable by `read', either.  But in all
+    % other cases the format used is standard Mercury syntax, and if you append
+    % a period and newline (".\n"), then the results can be read in again using
+    % `read'.
     %
     % write/5 is the same as write/4 except that it allows the caller to
     % specify how non-canonical types should be handled.  write_cc/4 is the
@@ -602,13 +603,13 @@ do_write_univ_prio(Stream, NonCanon, Univ, Priority, !State) :-
     else if univ_to_type(Univ, UInt16) then
         put_uint16(Stream, UInt16, !State),
         put(Stream, "u16", !State)
-    else if univ_to_type(Univ, Int32)then
+    else if univ_to_type(Univ, Int32) then
         put_int32(Stream, Int32, !State),
         put(Stream, "i32", !State)
     else if univ_to_type(Univ, UInt32) then
         put_uint32(Stream, UInt32, !State),
         put(Stream, "u32", !State)
-    else if univ_to_type(Univ, Int64)then
+    else if univ_to_type(Univ, Int64) then
         put_int64(Stream, Int64, !State),
         put(Stream, "i64", !State)
     else if univ_to_type(Univ, UInt64) then

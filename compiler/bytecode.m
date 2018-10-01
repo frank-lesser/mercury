@@ -10,7 +10,8 @@
 % File: bytecode.m.
 % Author: zs.
 %
-% This module defines the bytecode used by the debugger.
+% This module defines the bytecode used by a possible future
+% bytecode-based debugger.
 %
 %---------------------------------------------------------------------------%
 
@@ -19,8 +20,6 @@
 
 :- import_module backend_libs.
 :- import_module backend_libs.builtin_ops.
-:- import_module hlds.
-:- import_module hlds.hlds_data.
 :- import_module mdbcomp.
 :- import_module mdbcomp.sym_name.
 :- import_module parse_tree.
@@ -34,7 +33,7 @@
 
 %---------------------------------------------------------------------------%
 
-:- type byte_tree   ==  cord(byte_code).
+:- type byte_tree == cord(byte_code).
 
 :- type byte_code
     --->    byte_enter_pred(byte_pred_id, int, byte_is_func, int)
@@ -109,9 +108,9 @@
 
 :- type byte_cons_tag
     --->    byte_no_tag
-    ;       byte_unshared_tag(ptag)
-    ;       byte_shared_remote_tag(ptag, int)
-    ;       byte_shared_local_tag(ptag, int)
+    ;       byte_unshared_tag(int)
+    ;       byte_shared_remote_tag(int, int)
+    ;       byte_shared_local_tag(int, int)
     ;       byte_enum_tag(int).
 
 :- type byte_arg
@@ -1473,9 +1472,9 @@ binop_debug(unchecked_right_shift(int_type_uint64), ">>(uint64)").
 
 :- pred unop_code(unary_op::in, int::out) is det.
 
-unop_code(mktag,                0).
+% unop_code(mktag,              0).
 unop_code(tag,                  1).
-unop_code(unmktag,              2).
+% unop_code(unmktag,            2).
 unop_code(mkbody,               3).
 unop_code(unmkbody,             4).
 unop_code(strip_tag,            5).
@@ -1505,9 +1504,9 @@ unop_code(dword_uint64_get_word1,               28).
 
 :- pred unop_debug(unary_op::in, string::out) is det.
 
-unop_debug(mktag,               "mktag").
+% unop_debug(mktag,             "mktag").
 unop_debug(tag,                 "tag").
-unop_debug(unmktag,             "unmktag").
+% unop_debug(unmktag,           "unmktag").
 unop_debug(mkbody,              "mkbody").
 unop_debug(unmkbody,            "unmkbody").
 unop_debug(strip_tag,           "strip_tag").

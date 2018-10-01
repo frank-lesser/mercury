@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1997-2009, 2011 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_trace.c - implements the top levels of the tracing subsystem,
 // which interface to the automatically generated code in user programs.
@@ -1706,14 +1706,9 @@ MR_maybe_record_call_table(const MR_ProcLayout *level_layout,
         return;
     }
 
-    {
-        char    buf[256];
-
-        sprintf(buf,
-            "unknown evaluation method %d in MR_maybe_record_call_table",
-            MR_sle_eval_method(level_layout));
-        MR_fatal_error(buf);
-    }
+    MR_fatal_error(
+        "unknown evaluation method %d in MR_maybe_record_call_table",
+        MR_sle_eval_method(level_layout));
 }
 
 static void

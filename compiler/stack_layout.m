@@ -436,13 +436,12 @@ add_line_no(LineNo, LineInfo, RevList0, RevList) :-
 construct_proc_and_label_layouts_for_proc(Params, PLI, !LabelTables,
         !StringTable, !TypeTable, !StaticCellInfo,
         !LabelLayoutInfo, !ProcLayoutInfo) :-
-    PLI = proc_layout_info(RttiProcLabel, EntryLabel,
-        _Detism, _StackSlots, _SuccipLoc, _EvalMethod, _EffTraceLevel,
+    PLI = proc_layout_info(_Detism, _EffTraceLevel, _EvalMethod,
+        _NeedGoalRep, ForceProcIdLayout, _NeedsAllNames,
+        RttiProcLabel, EntryLabel, _StackSlots, _SuccipLoc,
         _MaybeCallLabel, _MaxTraceRegR, _MaxTraceRegF, HeadVars, _ArgModes,
-        Goal, _NeedGoalRep, _InstMap,
-        _TraceSlotInfo, ForceProcIdLayout, VarSet, _VarTypes,
-        InternalMap, MaybeTableIoEntry, _NeedsAllNames, _OISUKindFors,
-        _MaybeDeepProfInfo),
+        Goal, _InstMap, _TraceSlotInfo, VarSet, _VarTypes,
+        InternalMap, MaybeTableIoEntry, _OISUKindFors, _MaybeDeepProfInfo),
     map.to_assoc_list(InternalMap, Internals),
     compute_var_number_map(HeadVars, VarSet, Internals, Goal, VarNumMap),
 
@@ -593,13 +592,12 @@ context_is_valid(Context) :-
 construct_proc_layout(Params, PLI, ProcLayoutName, Kind, InternalLabelInfos,
         VarNumMap, LabelLayoutInfo, !StringTable, !TypeTable,
         !StaticCellInfo, !ProcLayoutInfo) :-
-    PLI = proc_layout_info(RttiProcLabel, EntryLabel,
-        Detism, StackSlots, SuccipLoc, EvalMethod, EffTraceLevel,
+    PLI = proc_layout_info(Detism, EffTraceLevel, EvalMethod,
+        NeedGoalRep, _ForceProcIdLayout, NeedsAllNames,
+        RttiProcLabel, EntryLabel, StackSlots, SuccipLoc,
         MaybeCallLabel, MaxTraceRegR, MaxTraceRegF, HeadVars, ArgModes,
-        Goal, NeedGoalRep, InstMap,
-        TraceSlotInfo, _ForceProcIdLayout, VarSet, VarTypes,
-        InternalMap, MaybeTableInfo, NeedsAllNames, OISUKindFors,
-        MaybeDeepProfInfo),
+        Goal, InstMap, TraceSlotInfo, VarSet, VarTypes,
+        InternalMap, MaybeTableInfo, OISUKindFors, MaybeDeepProfInfo),
     construct_proc_traversal(Params, EntryLabel, Detism, StackSlots,
         SuccipLoc, Traversal),
     PredId = RttiProcLabel ^ rpl_pred_id,
@@ -2571,6 +2569,10 @@ represent_determinism_rval(Detism,
     --->    stack_layout_params(
                 slp_module_info             :: module_info,
 
+                % Should we try to compress arrays? If yes, give the number
+                % of elements in the biggest array we should try to compress.
+                slp_compress_arrays         :: maybe(int),
+
                 % What kind of execution tracing, if any, are we doing?
                 slp_trace_level             :: trace_level,
                 slp_trace_suppress          :: trace_suppress_items,
@@ -2587,44 +2589,34 @@ represent_determinism_rval(Detism,
                 % Should we generate proc id info?
                 slp_procid_stack_layout     :: bool,
 
-                % Should we try to compress arrays?
-                slp_compress_arrays         :: maybe(int),
-
                 % Do we have static code addresses or unboxed floats?
                 slp_static_code_addresses   :: bool,
                 slp_unboxed_floats          :: have_unboxed_floats,
 
-                % Do we want to include information about labels' line numbers?
-                slp_rtti_line_numbers       :: bool,
-
                 % Do we have unboxed 64-bit integer types?
-                slp_unboxed_int64s          :: have_unboxed_int64s
+                slp_unboxed_int64s          :: have_unboxed_int64s,
+
+                % Do we want to include information about labels' line numbers?
+                slp_rtti_line_numbers       :: bool
             ).
 
 :- func init_stack_layout_params(module_info) = stack_layout_params.
 
 init_stack_layout_params(ModuleInfo) = Params :-
     module_info_get_globals(ModuleInfo, Globals),
+    globals.lookup_bool_option(Globals, common_layout_data, CommonLayoutData),
+    globals.lookup_int_option(Globals, layout_compression_limit,
+        CompressLimit),
     globals.get_trace_level(Globals, TraceLevel),
     globals.get_trace_suppress(Globals, TraceSuppress),
     globals.lookup_bool_option(Globals, profile_deep, DeepProfiling),
     globals.lookup_bool_option(Globals, agc_stack_layout, AgcLayout),
     globals.lookup_bool_option(Globals, trace_stack_layout, TraceLayout),
     globals.lookup_bool_option(Globals, procid_stack_layout, ProcIdLayout),
-    globals.lookup_bool_option(Globals, common_layout_data, CommonLayoutData),
     globals.lookup_bool_option(Globals, static_code_addresses, StaticCodeAddr),
     globals.lookup_bool_option(Globals, unboxed_float, UnboxedFloatOpt),
-    globals.lookup_bool_option(Globals, rtti_line_numbers, RttiLineNumbers),
-    globals.lookup_int_option(Globals, layout_compression_limit,
-        CompressLimit),
     globals.lookup_bool_option(Globals, unboxed_int64s, UnboxedInt64sOpt),
-    (
-        UnboxedFloatOpt = no,
-        UnboxedFloat = do_not_have_unboxed_floats
-    ;
-        UnboxedFloatOpt = yes,
-        UnboxedFloat = have_unboxed_floats
-    ),
+    globals.lookup_bool_option(Globals, rtti_line_numbers, RttiLineNumbers),
     (
         CommonLayoutData = no,
         CompressArrays = no
@@ -2633,15 +2625,23 @@ init_stack_layout_params(ModuleInfo) = Params :-
         CompressArrays = yes(CompressLimit)
     ),
     (
+        UnboxedFloatOpt = no,
+        UnboxedFloat = do_not_have_unboxed_floats
+    ;
+        UnboxedFloatOpt = yes,
+        UnboxedFloat = have_unboxed_floats
+    ),
+    (
         UnboxedInt64sOpt = no,
         UnboxedInt64s = do_not_have_unboxed_int64s
     ;
         UnboxedInt64sOpt = yes,
         UnboxedInt64s = have_unboxed_int64s
     ),
-    Params = stack_layout_params(ModuleInfo, TraceLevel, TraceSuppress,
-        DeepProfiling, AgcLayout, TraceLayout, ProcIdLayout, CompressArrays,
-        StaticCodeAddr, UnboxedFloat, RttiLineNumbers, UnboxedInt64s).
+    Params = stack_layout_params(ModuleInfo, CompressArrays,
+        TraceLevel, TraceSuppress, DeepProfiling,
+        AgcLayout, TraceLayout, ProcIdLayout, StaticCodeAddr,
+        UnboxedFloat, UnboxedInt64s, RttiLineNumbers).
 
 %---------------------------------------------------------------------------%
 :- end_module ll_backend.stack_layout.

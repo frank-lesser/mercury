@@ -143,13 +143,13 @@ rename_class_names_in_type(Renaming, !Type) :-
         rename_class_names_in_func_params(Renaming, FuncParams0, FuncParams),
         !:Type = mlds_func_type(FuncParams)
     ;
-        ( !.Type = mercury_type(_, _, _)
+        ( !.Type = mercury_nb_type(_, _)
         ; !.Type = mlds_commit_type
         ; !.Type = mlds_native_bool_type
-        ; !.Type = mlds_native_int_type
-        ; !.Type = mlds_native_uint_type
-        ; !.Type = mlds_native_float_type
-        ; !.Type = mlds_native_char_type
+        ; !.Type = mlds_builtin_type_int(_)
+        ; !.Type = mlds_builtin_type_float
+        ; !.Type = mlds_builtin_type_string
+        ; !.Type = mlds_builtin_type_char
         ; !.Type = mlds_foreign_type(_)
         ; !.Type = mlds_generic_type
         ; !.Type = mlds_generic_env_ptr_type
@@ -357,12 +357,12 @@ rename_class_names_in_atomic(Renaming, !Stmt) :-
 
 rename_class_names_in_lval(Renaming, !Lval) :-
     (
-        !.Lval = ml_field(Tag, Address0, FieldId0, FieldType0, PtrType0),
-        rename_class_names_in_rval(Renaming, Address0, Address),
+        !.Lval = ml_field(Tag, PtrRval0, PtrType0, FieldId0, FieldType0),
+        rename_class_names_in_rval(Renaming, PtrRval0, PtrRval),
+        rename_class_names_in_type(Renaming, PtrType0, PtrType),
         rename_class_names_in_field_id(Renaming, FieldId0, FieldId),
         rename_class_names_in_type(Renaming, FieldType0, FieldType),
-        rename_class_names_in_type(Renaming, PtrType0, PtrType),
-        !:Lval = ml_field(Tag, Address, FieldId, FieldType, PtrType)
+        !:Lval = ml_field(Tag, PtrRval, PtrType, FieldId, FieldType)
     ;
         !.Lval = ml_mem_ref(Rval0, Type0),
         rename_class_names_in_rval(Renaming, Rval0, Rval),

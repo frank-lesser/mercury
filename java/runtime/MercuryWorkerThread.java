@@ -1,7 +1,7 @@
+// vim: ts=4 sw=4 expandtab ft=java
 //
-// Copyright (C) 2014 The Mercury Team 
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2016, 2018 The Mercury Team
+// This file is distributed under the terms specified in COPYING.LIB.
 //
 
 package jmercury.runtime;
@@ -45,10 +45,8 @@ public class MercuryWorkerThread extends MercuryThread
                     task = pool.workerGetTask();
                 }
                 catch (InterruptedException e) {
-                    /*
-                    ** A worker thread has no semantics for this, so we continue
-                    ** looping.
-                    */
+                    // A worker thread has no semantics for this,
+                    // so we continue looping.
                     continue;
                 }
                 if (task != null) {
@@ -64,7 +62,8 @@ public class MercuryWorkerThread extends MercuryThread
                         break;
                     } catch (Throwable e) {
                         // Some other error occured. bail out.
-                        System.err.println("Uncaught exception: " + e.toString());
+                        System.err.println("Uncaught exception: " +
+                            e.toString());
                         System.err.println(e.getMessage());
                         e.printStackTrace();
                         System.exit(1);
@@ -93,4 +92,3 @@ public class MercuryWorkerThread extends MercuryThread
         status = ThreadStatus.WORKING;
     }
 }
-

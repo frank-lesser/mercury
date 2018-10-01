@@ -110,10 +110,11 @@
     ;       tag_uses_base_class.
 
     % A constructor is represented using the base class rather than a derived
-    % class if there is only a single functor, or if there is a single
-    % functor and some constants represented using reserved addresses.
+    % class if there is only a single functor.
     %
 :- func ml_tag_uses_base_class(cons_tag) = tag_uses_base_class.
+:- func ml_remote_args_tag_uses_base_class(remote_args_tag_info)
+    = tag_uses_base_class.
 
     % Return whether this compilation target uses object constructors.
     %
@@ -326,14 +327,15 @@ ml_gen_hld_enum_type(Target, TypeCtor, TypeDefn, CtorRepns,
 
 ml_gen_hld_enum_value_member(Context) =
     mlds_field_var_defn(fvn_mr_value, Context, ml_gen_member_data_decl_flags,
-        mlds_native_int_type, no_initializer, gc_no_stmt).
+        mlds_builtin_type_int(int_type_int),
+        no_initializer, gc_no_stmt).
 
 :- func ml_gen_hld_enum_constant(prog_context, mlds_type, constructor_repn)
     = mlds_field_var_defn.
 
 ml_gen_hld_enum_constant(Context, MLDS_Type, CtorRepn) = FieldVarDefn :-
     % Figure out the value of this enumeration constant.
-    CtorRepn = ctor_repn(_, QualSymName, ConsTag, _, Arity, _),
+    CtorRepn = ctor_repn(_, _, QualSymName, ConsTag, _, Arity, _),
     expect(unify(Arity, 0), $pred, "arity != []"),
     enum_cons_tag_to_ml_const_rval(MLDS_Type, ConsTag, ConstRval),
 
@@ -341,7 +343,8 @@ ml_gen_hld_enum_constant(Context, MLDS_Type, CtorRepn) = FieldVarDefn :-
     Name = unqualify_name(QualSymName),
     VarName = fvn_enum_const(Name),
     FieldVarDefn = mlds_field_var_defn(VarName, Context,
-        ml_gen_enum_constant_data_decl_flags, mlds_native_int_type,
+        ml_gen_enum_constant_data_decl_flags,
+        mlds_builtin_type_int(int_type_int),
         init_obj(ConstRval), gc_no_stmt).
 
 %---------------------------------------------------------------------------%
@@ -440,7 +443,8 @@ ml_gen_hld_du_type(ModuleInfo, Target, TypeCtor, TypeDefn, CtorRepns,
     ( if NumWithSecTag > 0 then
         % Generate the members for the secondary tag.
         TagVarMember = mlds_field_var_defn(fvn_data_tag, Context,
-            ml_gen_member_data_decl_flags, mlds_native_int_type,
+            ml_gen_member_data_decl_flags,
+            mlds_builtin_type_int(int_type_int),
             no_initializer, gc_no_stmt),
         TagConstMembers = [],
         % XXX we don't yet bother with these;
@@ -551,13 +555,14 @@ ml_gen_hld_tag_constant(Context, CtorRepn) = Defns :-
         % we don't do the same thing for primary tags, so this is most useful
         % in the `--tags none' case, where there will be no primary tags.
 
-        CtorRepn = ctor_repn(_MaybeExistConstraints, Name, _Tag, _ArgRepns,
-            _Arity, _Ctxt),
+        CtorRepn = ctor_repn(_Ordinal, _MaybeExistConstraints, Name, _Tag,
+            _ArgRepns, _Arity, _Ctxt),
         UnqualifiedName = unqualify_name(Name),
         VarName = fvn_sectag_const(UnqualifiedName),
         ConstValue = ml_const(mlconst_int(SecondaryTag)),
         Defn = mlds_field_var_defn(VarName, Context,
-            ml_gen_enum_constant_data_decl_flags, mlds_native_int_type,
+            ml_gen_enum_constant_data_decl_flags,
+            mlds_builtin_type_int(int_type_int),
             init_obj(ConstValue), gc_no_stmt),
         Defns = [Defn]
     ;
@@ -631,8 +636,8 @@ ml_gen_hld_du_ctor_member(ModuleInfo, Target, BaseClassId, BaseClassQualifier,
         SecondaryTagClassId, TypeCtor, TypeDefn, CtorRepn,
         BaseClassFields0, BaseClassFields, BaseClassClasses0, BaseClassClasses,
         BaseClassCtors0, BaseClassCtors) :-
-    CtorRepn = ctor_repn(MaybeExistConstraints, CtorName, TagVal, ArgRepns,
-        CtorArity, _Ctxt),
+    CtorRepn = ctor_repn(_Ordinal, MaybeExistConstraints, CtorName, ConsTag,
+        ArgRepns, CtorArity, _Ctxt),
 
     % XXX We should keep a context for the constructor,
     % but we don't, so we just use the context from the type.
@@ -691,9 +696,9 @@ ml_gen_hld_du_ctor_member(ModuleInfo, Target, BaseClassId, BaseClassQualifier,
 
     % Generate a constructor function to initialize the fields, if needed
     % (not all back-ends use constructor functions).
-    MaybeSecTagVal = get_maybe_secondary_tag(TagVal),
+    MaybeSecTagVal = get_maybe_secondary_tag(ConsTag),
     UsesConstructors = ml_target_uses_constructors(Target),
-    UsesBaseClass = ml_tag_uses_base_class(TagVal),
+    UsesBaseClass = ml_tag_uses_base_class(ConsTag),
     (
         UsesConstructors = yes,
         (
@@ -711,8 +716,7 @@ ml_gen_hld_du_ctor_member(ModuleInfo, Target, BaseClassId, BaseClassQualifier,
         ),
         SubClassCtorFunc = ml_gen_constructor_function(Target,
             BaseClassId, CtorClassId, CtorClassQualifier,
-            SecondaryTagClassId, MaybeSecTagVal, SubClassFieldInfos,
-            Context),
+            SecondaryTagClassId, MaybeSecTagVal, SubClassFieldInfos, Context),
         % If this constructor is going to go in the base class, then we may
         % also need to generate an additional zero-argument constructor,
         % which is used to construct the class that is used for
@@ -831,20 +835,21 @@ make_arg(FieldInfo) = Arg :-
     mlds_module_name, mlds_field_info) = mlds_stmt is det.
 
 gen_init_field(BaseClassId, CtorClassId, ClassQualifier, FieldInfo) = Stmt :-
-    FieldInfo = mlds_field_info(FieldVarName, Type, _GcStmt, Context),
+    FieldInfo = mlds_field_info(FieldVarName, FieldType, _GcStmt, Context),
     LocalVarName = lvn_field_var_as_local(FieldVarName),
-    Param = ml_lval(ml_local_var(LocalVarName, Type)),
+    Param = ml_lval(ml_local_var(LocalVarName, FieldType)),
     CtorClassType = mlds_class_type(CtorClassId),
-    Field = ml_field(yes(0), ml_self(CtorClassType),
-        ml_field_named(
-            qual_field_var_name(ClassQualifier, type_qual, FieldVarName),
-            mlds_ptr_type(CtorClassType)),
-            % XXX we should use ClassType rather than BaseClassId here.
-            % But doing so breaks the IL back-end, because then the hack in
-            % fixup_class_qualifiers doesn't work.
-            % XXX That isn't an issue anymore.
-        Type, mlds_class_type(BaseClassId)),
-    Stmt = ml_stmt_atomic(assign(Field, Param), Context).
+    FieldId = ml_field_named(
+        qual_field_var_name(ClassQualifier, type_qual, FieldVarName),
+        mlds_ptr_type(CtorClassType)),
+    FieldLval = ml_field(yes(ptag(0u8)),
+        % XXX We should use ClassType rather than BaseClassId here.
+        % But doing so breaks the IL back-end, because then the hack in
+        % fixup_class_qualifiers doesn't work.
+        % XXX That isn't an issue anymore.
+        ml_self(CtorClassType), mlds_class_type(BaseClassId),
+        FieldId, FieldType),
+    Stmt = ml_stmt_atomic(assign(FieldLval, Param), Context).
 
     % Generate "this->data_tag = <TagVal>;".
     %
@@ -857,15 +862,14 @@ gen_init_tag(Target, CtorClassId, SecondaryTagClassId, TagVal, Context)
     TagClass = qual_class_name(BaseClassQualifier, QualKind, TagClassName),
     TagClassQualifier = mlds_append_class_qualifier(Target,
         BaseClassQualifier, QualKind, TagClassName, TagArity),
-    Type = mlds_native_int_type,
-    Val = ml_const(mlconst_int(TagVal)),
+    Rval = ml_const(mlconst_int(TagVal)),
     CtorClassType = mlds_class_type(CtorClassId),
-    Field = ml_field(yes(0), ml_self(CtorClassType),
-        ml_field_named(
-            qual_field_var_name(TagClassQualifier, type_qual, fvn_data_tag),
-            mlds_ptr_type(mlds_class_type(SecondaryTagClassId))),
-        Type, CtorClassType),
-    Stmt = ml_stmt_atomic(assign(Field, Val), Context).
+    FieldId = ml_field_named(
+        qual_field_var_name(TagClassQualifier, type_qual, fvn_data_tag),
+        mlds_ptr_type(mlds_class_type(SecondaryTagClassId))),
+    FieldLval = ml_field(yes(ptag(0u8)), ml_self(CtorClassType), CtorClassType,
+        FieldId, mlds_builtin_type_int(int_type_int)),
+    Stmt = ml_stmt_atomic(assign(FieldLval, Rval), Context).
 
 :- pred ml_gen_hld_du_ctor_typeclass_info_field(module_info::in,
     prog_context::in, prog_constraint::in,
@@ -1000,34 +1004,46 @@ ml_gen_enum_constant_data_decl_flags =
 
 %---------------------------------------------------------------------------%
 
-ml_tag_uses_base_class(Tag) = UsesBaseClass :-
+ml_tag_uses_base_class(ConsTag) = UsesBaseClass :-
     % A constructor is represented using the base class (rather than
     % a derived class) if there is only a single functor.
+
     (
-        Tag = single_functor_tag,
-        UsesBaseClass = tag_uses_base_class
+        ConsTag = remote_args_tag(RemoteArgsTagInfo),
+        UsesBaseClass = ml_remote_args_tag_uses_base_class(RemoteArgsTagInfo)
     ;
-        Tag = ground_term_const_tag(_ConstNum, SubTag),
+        ConsTag = ground_term_const_tag(_ConstNum, SubTag),
         UsesBaseClass = ml_tag_uses_base_class(SubTag)
     ;
-        ( Tag = string_tag(_)
-        ; Tag = float_tag(_)
-        ; Tag = int_tag(_)
-        ; Tag = foreign_tag(_, _)
-        ; Tag = closure_tag(_, _, _)
-        ; Tag = type_ctor_info_tag(_, _, _)
-        ; Tag = base_typeclass_info_tag(_, _, _)
-        ; Tag = type_info_const_tag(_)
-        ; Tag = typeclass_info_const_tag(_)
-        ; Tag = tabling_info_tag(_, _)
-        ; Tag = deep_profiling_proc_layout_tag(_, _)
-        ; Tag = table_io_entry_tag(_, _)
-        ; Tag = unshared_tag(_)
-        ; Tag = direct_arg_tag(_)
-        ; Tag = shared_remote_tag(_, _, _)
-        ; Tag = shared_local_tag(_, _)
-        ; Tag = no_tag
-        ; Tag = dummy_tag
+        ( ConsTag = string_tag(_)
+        ; ConsTag = float_tag(_)
+        ; ConsTag = int_tag(_)
+        ; ConsTag = foreign_tag(_, _)
+        ; ConsTag = closure_tag(_, _, _)
+        ; ConsTag = type_ctor_info_tag(_, _, _)
+        ; ConsTag = base_typeclass_info_tag(_, _, _)
+        ; ConsTag = type_info_const_tag(_)
+        ; ConsTag = typeclass_info_const_tag(_)
+        ; ConsTag = tabling_info_tag(_, _)
+        ; ConsTag = deep_profiling_proc_layout_tag(_, _)
+        ; ConsTag = table_io_entry_tag(_, _)
+        ; ConsTag = direct_arg_tag(_)
+        ; ConsTag = shared_local_tag_no_args(_, _, _)
+        ; ConsTag = local_args_tag(_)
+        ; ConsTag = no_tag
+        ; ConsTag = dummy_tag
+        ),
+        UsesBaseClass = tag_does_not_use_base_class
+    ).
+
+ml_remote_args_tag_uses_base_class(RemoteArgsTagInfo) = UsesBaseClass :-
+    (
+        RemoteArgsTagInfo = remote_args_only_functor,
+        UsesBaseClass = tag_uses_base_class
+    ;
+        ( RemoteArgsTagInfo = remote_args_unshared(_)
+        ; RemoteArgsTagInfo = remote_args_shared(_, _)
+        ; RemoteArgsTagInfo = remote_args_ctor(_)
         ),
         UsesBaseClass = tag_does_not_use_base_class
     ).
@@ -1065,7 +1081,7 @@ ml_gen_exported_enum(ExportedEnumInfo, MLDS_ExportedEnum) :-
 
 generate_foreign_enum_constant(Mapping, MLDS_Type, CtorRepn,
         ExportConstant) :-
-    CtorRepn = ctor_repn(_, SymName, ConsTag, _, Arity, _),
+    CtorRepn = ctor_repn(_, _, SymName, ConsTag, _, Arity, _),
     expect(unify(Arity, 0), $pred, "enum constant arity != 0"),
     enum_cons_tag_to_ml_const_rval(MLDS_Type, ConsTag, ConstRval),
 
@@ -1114,11 +1130,10 @@ enum_cons_tag_to_ml_const_rval(MLDS_Type, ConsTag, ConstRval) :-
         ; ConsTag = tabling_info_tag(_, _)
         ; ConsTag = deep_profiling_proc_layout_tag(_, _)
         ; ConsTag = table_io_entry_tag(_, _)
-        ; ConsTag = single_functor_tag
-        ; ConsTag = unshared_tag(_)
         ; ConsTag = direct_arg_tag(_)
-        ; ConsTag = shared_remote_tag(_, _, _)
-        ; ConsTag = shared_local_tag(_, _)
+        ; ConsTag = shared_local_tag_no_args(_, _, _)
+        ; ConsTag = local_args_tag(_)
+        ; ConsTag = remote_args_tag(_)
         ; ConsTag = no_tag
         ),
         unexpected($pred, "enum constant requires an int or foreign tag")

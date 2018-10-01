@@ -30,6 +30,7 @@
 :- interface.
 
 :- import_module hlds.
+:- import_module hlds.hlds_data.
 :- import_module hlds.hlds_pred.
 :- import_module hlds.hlds_rtti.
 :- import_module libs.
@@ -170,10 +171,10 @@
 :- type type_ctor_details
     --->    tcd_enum(
                 enum_axioms         :: equality_axioms,
+                enum_is_dummy       :: enum_maybe_dummy,
                 enum_functors       :: list(enum_functor),
                 enum_value_table    :: map(int, enum_functor),
                 enum_name_table     :: map(string, enum_functor),
-                enum_is_dummy       :: enum_maybe_dummy,
                 enum_functor_number_mapping
                                     :: list(int)
             )
@@ -278,11 +279,11 @@
     %
 :- type du_rep
     --->    du_ll_rep(
-                du_ll_ptag          :: int,
+                du_ll_ptag          :: ptag,
                 du_ll_sec_tag       :: sectag_and_locn
             )
     ;       du_hl_rep(
-                remote_sec_tag      :: int
+                remote_sec_tag      :: uint
             ).
 
     % Describes the types of the existentially typed arguments of a
@@ -330,13 +331,15 @@
     % The type sectag_table corresponds to the C type MR_DuPtagLayout.
     % The two maps are implemented in C as simple arrays.
     %
-:- type ptag_map == map(int, sectag_table).  % key is primary tag
-:- type stag_map == map(int, du_functor).    % key is secondary tag
+:- type ptag_map == map(ptag, sectag_table).  % key is primary tag
+:- type stag_map == map(uint, du_functor).    % key is secondary tag
 
 :- type sectag_table
     --->    sectag_table(
                 sectag_locn         :: sectag_locn,
-                sectag_num_sharers  :: int,
+                sectag_num_bits     :: int8,
+                % XXX The number of sharers *should* fit in a 32 bit number.
+                sectag_num_sharers  :: uint,
                 sectag_map          :: stag_map
             ).
 
@@ -346,17 +349,21 @@
 :- type sectag_locn
     --->    sectag_none
     ;       sectag_none_direct_arg
-    ;       sectag_local
-    ;       sectag_remote.
+    ;       sectag_local_rest_of_word
+    ;       sectag_local_bits(uint8, uint)              % #bits, mask
+    ;       sectag_remote_word
+    ;       sectag_remote_bits(uint8, uint).            % #bits, mask
 
-    % Describes the location of the secondary tag and its value for a
-    % given functor in a given type.
+    % Describes the location, maybe size, and value of the secondary tag,
+    % for a given functor in a given type.
     %
 :- type sectag_and_locn
     --->    sectag_locn_none
     ;       sectag_locn_none_direct_arg
-    ;       sectag_locn_local(int)
-    ;       sectag_locn_remote(int).
+    ;       sectag_locn_local_rest_of_word(uint)        % value
+    ;       sectag_locn_local_bits(uint, uint8, uint)   % value, #bits, mask
+    ;       sectag_locn_remote_word(uint)               % value
+    ;       sectag_locn_remote_bits(uint, uint8, uint). % value, #bits, mask
 
     % Information about an argument of a functor in a discriminated union type.
     %
@@ -625,9 +632,9 @@
     ;       type_ctor_foreign_enum_name_ordered_table
     ;       type_ctor_foreign_enum_ordinal_ordered_table
     ;       type_ctor_du_name_ordered_table
-    ;       type_ctor_du_stag_ordered_table(int)        % primary tag
+    ;       type_ctor_du_stag_ordered_table(ptag)
     ;       type_ctor_du_ptag_ordered_table
-    ;       type_ctor_du_ptag_layout(int)               % primary tag
+    ;       type_ctor_du_ptag_layout(ptag)
     ;       type_ctor_functor_number_map
     ;       type_ctor_type_functors
     ;       type_ctor_type_layout
@@ -957,6 +964,7 @@
 :- import_module require.
 :- import_module string.
 :- import_module table_builtin.
+:- import_module uint8.
 
 %----------------------------------------------------------------------------%
 
@@ -1241,7 +1249,8 @@ name_to_string(RttiTypeCtor, RttiName) = Str :-
             TypeName, "_", A_str], Str)
     ;
         RttiName = type_ctor_du_stag_ordered_table(Ptag),
-        string.int_to_string(Ptag, P_str),
+        Ptag = ptag(PtagUint8),
+        P_str = string.uint8_to_string(PtagUint8),
         string.append_list([ModuleName, "__du_stag_ordered_",
             TypeName, "_", A_str, "_", P_str], Str)
     ;
@@ -1250,7 +1259,8 @@ name_to_string(RttiTypeCtor, RttiName) = Str :-
             TypeName, "_", A_str], Str)
     ;
         RttiName = type_ctor_du_ptag_layout(Ptag),
-        string.int_to_string(Ptag, P_str),
+        Ptag = ptag(PtagUint8),
+        P_str = string.uint8_to_string(PtagUint8),
         string.append_list([ModuleName, "__du_ptag_layout_",
             TypeName, "_", A_str, "_", P_str], Str)
     ;
@@ -1511,6 +1521,8 @@ pred_or_func_to_string(PredOrFunc, TargetPrefixes, String) :-
     ).
 
 sectag_locn_to_string(SecTag, TargetPrefixes, String) :-
+    % The code of this predicate should produce output using the same scheme
+    % as sectag_and_locn_to_locn_string.
     TargetPrefixes =
         target_prefixes("private_builtin.", "runtime.Sectag_Locn."),
     (
@@ -1520,14 +1532,22 @@ sectag_locn_to_string(SecTag, TargetPrefixes, String) :-
         SecTag = sectag_none_direct_arg,
         String = "MR_SECTAG_NONE_DIRECT_ARG"
     ;
-        SecTag = sectag_local,
-        String = "MR_SECTAG_LOCAL"
+        SecTag = sectag_local_rest_of_word,
+        String = "MR_SECTAG_LOCAL_REST_OF_WORD"
     ;
-        SecTag = sectag_remote,
-        String = "MR_SECTAG_REMOTE"
+        SecTag = sectag_local_bits(_, _),
+        String = "MR_SECTAG_LOCAL_BITS"
+    ;
+        SecTag = sectag_remote_word,
+        String = "MR_SECTAG_REMOTE_FULL_WORD"
+    ;
+        SecTag = sectag_remote_bits(_, _),
+        String = "MR_SECTAG_REMOTE_BITS"
     ).
 
 sectag_and_locn_to_locn_string(SecTag, TargetPrefixes, String) :-
+    % The code of this predicate should produce output using the same scheme
+    % as sectag_locn_to_string.
     TargetPrefixes =
         target_prefixes("private_builtin.", "runtime.Sectag_Locn."),
     (
@@ -1537,11 +1557,17 @@ sectag_and_locn_to_locn_string(SecTag, TargetPrefixes, String) :-
         SecTag = sectag_locn_none_direct_arg,
         String = "MR_SECTAG_NONE_DIRECT_ARG"
     ;
-        SecTag = sectag_locn_local(_),
-        String = "MR_SECTAG_LOCAL"
+        SecTag = sectag_locn_local_rest_of_word(_),
+        String = "MR_SECTAG_LOCAL_REST_OF_WORD"
     ;
-        SecTag = sectag_locn_remote(_),
-        String = "MR_SECTAG_REMOTE"
+        SecTag = sectag_locn_local_bits(_, _, _),
+        String = "MR_SECTAG_LOCAL_BITS"
+    ;
+        SecTag = sectag_locn_remote_word(_),
+        String = "MR_SECTAG_REMOTE_FULL_WORD"
+    ;
+        SecTag = sectag_locn_remote_bits(_, _, _),
+        String = "MR_SECTAG_REMOTE_BITS"
     ).
 
 functor_subtype_info_to_string(FunctorSubtypeInfo, TargetPrefixes, String) :-
@@ -1560,7 +1586,7 @@ type_ctor_rep_to_string(TypeCtorData, TargetPrefixes, RepStr) :-
         "runtime.TypeCtorRep."),
     TypeCtorDetails = TypeCtorData ^ tcr_rep_details,
     (
-        TypeCtorDetails = tcd_enum(TypeCtorUserEq, _, _, _, IsDummy, _),
+        TypeCtorDetails = tcd_enum(TypeCtorUserEq, IsDummy, _, _, _, _),
         (
             IsDummy = enum_is_dummy,
             expect(unify(TypeCtorUserEq, standard), $pred,
@@ -1734,12 +1760,13 @@ type_ctor_details_num_ptags(TypeCtorDetails) = NumPtags :-
         TypeCtorDetails = tcd_du(_, _, PtagMap, _, _),
         map.keys(PtagMap, Ptags),
         list.det_last(Ptags, LastPtag),
-        NumPtags = LastPtag + 1
+        LastPtag = ptag(LastPtagUint8),
+        NumPtags = uint8.cast_to_int(LastPtagUint8) + 1
     ).
 
 type_ctor_details_num_functors(TypeCtorDetails) = NumFunctors :-
     (
-        TypeCtorDetails = tcd_enum(_, EnumFunctors, _, _, _, _),
+        TypeCtorDetails = tcd_enum(_, _, EnumFunctors, _, _, _),
         list.length(EnumFunctors, NumFunctors)
     ;
         TypeCtorDetails = tcd_foreign_enum(_, _, ForeignFunctors, _, _, _),

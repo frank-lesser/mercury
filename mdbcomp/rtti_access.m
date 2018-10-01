@@ -2,8 +2,8 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2005-2007, 2009-2011 The University of Melbourne.
-% This file may only be copied under the terms of the GNU General
-% Public License - see the file COPYING in the Mercury distribution.
+% Copyright (C) 2014-2015, 2017-2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: rtti_access.m.
@@ -380,7 +380,8 @@ get_proc_name(special_proc_label(_, _, _, ProcName , _, _)) = ProcName.
         MR_bool                 found;
 
         if (should_copy_out) {
-            strncpy(out_name_buf, out_name, MR_MAX_VARNAME_SIZE);
+            strncpy(out_name_buf, out_name, sizeof(out_name_buf) - 1);
+            out_name_buf[sizeof(out_name_buf) - 1] = '\\0';
             out_name = (const char *) out_name_buf;
         }
 
@@ -828,7 +829,7 @@ encode_short(Short, [Byte1, Byte2]) :-
     Byte1 < 128.
 
 encode_short_det(Short, Bytes) :-
-    ( if encode_short(Short, BytesPrime)then
+    ( if encode_short(Short, BytesPrime) then
         Bytes = BytesPrime
     else
         unexpected($pred, "encode_short failed")
@@ -875,7 +876,7 @@ encode_num_2(Num, RestBytes, Bytes) :-
     ).
 
 encode_num_det(Num, Bytes) :-
-    ( if encode_num(Num, BytesPrime)then
+    ( if encode_num(Num, BytesPrime) then
         Bytes = BytesPrime
     else
         unexpected($pred, "encode_num failed")

@@ -2,8 +2,8 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2002-2009, 2011 The University of Melbourne.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2014-2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: construct.m.
@@ -212,28 +212,21 @@ get_functor_internal(TypeDesc, FunctorNumber, FunctorName, Arity,
 
     type_info = (MR_TypeInfo) TypeDesc;
 
-        /*
-        ** If type_info is an equivalence type, expand it.
-        */
+    // If type_info is an equivalence type, expand it.
     MR_save_transient_registers();
     type_info = MR_collapse_equivalences(type_info);
     MR_restore_transient_registers();
 
-        /*
-        ** Get information for this functor number and store in construct_info.
-        ** If this is a discriminated union type and if the functor number
-        ** is in range, we succeed.
-        */
+    // Get information for this functor number and store in construct_info.
+    // If this is a discriminated union type and if the functor number
+    // is in range, we succeed.
     MR_save_transient_registers();
     success = MR_get_functors_check_range(FunctorNumber, type_info,
         &construct_info);
     MR_restore_transient_registers();
 
-        /*
-        ** Get the functor name and arity, construct the list
-        ** of type_infos for arguments.
-        */
-
+    // Get the functor name and arity, construct the list  of type_infos
+    // for arguments.
     if (success) {
         MR_make_aligned_string(FunctorName, construct_info.functor_name);
         arity = construct_info.arity;
@@ -295,28 +288,21 @@ get_functor_with_names_internal(TypeDesc, FunctorNumber, FunctorName, Arity,
 
     type_info = (MR_TypeInfo) TypeDesc;
 
-        /*
-        ** If type_info is an equivalence type, expand it.
-        */
+    // If type_info is an equivalence type, expand it.
     MR_save_transient_registers();
     type_info = MR_collapse_equivalences(type_info);
     MR_restore_transient_registers();
 
-        /*
-        ** Get information for this functor number and
-        ** store in construct_info. If this is a discriminated union
-        ** type and if the functor number is in range, we
-        ** succeed.
-        */
+    // Get information for this functor number and store in construct_info.
+    // If this is a discriminated union type and if the functor number
+    // is in range, we succeed.
     MR_save_transient_registers();
     success = MR_get_functors_check_range(FunctorNumber, type_info,
         &construct_info);
     MR_restore_transient_registers();
 
-        /*
-        ** Get the functor name and arity, construct the list
-        ** of type_infos for arguments.
-        */
+    // Get the functor name and arity, construct the list of type_infos
+    // for arguments.
 
     if (success) {
         MR_make_aligned_string(FunctorName, construct_info.functor_name);
@@ -411,11 +397,9 @@ get_functor_ordinal(TypeDesc, FunctorNumber, Ordinal) :-
 
     type_info = (MR_TypeInfo) TypeDesc;
 
-    /*
-    ** Get information for this functor number and store in construct_info.
-    ** If this is a discriminated union type and if the functor number is
-    ** in range, we succeed.
-    */
+    // Get information for this functor number and store in construct_info.
+    // If this is a discriminated union type and if the functor number is
+    // in range, we succeed.
     MR_save_transient_registers();
     success = MR_get_functors_check_range(FunctorNumber, type_info,
         &construct_info);
@@ -523,11 +507,9 @@ get_functor_lex(TypeDesc, Ordinal) = FunctorNumber :-
 
     type_info = (MR_TypeInfo) TypeDesc;
 
-    /*
-    ** Get information for this functor number and store in construct_info.
-    ** If this is a discriminated union type and if the functor number is
-    ** in range, we succeed.
-    */
+    // Get information for this functor number and store in construct_info.
+    // If this is a discriminated union type and if the functor number is
+    // in range, we succeed.
     MR_save_transient_registers();
     type_info = MR_collapse_equivalences(type_info);
     num_functors = MR_get_num_functors(type_info);
@@ -564,7 +546,7 @@ find_functor_2(TypeInfo, Functor, Arity, Num0, FunctorNumber, ArgTypes) :-
 
 :- pragma foreign_decl("C",
 "
-// This function exists to allow us to handle both the MR_SECTAG_REMOTE
+// This function exists to allow us to handle both the MR_SECTAG_REMOTE_*
 // and the MR_SECTAG_NONE cases of constructing values of discriminated
 // union types without code duplication.
 //
@@ -575,10 +557,17 @@ find_functor_2(TypeInfo, Functor, Arity, Num0, FunctorNumber, ArgTypes) :-
 // Once this code has been operation for a while without problems,
 // we should consider turning it into a macro.
 
-extern void ML_copy_memory_cell_args(MR_Word *arg_list_ptr,
-                MR_Word *new_data_ptr,
-                const MR_Word ptag, const MR_DuFunctorDesc *functor_desc,
-                const MR_bool has_sectag, MR_AllocSiteInfoPtr);
+extern void         ML_copy_memory_cell_args(MR_Word *arg_list_ptr,
+                        MR_Word *new_data_ptr, const MR_Word ptag,
+                        const MR_DuFunctorDesc *functor_desc,
+                        const MR_bool has_sectag,
+                        const MR_AllocSiteInfoPtr alloc_id);
+
+// This is a version of ML_copy_memory_cell_args that puts arguments
+// not into a memory cell, but next to the primary and secondary tag.
+extern MR_Unsigned  ML_copy_tagword_args(MR_Word *arg_list_ptr,
+                        const MR_Word ptag,
+                        const MR_DuFunctorDesc *functor_desc);
 ").
 
 
@@ -587,7 +576,7 @@ extern void ML_copy_memory_cell_args(MR_Word *arg_list_ptr,
 void
 ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
     const MR_Word ptag, const MR_DuFunctorDesc *functor_desc,
-    MR_bool has_sectag, MR_AllocSiteInfoPtr alloc_id)
+    const MR_bool has_sectag, const MR_AllocSiteInfoPtr alloc_id)
 {
     MR_Word             arg_list = *arg_list_ptr;
     MR_Word             new_data;
@@ -624,18 +613,22 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
             MR_UNIV_OFFSET_FOR_DATA);
         arg_type_info = (MR_TypeInfo) MR_field(MR_UNIV_TAG,
             MR_list_head(arg_list), MR_UNIV_OFFSET_FOR_TYPEINFO);
+        // XXX ARG_PACK This test is loop-invariant; lift it out of the loop.
         if (arg_locns == NULL) {
             MR_field(ptag, new_data, sectag01 + i) = arg_data;
         } else {
             const MR_DuArgLocn *locn = &arg_locns[i];
 
             // The meanings of the various special values of MR_arg_bits
-            // are documented next to the definition of the MR_DuArgLocn type
-            // in mercury_type_info.h.
+            // and MR_arg_offset are documented next to the definition of
+            // the MR_DuArgLocn type in mercury_type_info.h.
 
             switch (locn->MR_arg_bits) {
 
             case 0:
+                if (locn->MR_arg_offset < 0) {
+                    MR_fatal_error(""construct(): full word arg in tagword"");
+                }
                 MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset)
                     = arg_data;
                 break;
@@ -643,6 +636,9 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
             case -1:
                 // This is a double-precision floating point argument
                 // that takes two words.
+                if (locn->MR_arg_offset < 0) {
+                    MR_fatal_error(""construct(): double word arg in tagword"");
+                }
   #ifdef MR_BOXED_FLOAT
                 MR_memcpy(
                     &MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset),
@@ -654,6 +650,9 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
 
             case -2:
                 // This is an int64 argument that takes two words.
+                if (locn->MR_arg_offset < 0) {
+                    MR_fatal_error(""construct(): double word arg in tagword"");
+                }
   #ifdef MR_BOXED_INT64S
                 MR_memcpy(
                     &MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset),
@@ -665,6 +664,9 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
 
             case -3:
                 // This is a uint64 argument that takes two words.
+                if (locn->MR_arg_offset < 0) {
+                    MR_fatal_error(""construct(): double word arg in tagword"");
+                }
   #ifdef MR_BOXED_INT64S
                 MR_memcpy(
                     &MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset),
@@ -674,28 +676,49 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
   #endif
                 break;
 
-            case -4:
+            case -4:    // fall-through
             case -5:
                 // This is an int8 (-4) or uint8 (-5) argument.
                 bits_to_or = (((MR_Unsigned) arg_data) & 0xff);
-                MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset)
-                    |= (bits_to_or << locn->MR_arg_shift);
+                if (locn->MR_arg_offset == -1) {
+                    MR_field(ptag, new_data, 0)
+                        |= (bits_to_or << locn->MR_arg_shift);
+                } else if (locn->MR_arg_offset < 0) {
+                    MR_fatal_error(""construct(): unknown negative offset"");
+                } else {
+                    MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset)
+                        |= (bits_to_or << locn->MR_arg_shift);
+                }
                 break;
 
-            case -6:
+            case -6:    // fall-through
             case -7:
                 // This is an int16 (-6) or uint16 (-7) argument.
                 bits_to_or = (((MR_Unsigned) arg_data) & 0xffff);
-                MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset)
-                    |= (bits_to_or << locn->MR_arg_shift);
+                if (locn->MR_arg_offset == -1) {
+                    MR_field(ptag, new_data, 0)
+                        |= (bits_to_or << locn->MR_arg_shift);
+                } else if (locn->MR_arg_offset < 0) {
+                    MR_fatal_error(""construct(): unknown negative offset"");
+                } else {
+                    MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset)
+                        |= (bits_to_or << locn->MR_arg_shift);
+                }
                 break;
 
-            case -8:
+            case -8:    // fall-through
             case -9:
                 // This is an int32 (-8) or uint32 (-9) argument.
                 bits_to_or = (((MR_Unsigned) arg_data) & 0xffffffff);
-                MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset)
-                    |= (bits_to_or << locn->MR_arg_shift);
+                if (locn->MR_arg_offset == -1) {
+                    MR_field(ptag, new_data, 0)
+                        |= (bits_to_or << locn->MR_arg_shift);
+                } else if (locn->MR_arg_offset < 0) {
+                    MR_fatal_error(""construct(): unknown negative offset"");
+                } else {
+                    MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset)
+                        |= (bits_to_or << locn->MR_arg_shift);
+                }
                 break;
 
             case -10:
@@ -704,8 +727,16 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
 
             default:
                 if (locn->MR_arg_bits > 0) {
-                    MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset)
-                        |= (arg_data << locn->MR_arg_shift);
+                    bits_to_or = arg_data;
+                    if (locn->MR_arg_offset == -1) {
+                        MR_field(ptag, new_data, 0)
+                            |= (bits_to_or << locn->MR_arg_shift);
+                    } else if (locn->MR_arg_offset < 0) {
+                        MR_fatal_error(""construct(): unknown negative offset"");
+                    } else {
+                        MR_field(ptag, new_data, sectag01 + locn->MR_arg_offset)
+                            |= (bits_to_or << locn->MR_arg_shift);
+                    }
                 } else {
                     MR_fatal_error(""unknown MR_arg_bits value"");
                 }
@@ -719,6 +750,94 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
 
     *arg_list_ptr = arg_list;
     MR_define_size_slot(ptag, new_data, size);
+}
+
+MR_Unsigned
+ML_copy_tagword_args(MR_Word *arg_list_ptr, const MR_Word ptag,
+    const MR_DuFunctorDesc *functor_desc)
+{
+    MR_Word             arg_list = *arg_list_ptr;
+    MR_Unsigned         new_data;
+    const MR_Word       arity = functor_desc->MR_du_functor_orig_arity;
+    const MR_DuArgLocn  *arg_locns = functor_desc->MR_du_functor_arg_locns;
+    MR_Unsigned         i;
+
+    new_data = ptag | (functor_desc->MR_du_functor_secondary << MR_TAGBITS);
+
+    for (i = 0; i < arity; i++) {
+        MR_Word         arg_data;
+        MR_TypeInfo     arg_type_info;
+
+        arg_data = MR_field(MR_UNIV_TAG, MR_list_head(arg_list),
+            MR_UNIV_OFFSET_FOR_DATA);
+        arg_type_info = (MR_TypeInfo) MR_field(MR_UNIV_TAG,
+            MR_list_head(arg_list), MR_UNIV_OFFSET_FOR_TYPEINFO);
+        if (arg_locns == NULL) {
+            MR_fatal_error(""construct(): arg_locns == NULL"");
+        }
+
+        const MR_DuArgLocn *locn = &arg_locns[i];
+
+        // The meanings of the various special values of MR_arg_bits
+        // are documented next to the definition of the MR_DuArgLocn type
+        // in mercury_type_info.h.
+
+        switch (locn->MR_arg_bits) {
+
+        case 0:
+            MR_fatal_error(""construct(): full word argument in tagword"");
+            break;
+
+        case -1:    // fall-through
+        case -2:    // fall-through
+        case -3:
+            // This is an argument that takes two words, the type being
+            // float, int64, or uint64.
+            MR_fatal_error(""construct(): double word argument in tagword"");
+            break;
+
+        case -4:    // fall-through
+        case -5:
+            // This is an int8 (-4) or uint8 (-5) argument.
+            new_data = new_data |
+                ((((MR_Unsigned) arg_data) & 0xff) << locn->MR_arg_shift);
+            break;
+
+        case -6:    // fall-through
+        case -7:
+            // This is an int16 (-6) or uint16 (-7) argument.
+            new_data = new_data |
+                ((((MR_Unsigned) arg_data) & 0xffff) << locn->MR_arg_shift);
+            break;
+
+        case -8:    // fall-through
+        case -9:
+            // This is an int32 (-8) or uint32 (-9) argument.
+            new_data = new_data |
+                ((((MR_Unsigned) arg_data) & 0xffffffff)
+                    << locn->MR_arg_shift);
+            break;
+
+        case -10:
+            // This is a dummy argument, which does not need setting.
+            break;
+
+        default:
+            if (locn->MR_arg_bits > 0) {
+                MR_Unsigned arg_value = ((MR_Unsigned) arg_data) &
+                    ((1 << locn->MR_arg_bits) - 1);
+                new_data = new_data | (arg_value << locn->MR_arg_shift);
+            } else {
+                MR_fatal_error(""unknown MR_arg_bits value"");
+            }
+            break;
+        }
+
+        arg_list = MR_list_tail(arg_list);
+    }
+
+    *arg_list_ptr = arg_list;
+    return new_data;
 }
 ").
 
@@ -735,12 +854,12 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
 
     type_info = (MR_TypeInfo) TypeDesc;
 
-    /* If type_info is an equivalence type, expand it. */
+    // If type_info is an equivalence type, expand it.
     MR_save_transient_registers();
     type_info = MR_collapse_equivalences(type_info);
     MR_restore_transient_registers();
 
-    /* Check range of FunctorNum, get info for this functor. */
+    // Check range of FunctorNum, get info for this functor.
     MR_save_transient_registers();
     success =
         MR_get_functors_check_range(FunctorNumber, type_info, &construct_info)
@@ -748,7 +867,7 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
             construct_info.arg_pseudo_type_infos);
     MR_restore_transient_registers();
 
-    /* Build the new term in `new_data'. */
+    // Build the new term in `new_data'.
     if (success) {
         type_ctor_info = MR_TYPEINFO_GET_TYPE_CTOR_INFO(type_info);
 
@@ -824,13 +943,19 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
                 ptag = functor_desc->MR_du_functor_primary;
                 switch (functor_desc->MR_du_functor_sectag_locn) {
 
-                case MR_SECTAG_LOCAL:
+                case MR_SECTAG_LOCAL_REST_OF_WORD:
                     new_data = (MR_Word) MR_mkword(ptag,
                         MR_mkbody((MR_Word)
                             functor_desc->MR_du_functor_secondary));
                     break;
 
-                case MR_SECTAG_REMOTE:
+                case MR_SECTAG_LOCAL_BITS:
+                    new_data = ML_copy_tagword_args(&arg_list, ptag,
+                        functor_desc);
+                    break;
+
+                case MR_SECTAG_REMOTE_FULL_WORD:        // fall-through
+                case MR_SECTAG_REMOTE_BITS:
                     MR_save_transient_registers();
                     ML_copy_memory_cell_args(&arg_list, &new_data, ptag,
                         functor_desc, MR_TRUE, MR_ALLOC_ID);
@@ -858,12 +983,12 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
                     break;
 
                 case MR_SECTAG_VARIABLE:
-                    new_data = (MR_Word) 0;     /* avoid a warning */
+                    new_data = (MR_Word) 0;     // avoid a warning
                     MR_fatal_error(""construct(): cannot construct variable"");
 
 #ifdef MR_INCLUDE_SWITCH_DEFAULTS
                 default:
-                    new_data = (MR_Word) 0;     /* avoid a warning */
+                    new_data = (MR_Word) 0;     // avoid a warning
                     MR_fatal_error(""construct(): unrecognised sectag locn"");
 #endif
 
@@ -917,100 +1042,98 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
             break;
 
         case MR_TYPECTOR_REP_DUMMY:
-            /*
-            ** The value of the dummy type will never be looked at,
-            ** so it doesn't matter what new_data is set to.
-            */
+            // The value of the dummy type will never be looked at,
+            // so it doesn't matter what new_data is set to.
             new_data = (MR_Word) 0;
             break;
 
         case MR_TYPECTOR_REP_INT:
-            /* ints don't have functor ordinals. */
+            // ints don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct int with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_UINT:
-            /* uints don't have functor ordinals. */
+            // uints don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct uint with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_INT8:
-            /* int8s don't have functor ordinals. */
+            // int8s don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct int8 with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_UINT8:
-            /* uint8s don't have functor ordinals. */
+            // uint8s don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct uint8 with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_INT16:
-            /* int16s don't have functor ordinals. */
+            // int16s don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct int16 with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_UINT16:
-            /* uint16s don't have functor ordinals. */
+            // uint16s don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct uint16 with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_INT32:
-            /* int32s don't have functor ordinals. */
+            // int32s don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct int32 with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_UINT32:
-            /* uint32s don't have functor ordinals. */
+            // uint32s don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct uint32 with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_INT64:
-            /* int64s don't have functor ordinals. */
+            // int64s don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct int64 with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_UINT64:
-            /* uint64s don't have functor ordinals. */
+            // uint64s don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct uint64 with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_FLOAT:
-            /* floats don't have functor ordinals. */
+            // floats don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct floats with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_CHAR:
-            /* chars don't have functor ordinals. */
+            // chars don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct chars with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_STRING:
-            /* strings don't have functor ordinals. */
+            // strings don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct strings with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_BITMAP:
-            /* bitmaps don't have functor ordinals. */
+            // bitmaps don't have functor ordinals.
             MR_fatal_error(
                 ""cannot construct bitmaps with construct.construct"");
             break;
 
         case MR_TYPECTOR_REP_EQUIV:
         case MR_TYPECTOR_REP_EQUIV_GROUND:
-            /* These should be eliminated by MR_collapse_equivalences above. */
+            // These should be eliminated by MR_collapse_equivalences above.
             MR_fatal_error(""equiv type in construct.construct"");
             break;
 
@@ -1144,18 +1267,13 @@ ML_copy_memory_cell_args(MR_Word *arg_list_ptr, MR_Word *new_data_ptr,
 #ifdef MR_INCLUDE_SWITCH_DEFAULTS
 
         default:
-            new_data = (MR_Word) 0;     /* avoid a warning */
+            new_data = (MR_Word) 0;     // avoid a warning
             MR_fatal_error(""bad type_ctor_rep in construct.construct"");
 
 #endif
-        }
+        }   // end of main switch
 
-    end_of_main_switch:
-
-        /*
-        ** Create a univ.
-        */
-
+        // Create a univ.
         MR_new_univ_on_hp(Term, type_info, new_data);
     }
 
@@ -1186,17 +1304,13 @@ construct_tuple(Args) =
     MR_TypeInfo arg_type_info;
     int         size;
 
-    /*
-    ** Construct a type_info for the tuple.
-    */
+    // Construct a type_info for the tuple.
     MR_save_transient_registers();
     type_info = MR_make_type(Arity, MR_TYPECTOR_DESC_MAKE_TUPLE(Arity),
         ArgTypes);
     MR_restore_transient_registers();
 
-    /*
-    ** Create the tuple.
-    */
+    // Create the tuple.
     if (Arity == 0) {
         new_data = (MR_Word) NULL;
     } else {
@@ -1218,9 +1332,7 @@ construct_tuple(Args) =
         MR_define_size_slot(MR_mktag(0), new_data, size);
     }
 
-    /*
-    ** Create a univ.
-    */
+    // Create a univ.
     MR_new_univ_on_hp(Term, type_info, new_data);
 }").
 

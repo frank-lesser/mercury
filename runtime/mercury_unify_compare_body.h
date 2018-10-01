@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 2000-2005, 2007, 2011 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014-2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // This file contains a piece of code that is included by mercury_ho_call.c
 // six times:
@@ -169,14 +169,14 @@ start_label:
   #ifdef  select_compare_code
                 const MR_DuFunctorDesc  *x_functor_desc;
                 const MR_DuFunctorDesc  *y_functor_desc;
-                const MR_DuPtagLayout   *x_ptaglayout;
-                const MR_DuPtagLayout   *y_ptaglayout;
+                const MR_DuPtagLayout   *x_ptag_layout;
+                const MR_DuPtagLayout   *y_ptag_layout;
   #else
                 MR_Word                 x_ptag;
                 MR_Word                 y_ptag;
                 MR_Word                 x_sectag;
                 MR_Word                 y_sectag;
-                const MR_DuPtagLayout   *ptaglayout;
+                const MR_DuPtagLayout   *ptag_layout;
   #endif
                 MR_Word                 *x_data_value;
                 MR_Word                 *y_data_value;
@@ -203,23 +203,31 @@ start_label:
 
   #define MR_find_du_functor_desc(data, data_value, functor_desc)             \
                 do {                                                          \
-                    const MR_DuPtagLayout   *ptaglayout;                      \
+                    const MR_DuPtagLayout   *ptag_layout;                     \
                     int                     ptag;                             \
                     int                     sectag;                           \
                                                                               \
                     ptag = MR_tag(data);                                      \
-                    ptaglayout = &MR_type_ctor_layout(type_ctor_info).        \
+                    ptag_layout = &MR_type_ctor_layout(type_ctor_info).       \
                         MR_layout_du[ptag];                                   \
                     data_value = (MR_Word *) MR_body(data, ptag);             \
                                                                               \
-                    switch (ptaglayout->MR_sectag_locn) {                     \
-                        case MR_SECTAG_LOCAL:                                 \
+                    switch (ptag_layout->MR_sectag_locn) {                    \
+                        case MR_SECTAG_LOCAL_REST_OF_WORD:                    \
                             sectag = MR_unmkbody(data_value);                 \
                             break;                                            \
-                        case MR_SECTAG_REMOTE:                                \
+                        case MR_SECTAG_LOCAL_BITS:                            \
+                            sectag = MR_unmkbody(data_value) &                \
+                                ((1 << ptag_layout->MR_sectag_numbits) - 1);  \
+                            break;                                            \
+                        case MR_SECTAG_REMOTE_FULL_WORD:                      \
                             sectag = data_value[0];                           \
                             break;                                            \
-                        case MR_SECTAG_NONE:                                  \
+                        case MR_SECTAG_REMOTE_BITS:                           \
+                            sectag = data_value[0] &                          \
+                                ((1 << ptag_layout->MR_sectag_numbits) - 1);  \
+                            break;                                            \
+                        case MR_SECTAG_NONE:             /* fall-though */    \
                         case MR_SECTAG_NONE_DIRECT_ARG:                       \
                             sectag = 0;                                       \
                             break;                                            \
@@ -233,7 +241,8 @@ start_label:
                                 "unrecognised sectag locn");                  \
                     }                                                         \
                                                                               \
-                    functor_desc = ptaglayout->MR_sectag_alternatives[sectag];\
+                    functor_desc =                                            \
+                        ptag_layout->MR_sectag_alternatives[sectag];          \
                 } while (0)
 
                 MR_find_du_functor_desc(x, x_data_value, x_functor_desc);
@@ -264,15 +273,47 @@ start_label:
                     return_unify_answer(builtin, user_by_rtti, 0, MR_FALSE);
                 }
 
-                ptaglayout = &MR_type_ctor_layout(type_ctor_info).
+                ptag_layout = &MR_type_ctor_layout(type_ctor_info).
                     MR_layout_du[x_ptag];
                 x_data_value = (MR_Word *) MR_body(x, x_ptag);
                 y_data_value = (MR_Word *) MR_body(y, y_ptag);
 
-                switch (ptaglayout->MR_sectag_locn) {
-                    case MR_SECTAG_LOCAL:
+                switch (ptag_layout->MR_sectag_locn) {
+                    case MR_SECTAG_LOCAL_REST_OF_WORD:
                         x_sectag = MR_unmkbody(x_data_value);
                         y_sectag = MR_unmkbody(y_data_value);
+
+                        if (x_sectag == y_sectag) {
+                            return_unify_answer(builtin, user_by_rtti, 0,
+                                MR_TRUE);
+                        } else {
+                            return_unify_answer(builtin, user_by_rtti, 0,
+                                MR_FALSE);
+                        }
+
+                        break;
+
+                    case MR_SECTAG_LOCAL_BITS:
+                        {
+                            MR_Word x_sectag_word;
+                            MR_Word y_sectag_word;
+
+                            x_sectag_word = MR_unmkbody(x_data_value);
+                            y_sectag_word = MR_unmkbody(y_data_value);
+
+                            if (x_sectag_word != y_sectag_word) {
+                                return_unify_answer(builtin, user_by_rtti, 0,
+                                    MR_FALSE);
+                            }
+
+                            x_sectag = x_sectag_word &
+                                ((1 << ptag_layout->MR_sectag_numbits) - 1);
+                        }
+                        break;
+
+                    case MR_SECTAG_REMOTE_FULL_WORD:
+                        x_sectag = x_data_value[0];
+                        y_sectag = y_data_value[0];
 
                         if (x_sectag != y_sectag) {
                             return_unify_answer(builtin, user_by_rtti, 0,
@@ -281,9 +322,11 @@ start_label:
 
                         break;
 
-                    case MR_SECTAG_REMOTE:
-                        x_sectag = x_data_value[0];
-                        y_sectag = y_data_value[0];
+                    case MR_SECTAG_REMOTE_BITS:
+                        x_sectag = x_data_value[0] &
+                            ((1 << ptag_layout->MR_sectag_numbits) - 1);
+                        y_sectag = y_data_value[0] &
+                            ((1 << ptag_layout->MR_sectag_numbits) - 1);
 
                         if (x_sectag != y_sectag) {
                             return_unify_answer(builtin, user_by_rtti, 0,
@@ -302,7 +345,7 @@ start_label:
                             "attempt get functor desc of variable");
                 }
 
-                functor_desc = ptaglayout->MR_sectag_alternatives[x_sectag];
+                functor_desc = ptag_layout->MR_sectag_alternatives[x_sectag];
   #endif // select_compare_code
 
                 switch (functor_desc->MR_du_functor_sectag_locn) {
@@ -338,19 +381,27 @@ start_label:
       #endif
                     break;
 
-                case MR_SECTAG_REMOTE:
+                case MR_SECTAG_REMOTE_FULL_WORD:
                     cur_slot = 1;
                     // The work is done after the switch.
                     break;
 
                 case MR_SECTAG_NONE:
-                case MR_SECTAG_LOCAL:
                     cur_slot = 0;
                     // The work is done after the switch.
                     break;
 
+                case MR_SECTAG_REMOTE_BITS:     // fall through
+                case MR_SECTAG_LOCAL_BITS:
+                    MR_fatal_error("packed with sectag in du switch NYI");
+                    break;
+
+                case MR_SECTAG_LOCAL_REST_OF_WORD:
+                    // This case should have been handled in full above.
+                    MR_fatal_error("MR_SECTAG_LOCAL_REST_OF_WORD in du switch");
+
                 default:
-                    MR_fatal_error("bad sectag location in direct arg switch");
+                    MR_fatal_error("bad sectag location in du switch");
                 }
 
                 arity = functor_desc->MR_du_functor_orig_arity;
@@ -405,6 +456,12 @@ start_label:
                 for (i = 0; i < arity; i++) {
                     MR_TypeInfo arg_type_info;
 
+                    // XXX This code is like the expansion of
+                    // MR_get_arg_type_info(type_info, functor_desc,
+                    //     x_data_value, i);
+                    // but with save/restore of transient hp.
+                    // Either that macro should have the same save/restore,
+                    // or this code does not need it.
                     if (MR_arg_type_may_contain_var(functor_desc, i)) {
                         MR_save_transient_hp();
                         arg_type_info = MR_create_type_info_maybe_existq(
@@ -418,6 +475,7 @@ start_label:
                     }
   #ifdef  select_compare_code
                     MR_save_transient_registers();
+                    // XXX The code below is wrong for packed args.
     #ifdef include_compare_rep_code
                     result = MR_generic_compare_representation(arg_type_info,
                         x_data_value[cur_slot], y_data_value[cur_slot]);

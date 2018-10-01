@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1995-2007, 2009, 2011-2012 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2015-2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // Definitions of the types defining the type_ctor_infos, type_infos,
 // pseudo_type_infos, base_typeclass_infos and typeclass_infos generated
@@ -31,7 +31,6 @@
 //      library/builtin.m
 //      library/private_builtin.m
 //      library/type_desc.m
-//      runtime/mercury_bootstrap.c
 //          (for updating the hand-written RTTI structures)
 //
 // Both kinds of changes will of course also require changes to the code
@@ -42,6 +41,8 @@
 //      runtime/mercury_type_info.c
 //      library/type_desc.m
 //
+//      runtime/mercury_dotnet.cs.in
+//          (for updating the C# backend RTTI structures)
 //      java/ *.java
 //          (for updating the Java backend RTTI structures)
 //
@@ -51,7 +52,7 @@
 #ifndef MERCURY_TYPE_INFO_H
 #define MERCURY_TYPE_INFO_H
 
-#include "mercury_std.h"    // for `MR_STRINGIFY', `MR_PASTEn' and MR_CALL
+#include "mercury_std.h"        // for `MR_STRINGIFY', `MR_PASTEn' and MR_CALL
 #include "mercury_types.h"      // for `MR_Word'
 #include "mercury_tags.h"       // for `MR_DEFINE_BUILTIN_ENUM_CONST'
 #include "mercury_hlc_types.h"  // for `MR_Mercury_Type_Info'
@@ -786,12 +787,12 @@ typedef struct {
     const MR_TypeClassConstraint    *MR_exist_constraints;
 } MR_DuExistInfo;
 
-// This type describes the implementation of a function symbol
+// The MR_DuFunctorDesc type describes the implementation of a function symbol
 // from a (proper) discriminated union type, whether it has standard
 // or user-defined-equality.
 //
 // Functor descriptors are reachable from both the layout and functor tables.
-// They all the information one may need about the function symbol, even
+// They have all the information one may need about the function symbol, even
 // though some of this information may be redundant along some access paths.
 //
 // The fields that you are likely to be interested in when you arrive at the
@@ -802,8 +803,16 @@ typedef struct {
 //
 // The primary and secondary fields give the corresponding tag values, and
 // the sectag_locn field gives the location of the secondary tag.
-// MR_SECTAG_NONE_DIRECT_ARG is a sub-case of MR_SECTAG_NONE, where the
-// function symbol is represented as a tagged pointer to its only argument.
+// MR_SECTAG_REMOTE_* means the secondary tag is stored in the first word
+// of the memory cell being pointed to; MR_SECTAG_LOCAL_* means it is stored
+// next to the primary tag itself. MR_SECTAG_{REMOTE,LOCAL}_BITS means that
+// at least *some* of the function symbols whose representation includes
+// the given primary tag value have subword-sized arguments packed
+// next to (and starting immediately after) the secondary tag, while
+// MR_SECTAG_{REMOTE_FULL_WORD,LOCAL_REST_OF_WORD} means that this is
+// never the case. MR_SECTAG_NONE_DIRECT_ARG is a sub-case of MR_SECTAG_NONE,
+// where the function symbol is represented as a tagged pointer to its
+// only argument.
 //
 // The ordinal field gives the position of the function symbol in the
 // list of function symbols of the type; one function symbol compares
@@ -842,25 +851,43 @@ typedef struct {
 // If any argument contains subtype information (for example, higher order
 // mode information) then the subtype_info field will be
 // MR_DU_SUBTYPE_INFO_EXISTS, otherwise it will be MR_DU_SUBTYPE_INFO_NONE.
+//
+// If the secondary tag location is MR_SECTAG_{REMOTE,LOCAL}_BITS, then the
+// num_sectag_bits will specify *how many* bits the secondary tag occupies,
+// either at the start of the first word of the remote memory cell
+// (for MR_SECTAG_REMOTE_BITS) or immediately after the primary tag
+// (for MR_SECTAG_LOCAL_BITS).
 
 typedef enum {
     MR_DEFINE_BUILTIN_ENUM_CONST(MR_SECTAG_NONE),
     MR_DEFINE_BUILTIN_ENUM_CONST(MR_SECTAG_NONE_DIRECT_ARG),
     MR_DEFINE_BUILTIN_ENUM_CONST(MR_SECTAG_LOCAL),
     MR_DEFINE_BUILTIN_ENUM_CONST(MR_SECTAG_REMOTE),
-    MR_DEFINE_BUILTIN_ENUM_CONST(MR_SECTAG_VARIABLE)
+    MR_DEFINE_BUILTIN_ENUM_CONST(MR_SECTAG_VARIABLE),
+    MR_DEFINE_BUILTIN_ENUM_CONST(MR_SECTAG_LOCAL_BITS),
+    MR_DEFINE_BUILTIN_ENUM_CONST(MR_SECTAG_REMOTE_BITS),
+    MR_SECTAG_LOCAL_REST_OF_WORD = MR_SECTAG_LOCAL,
+    MR_SECTAG_REMOTE_FULL_WORD = MR_SECTAG_REMOTE,
 } MR_Sectag_Locn;
 
 typedef struct {
     MR_int_least16_t        MR_arg_offset;
-    // The MR_arg_offset is the offset of this argument *from the
-    // part of the cell containing the arguments*; it is *not* measured
-    // from the start of the cell itself. The difference is that the
-    // arguments may be preceded by a remote secondary tag, and by
+    // In the normal case, the MR_arg_offset is the offset of this argument
+    // *from the part of the cell containing the arguments*; it is *not*
+    // measured from the start of the cell itself. The difference is that
+    // the arguments may be preceded by a remote secondary tag, and by
     // type_infos and/or typeclass_infos added by polymorphism.m.
     // XXX The runtime mostly wants the offset from the start of the cell,
     // so we should consider changing this. However, any such change
     // would require a nontrivial bootstrapping sequence.
+    //
+    // In the special case of subword-sized arguments that are packed
+    // next to a remote secondary tag (MR_SECTAG_REMOTE_BITS), the value of
+    // the MR_arg_offset field will be -1.
+    // In the special case of subword-sized arguments that are packed
+    // next to a local secondary tag (MR_SECTAG_LOCAL_BITS), the value of
+    // the MR_arg_offset field will be -2.
+
     MR_int_least8_t         MR_arg_shift;
     MR_int_least8_t         MR_arg_bits;
     // If MR_arg_bits is 0, then the argument occupies the entire word
@@ -872,10 +899,11 @@ typedef struct {
     // fall into two categories: positive and negative.
     //
     // A strictly positive value of MR_arg_bits means that the argument
-    // is a value of an enum type packed into a word with other sub-word-sized
-    // arguments. To get the value of this argument, shift the word at
-    // the offset given by MR_arg_offset by MR_arg_shift bits to the right
-    // and mask off the bottom MR_arg_bits bits.
+    // is either a char or a value of an enum type, and is packed into
+    // a word with other sub-word-sized arguments. To get the value of
+    // this argument, shift the word at the offset given by MR_arg_offset
+    // by MR_arg_shift bits to the right and mask off the bottom MR_arg_bits
+    // bits.
     //
     // The strictly negative values of MR_arg_bits fall into three
     // subcategories.
@@ -947,6 +975,7 @@ typedef struct {
     const MR_DuArgLocn      *MR_du_functor_arg_locns;
     const MR_DuExistInfo    *MR_du_functor_exist_info;
     MR_FunctorSubtype       MR_du_functor_subtype;
+    MR_int_least8_t         MR_du_functor_num_sectag_bits;
 } MR_DuFunctorDesc;
 
 typedef const MR_DuFunctorDesc              *MR_DuFunctorDescPtr;
@@ -1037,6 +1066,18 @@ typedef struct {
     MR_int_least32_t                MR_sectag_sharers;
     MR_Sectag_Locn                  MR_sectag_locn;
     const MR_DuFunctorDesc * const *MR_sectag_alternatives;
+    // numbits = -1 means rest-of-word (for local) or full-word (for remote).
+    int8_t                          MR_sectag_numbits;
+    // XXX ARG_PACK The numbits field should be before MR_sectag_alternatives,
+    // but that requires nontrivial bootstrapping. The locn field should
+    // also be something like a uint8_t, while the num_sharers field
+    // should be MR_uint_least32_t (or MR_uint_least16_t, if want to make
+    // a practical limit official).
+    // XXX ARG_PACK We should consider storing the value of the sectag mask
+    // ((1 << ptag_layout->MR_sectag_numbits) - 1) here, to avoid having to
+    // compute it potentially millions of times. It could be stored either as
+    // a MR_uint_least32_t or as a MR_uint_least16_t, depending on how
+    // conservative we want to be.
 } MR_DuPtagLayout;
 
 typedef const MR_DuPtagLayout *MR_DuTypeLayout;

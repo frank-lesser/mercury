@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 2003-2005, 2007, 2009, 2011 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2016-2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_term_size.c
 //
@@ -85,10 +85,10 @@ try_again:
                 case MR_SECTAG_NONE_DIRECT_ARG:
                      // The compiler should not generate direct arg tags
                      // in term size recording grades.
-
                      MR_fatal_error("MR_term_size: DIRECT_ARG");
 
-                case MR_SECTAG_LOCAL:
+                case MR_SECTAG_LOCAL_REST_OF_WORD:  // fall-through
+                case MR_SECTAG_LOCAL_BITS:
 #ifdef MR_DEBUG_TERM_SIZES
                     if (MR_heapdebug && MR_lld_print_enabled) {
                         printf("MR_term_size: du sectag local %p\n",
@@ -97,7 +97,8 @@ try_again:
 #endif
                     return 0;
 
-                case MR_SECTAG_REMOTE:
+                case MR_SECTAG_REMOTE_WORD:         // fall-through
+                case MR_SECTAG_REMOTE_BITS:
 #ifdef MR_DEBUG_TERM_SIZES
                     sectag = MR_field(MR_mktag(ptag), term, 0);
 

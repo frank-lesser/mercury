@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1998-2002, 2004-2006, 2011 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014-2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_memory_zones.h
 //
@@ -198,6 +198,10 @@ struct MR_MemoryZonesFree_Struct {
     #endif
   #endif
 
+// MR_protect_pages() is currently only a wrapper around mprotect() so callers
+// may expect errno to be set appropriately on error to provide better error
+// messages. If MR_protect_pages() gains another implementation then it may be
+// necessary to update callers to not depend on errno being set.
 extern int      MR_protect_pages(void *addr, size_t size, int prot_flags);
 
 #endif

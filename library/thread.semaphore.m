@@ -2,9 +2,8 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2000-2001,2003-2004, 2006-2007, 2009-2011 The University of Melbourne.
-% Copyright (C) 2014 The Mercury Team.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2014-2018 The Mercury Team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: thread.semaphore.m.
@@ -193,10 +192,8 @@ impure_init(Semaphore) :-
     pthread_mutex_init(&(sem->lock), MR_MUTEX_ATTR);
 #endif
 
-    /*
-    ** The condvar and the mutex will need to be destroyed
-    ** when the semaphore is garbage collected.
-    */
+    // The condvar and the mutex will need to be destroyed
+    // when the semaphore is garbage collected.
     MR_GC_register_finalizer(sem, ML_finalize_semaphore, NULL);
 
     Semaphore = sem;
@@ -259,7 +256,7 @@ ML_finalize_semaphore(void *obj, void *cd)
 
 #ifndef MR_HIGHLEVEL_CODE
     if (sem->count >= 0 && sem->suspended_head != NULL) {
-        /* Reschedule the context at the start of the queue. */
+        // Reschedule the context at the start of the queue.
         ctxt = sem->suspended_head;
         sem->suspended_head = ctxt->MR_ctxt_next;
         if (sem->suspended_tail == ctxt) {
@@ -269,8 +266,8 @@ ML_finalize_semaphore(void *obj, void *cd)
         MR_UNLOCK(&(sem->lock), ""semaphore.signal"");
         MR_schedule_context(ctxt);
 
-        /* yield() */
-        /* This context switch can be done more directly and faster */
+        // yield()
+        // This context switch can be done more directly and faster.
         MR_save_context(MR_ENGINE(MR_eng_this_context));
       #ifdef ML_THREAD_AVOID_LABEL_ADDRS
         MR_ENGINE(MR_eng_this_context)->MR_ctxt_resume =
@@ -291,7 +288,7 @@ ML_finalize_semaphore(void *obj, void *cd)
         sem->count++;
         MR_UNLOCK(&(sem->lock), ""semaphore.signal"");
 
-        /* yield() */
+        // yield()
         MR_save_context(MR_ENGINE(MR_eng_this_context));
       #ifdef ML_THREAD_AVOID_LABEL_ADDRS
         MR_ENGINE(MR_eng_this_context)->MR_ctxt_resume =
@@ -363,7 +360,7 @@ ML_finalize_semaphore(void *obj, void *cd)
     } else {
         MR_save_context(MR_ENGINE(MR_eng_this_context));
 
-        /* Put the current context at the end of the queue. */
+        // Put the current context at the end of the queue.
         ctxt = MR_ENGINE(MR_eng_this_context);
       #ifdef ML_THREAD_AVOID_LABEL_ADDRS
         ctxt->MR_ctxt_resume = MR_ENTRY(mercury__thread__semaphore__nop);
@@ -380,7 +377,7 @@ ML_finalize_semaphore(void *obj, void *cd)
         }
         MR_UNLOCK(&(sem->lock), ""semaphore.wait"");
 
-        /* Make the current engine do something else. */
+        // Make the current engine do something else.
         MR_ENGINE(MR_eng_this_context) = NULL;
         MR_idle();
 
@@ -390,15 +387,14 @@ ML_finalize_semaphore(void *obj, void *cd)
     }
 #else
     while (sem->count <= 0) {
-        /*
-        ** Although it goes against the spec, pthread_cond_wait() can
-        ** return prematurely with the error code EINTR in glibc 2.3.2
-        ** if the thread is sent a signal.
-        */
+        // Although it goes against the spec, pthread_cond_wait() can return
+        // prematurely with the error code EINTR in glibc 2.3.2
+        // if the thread is sent a signal.
+
         while (MR_COND_WAIT(&(sem->cond), &(sem->lock), ""semaphore.wait"")
             != 0)
         {
-            /* do nothing */
+            // do nothing
         }
     }
 
@@ -427,10 +423,8 @@ ML_finalize_semaphore(void *obj, void *cd)
     impure_wait(Semaphore::in),
     [will_not_call_mercury, thread_safe],
 "
-    /*
-    ** acquire() might be useful as well; it will throw an exception if the
-    ** thread is interrupted.
-    */
+    // acquire() might be useful as well; it will throw an exception
+    // if the thread is interrupted.
     Semaphore.acquireUninterruptibly();
 ").
 
@@ -515,7 +509,7 @@ INIT mercury_sys_init_semaphore_modules
 
 #endif
 
-    /* forward decls to suppress gcc warnings */
+    // Forward decls to suppress gcc warnings.
     void mercury_sys_init_semaphore_modules_init(void);
     void mercury_sys_init_semaphore_modules_init_type_tables(void);
     #ifdef  MR_DEEP_PROFILING
@@ -532,14 +526,14 @@ INIT mercury_sys_init_semaphore_modules
 
     void mercury_sys_init_semaphore_modules_init_type_tables(void)
     {
-        /* no types to register */
+        // No types to register.
     }
 
     #ifdef  MR_DEEP_PROFILING
     void mercury_sys_init_semaphore_modules_write_out_proc_statics(
         FILE *deep_fp, FILE *procrep_fp)
     {
-        /* no proc_statics to write out */
+        // No proc_statics to write out.
     }
     #endif
 ").

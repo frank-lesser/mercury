@@ -2,8 +2,8 @@
 % vim: ts=4 sw=4 et ft=mercury
 %---------------------------------------------------------------------------%
 % Copyright (C) 1993-2007, 2009-2014 The University of Melbourne.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2013-2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % This module imports all the modules in the Mercury library.
@@ -204,10 +204,9 @@
 "
     MR_ConstString version_string = MR_VERSION;
     MR_ConstString fullarch_string = MR_FULLARCH;
-    /*
-    ** Cast away const needed here, because Mercury declares Version
-    ** with type MR_String rather than MR_ConstString.
-    */
+
+    // Cast away const needed here, because Mercury declares Version
+    // with type MR_String rather than MR_ConstString.
     Version = (MR_String) (MR_Word) version_string;
     Fullarch = (MR_String) (MR_Word) fullarch_string;
 ").

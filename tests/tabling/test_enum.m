@@ -34,8 +34,8 @@ main(!IO) :-
 
 test(Cond, In, !IO) :-
     Out = get_start_state(Cond, In),
-    io__write(Cond, !IO),
-    io__format(" %d: %d\n", [i(In), i(Out)], !IO).
+    io.write(Cond, !IO),
+    io.format(" %d: %d\n", [i(In), i(Out)], !IO).
 
 :- pragma no_inline(get_start_state/2).
 :- pragma memo(get_start_state/2).
@@ -57,6 +57,6 @@ get_start_state(StartCond, Anchor) = State :-
     test_exec(In::in, Out::out),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    printf(""test_exec %d\\n"", In);
+    printf(""test_exec %"" MR_INTEGER_LENGTH_MODIFIER ""d\\n"", In);
     Out = In + 1;
 ").

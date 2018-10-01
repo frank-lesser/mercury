@@ -2,8 +2,8 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2009-2010 The University of Melbourne.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2013-2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: calendar.m.
@@ -13,7 +13,7 @@
 % Proleptic Gregorian calendar utilities.
 %
 % The Gregorian calendar is the calendar that is currently used by most of
-% the world. In this calendar a year is a leap year if it is divisible by
+% the world. In this calendar, a year is a leap year if it is divisible by
 % 4, but not divisible by 100. The only exception is if the year is divisible
 % by 400, in which case it is a leap year. For example 1900 is not leap year,
 % while 2000 is. The proleptic Gregorian calendar is an extension of the

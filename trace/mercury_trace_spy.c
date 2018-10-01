@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1998-2002, 2005-2008, 2011 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014-2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // This file contains code to manage spy points for both
 // the internal and external debuggers.
@@ -23,14 +23,6 @@
 #include "mdb.cterm.mh"
 
 #include <stdlib.h>
-
-#if defined(MR_HAVE__SNPRINTF) && ! defined(MR_HAVE_SNPRINTF)
-  #define snprintf  _snprintf
-#endif
-
-#if defined(MR_HAVE_SNPRINTF) || defined(MR_HAVE__SNPRINTF)
-  #define MR_HAVE_A_SNPRINTF
-#endif
 
 const char      *MR_spy_when_names[] =
 {
@@ -735,29 +727,14 @@ MR_add_line_spy_point(MR_SpyAction action, MR_SpyIgnore_When ignore_when,
         }
 
         // There were no matching labels.
-#ifdef  MR_HAVE_A_SNPRINTF
         if (num_file_matches == 0) {
-            snprintf(MR_error_msg_buf, MR_ERROR_MSG_BUF_SIZE,
+            MR_snprintf(MR_error_msg_buf, MR_ERROR_MSG_BUF_SIZE,
                 "there is no debuggable source file named %s", filename);
         } else {
-            snprintf(MR_error_msg_buf, MR_ERROR_MSG_BUF_SIZE,
+            MR_snprintf(MR_error_msg_buf, MR_ERROR_MSG_BUF_SIZE,
                 "there is no event at line %d in %s",
                 linenumber, filename);
         }
-#else
-        // Not absolutely safe, but the risk of overflow is minimal.
-        if (num_file_matches == 0) {
-            sprintf(MR_error_msg_buf,
-                "there is no debuggable source file named %s", filename);
-        } else {
-            sprintf(MR_error_msg_buf,
-                "there is no event at line %d in file %s",
-                linenumber, filename);
-        }
-        if (strlen(MR_error_msg_buf) >= MR_ERROR_MSG_BUF_SIZE) {
-            MR_fatal_error("MR_add_line_spy_point: buf overflow");
-        }
-#endif
         *problem = MR_error_msg_buf;
         return -1;
     }

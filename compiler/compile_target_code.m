@@ -625,16 +625,6 @@ gather_grade_defines(Globals, GradeDefines) :-
         RecordTermSizesOpt = ""
     ),
 
-    globals.get_tags_method(Globals, Tags_Method),
-    (
-        Tags_Method = tags_high,
-        TagsOpt = "-DMR_HIGHTAGS "
-    ;
-        ( Tags_Method = tags_low
-        ; Tags_Method = tags_none
-        ),
-        TagsOpt = ""
-    ),
     globals.lookup_int_option(Globals, num_ptag_bits, NumPtagBits),
     string.int_to_string(NumPtagBits, NumPtagBitsString),
     NumPtagBitsOpt = "-DMR_TAGBITS=" ++ NumPtagBitsString ++ " ",
@@ -803,7 +793,7 @@ gather_grade_defines(Globals, GradeDefines) :-
         ProfileCallsOpt, ProfileTimeOpt,
         ProfileMemoryOpt, ProfileDeepOpt,
         RecordTermSizesOpt,
-        TagsOpt, NumPtagBitsOpt,
+        NumPtagBitsOpt,
         ExtendOpt,
         LL_DebugOpt, DeclDebugOpt,
         SourceDebugOpt,
@@ -2978,14 +2968,13 @@ create_csharp_exe_or_lib(Globals, ErrorStream, LinkTargetType, MainModuleName,
 
     % Converts the given filename into a format acceptable to the C# compiler.
     %
-    % This is because the MS C# compiler only allows \ as the path separator,
-    % so we convert all / into \ when using the MC C# compiler.
+    % Older MS C# compilers only allowed \ as the path separator, so we convert
+    % all / into \ when using an MS C# compiler on Windows.
     %
 :- func csharp_file_name(env_type, csharp_compiler_type, file_name)
     = file_name.
 
-csharp_file_name(env_type_posix, csharp_microsoft, _FileName) =
-    unexpected($module, $pred, "microsoft c# compiler in posix env").
+csharp_file_name(env_type_posix, csharp_microsoft, FileName) = FileName.
 csharp_file_name(env_type_posix, csharp_mono, Filename) = Filename.
 csharp_file_name(env_type_posix, csharp_unknown, Filename) = Filename.
 

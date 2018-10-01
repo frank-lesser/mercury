@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1998, 2001-2004, 2006 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // All the functions in this file work around problems caused by
 // our use of global registers conflicting with the use of registers
@@ -14,15 +14,19 @@
 
 #ifdef  MR_CAN_DO_PENDING_IO
 
-  #ifdef MR_BZERO_NEEDS_STRINGS_HEADER
-    #include <strings.h>
-  #endif
+#ifdef MR_BZERO_NEEDS_STRINGS_HEADER
+  #include <strings.h>
+#endif
 
-#include <sys/types.h>  // for fd_set and FD_ZERO()
-#include <sys/time.h>   // for FD_ZERO()
+#ifdef MR_HAVE_SYS_SELECT_H
+  #include <sys/select.h>   // for select() -- POSIX
+#endif
+
+#include <sys/types.h>      // for fd_set and FD_ZERO()
+#include <sys/time.h>       // for FD_ZERO()
 
 #ifdef MR_HAVE_UNISTD_H
-  #include <unistd.h>   // for FD_ZERO()
+  #include <unistd.h>       // for FD_ZERO()
 #endif
 
 void

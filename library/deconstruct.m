@@ -2,8 +2,8 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2002-2007 The University of Melbourne.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2014-2015, 2017-2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: deconstruct.m.
@@ -74,10 +74,15 @@
     %     handled as if it had standard equality.
     %   - for integers, the string is a base 10 number;
     %     positive integers have no sign.
-    %   - for floats, the string is a floating point, base 10 number;
-    %     positive floating point numbers have no sign.
-    %   - for strings, the string, inside double quotation marks
-    %   - for characters, the character inside single quotation marks
+    %   - for finite floats, the string is a base 10 floating point number;
+    %     positive floating point numbers have no sign;
+    %     for infinite floats, the string "infinity" or "-infinity".
+    %   - for strings, the string, inside double quotation marks using
+    %     backslash escapes if necessary and backslash or octal escapes for
+    %     all characters for which char.is_control/1 is true.
+    %   - for characters, the character inside single quotation marks using
+    %     a backslash escape if necssary and a backslash or octal escape for
+    %     for all characters for which char.is_control/1 is true.
     %   - for predicates, the string <<predicate>>, and for functions,
     %     the string <<function>>, except with include_details_cc,
     %     in which case it will be the predicate or function name.
@@ -867,7 +872,7 @@ univ_named_arg_idcc(Term, Name, DummyUniv, Argument, Success) :-
 #define ARITY_ARG               Arity
 #define ARGUMENTS_ARG           Arguments
 #define NONCANON                MR_NONCANON_ABORT
-/* This comment tells the compiler to define MR_ALLOC_ID. */
+// This comment tells the compiler to define MR_ALLOC_ID.
 #include ""mercury_ml_deconstruct_body.h""
 #undef  EXPAND_INFO_TYPE
 #undef  EXPAND_INFO_CALL
@@ -893,7 +898,7 @@ univ_named_arg_idcc(Term, Name, DummyUniv, Argument, Success) :-
 #define ARITY_ARG               Arity
 #define ARGUMENTS_ARG           Arguments
 #define NONCANON                MR_NONCANON_ALLOW
-/* This comment tells the compiler to define MR_ALLOC_ID. */
+// This comment tells the compiler to define MR_ALLOC_ID.
 #include ""mercury_ml_deconstruct_body.h""
 #undef  EXPAND_INFO_TYPE
 #undef  EXPAND_INFO_CALL
@@ -919,7 +924,7 @@ univ_named_arg_idcc(Term, Name, DummyUniv, Argument, Success) :-
 #define ARITY_ARG               Arity
 #define ARGUMENTS_ARG           Arguments
 #define NONCANON                MR_NONCANON_CC
-/* This comment tells the compiler to define MR_ALLOC_ID. */
+// This comment tells the compiler to define MR_ALLOC_ID.
 #include ""mercury_ml_deconstruct_body.h""
 #undef  EXPAND_INFO_TYPE
 #undef  EXPAND_INFO_CALL
@@ -947,7 +952,7 @@ univ_named_arg_idcc(Term, Name, DummyUniv, Argument, Success) :-
 #define ARGUMENTS_ARG           Arguments
 #define NONCANON                MR_NONCANON_ABORT
 #define SAVE_SUCCESS
-/* This comment tells the compiler to define MR_ALLOC_ID. */
+// This comment tells the compiler to define MR_ALLOC_ID.
 #include ""mercury_ml_deconstruct_body.h""
 #undef  EXPAND_INFO_TYPE
 #undef  EXPAND_INFO_CALL
@@ -976,7 +981,7 @@ univ_named_arg_idcc(Term, Name, DummyUniv, Argument, Success) :-
 #define ARGUMENTS_ARG           Arguments
 #define NONCANON                MR_NONCANON_ALLOW
 #define SAVE_SUCCESS
-/* This comment tells the compiler to define MR_ALLOC_ID. */
+// This comment tells the compiler to define MR_ALLOC_ID.
 #include ""mercury_ml_deconstruct_body.h""
 #undef  EXPAND_INFO_TYPE
 #undef  EXPAND_INFO_CALL
@@ -1004,7 +1009,7 @@ univ_named_arg_idcc(Term, Name, DummyUniv, Argument, Success) :-
     #define ARITY_ARG           Arity
     #define ARGUMENTS_ARG       Arguments
     #define NONCANON            MR_NONCANON_CC
-    /* This comment tells the compiler to define MR_ALLOC_ID. */
+    // This comment tells the compiler to define MR_ALLOC_ID.
     #include ""mercury_ml_deconstruct_body.h""
     #undef  EXPAND_INFO_TYPE
     #undef  EXPAND_INFO_CALL
@@ -1017,12 +1022,10 @@ univ_named_arg_idcc(Term, Name, DummyUniv, Argument, Success) :-
     #undef  NONCANON
 
     if (!success) {
-        /*
-        ** Fill in some dummy values, to ensure that we don't try to return
-        ** uninitialized memory to Mercury. It doesn't matter what we put here,
-        ** except that we must have Arity > MaxArity. The casts cast away
-        ** const.
-        */
+        // Fill in some dummy values, to ensure that we don't try to return
+        // uninitialized memory to Mercury. It doesn't matter what we put here,
+        // except that we must have Arity > MaxArity. The casts cast away
+        // const.
 
         Arity = MaxArity + 1;
         Functor = (MR_String) (MR_Integer) """";

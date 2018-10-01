@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1998-2001, 2003-2006, 2008, 2010-2011 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // This file contains code for printing statistics about stack frame sizes,
 // and for manipulating the generator stack, the cut stack and the pneg stack.
@@ -1095,7 +1095,7 @@ MR_pneg_enter_else(const char *context)
                 len = strlen(context) + strlen(msg) + 10;
                 buf = malloc(len);
                 if (buf != NULL) {
-                    snprintf(buf, len, "%s: %s", context, msg);
+                    MR_snprintf(buf, len, "%s: %s", context, msg);
                     MR_fatal_error(buf);
                 } else {
                     MR_fatal_error(msg);

@@ -32,8 +32,8 @@
     % Generate efficient indexing code for tag based switches.
     %
 :- pred ml_generate_tag_switch(list(tagged_case)::in, prog_var::in,
-    code_model::in, can_fail::in, prog_context::in, list(mlds_stmt)::out,
-    ml_gen_info::in, ml_gen_info::out) is det.
+    code_model::in, can_fail::in, packed_word_map::in, prog_context::in,
+    list(mlds_stmt)::out, ml_gen_info::in, ml_gen_info::out) is det.
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
@@ -49,7 +49,7 @@
 :- import_module ml_backend.ml_code_util.
 :- import_module ml_backend.ml_simplify_switch.
 :- import_module ml_backend.ml_switch_gen.
-:- import_module ml_backend.ml_unify_gen.
+:- import_module ml_backend.ml_unify_gen_util.
 :- import_module ml_backend.ml_util.
 
 :- import_module assoc_list.
@@ -58,18 +58,19 @@
 :- import_module pair.
 :- import_module require.
 :- import_module set.
+:- import_module uint8.
 :- import_module unit.
 
 :- type code_map == map(case_id, maybe_code).
 
 :- type maybe_code
     --->    immediate(mlds_stmt)
-    ;       generate(hlds_goal).
+    ;       generate(packed_word_map, hlds_goal).
 
 %---------------------------------------------------------------------------%
 
-ml_generate_tag_switch(TaggedCases, Var, CodeModel, CanFail, Context,
-        Stmts, !Info) :-
+ml_generate_tag_switch(TaggedCases, Var, CodeModel, CanFail,
+        EntryPackedArgsMap, Context, Stmts, !Info) :-
     % Generate the rval for the primary tag.
     ml_gen_var(!.Info, Var, VarLval),
     VarRval = ml_lval(VarLval),
@@ -82,7 +83,8 @@ ml_generate_tag_switch(TaggedCases, Var, CodeModel, CanFail, Context,
     ml_gen_info_get_module_info(!.Info, ModuleInfo),
     ml_variable_type(!.Info, Var, Type),
     get_ptag_counts(Type, ModuleInfo, MaxPrimary, PtagCountMap),
-    group_cases_by_ptag(TaggedCases, gen_tagged_case_code(CodeModel),
+    group_cases_by_ptag(TaggedCases,
+        gen_tagged_case_code(CodeModel, EntryPackedArgsMap),
         map.init, CodeMap, unit, _, !Info, _CaseIdPtagsMap, PtagCaseMap),
     order_ptags_by_count(PtagCountMap, PtagCaseMap, PtagCaseList),
     % The code generation scheme that we use below can duplicate the code of a
@@ -111,21 +113,22 @@ ml_generate_tag_switch(TaggedCases, Var, CodeModel, CanFail, Context,
     ml_switch_generate_default(CanFail, CodeModel, Context, Default, !Info),
 
     % Package up the results into a switch statement.
-    Range = mlds_switch_range(0, MaxPrimary),
-    SwitchStmt0 = ml_stmt_switch(mlds_native_int_type, PtagRval, Range,
-        PtagCases, Default, Context),
+    Range = mlds_switch_range(0, uint8.cast_to_int(MaxPrimary)),
+    SwitchStmt0 = ml_stmt_switch(mlds_builtin_type_int(int_type_int),
+        PtagRval, Range, PtagCases, Default, Context),
     ml_simplify_switch(SwitchStmt0, SwitchStmt, !Info),
     Stmts = [SwitchStmt].
 
-:- pred gen_tagged_case_code(code_model::in, tagged_case::in,
-    case_id::out, code_map::in, code_map::out, unit::in, unit::out,
-    ml_gen_info::in, ml_gen_info::out) is det.
+:- pred gen_tagged_case_code(code_model::in, packed_word_map::in,
+    tagged_case::in, case_id::out, code_map::in, code_map::out,
+    unit::in, unit::out, ml_gen_info::in, ml_gen_info::out) is det.
 
-gen_tagged_case_code(CodeModel, TaggedCase, CaseId, !CodeMap, !Unit,
-        Info0, Info) :-
+gen_tagged_case_code(CodeModel, EntryPackedArgsMap, TaggedCase, CaseId,
+        !CodeMap, !Unit, Info0, Info) :-
+    ml_gen_info_set_packed_word_map(EntryPackedArgsMap, Info0, Info1),
     TaggedCase = tagged_case(_MainTaggedConsId, OtherTaggedConsIds,
         CaseId, Goal),
-    ml_gen_goal_as_branch_block(CodeModel, Goal, Stmt, Info0, Info1),
+    ml_gen_goal_as_branch_block(CodeModel, Goal, Stmt, Info1, Info2),
     % Do not allow the generated code to be literally duplicated if it contains
     % labels. Rather, we will regenerate the code at every point it is required
     % so that the labels are unique.
@@ -133,11 +136,11 @@ gen_tagged_case_code(CodeModel, TaggedCase, CaseId, !CodeMap, !Unit,
         OtherTaggedConsIds = [_ | _],
         statement_contains_label(Stmt)
     then
-        MaybeCode = generate(Goal),
-        Info = Info0
+        MaybeCode = generate(EntryPackedArgsMap, Goal),
+        Info = Info1
     else
         MaybeCode = immediate(Stmt),
-        Info = Info1
+        Info = Info2
     ),
     map.det_insert(CaseId, MaybeCode, !CodeMap).
 
@@ -159,7 +162,7 @@ find_any_split_cases(CaseIdPtagsMap, IsAnyCaseSplit) :-
     map.foldl(find_any_split_cases_2, CaseIdPtagsMap,
         no_case_is_split_between_ptags, IsAnyCaseSplit).
 
-:- pred find_any_split_cases_2(case_id::in, set(int)::in,
+:- pred find_any_split_cases_2(case_id::in, set(ptag)::in,
     is_a_case_split_between_ptags::in, is_a_case_split_between_ptags::out)
     is det.
 
@@ -215,8 +218,10 @@ gen_ptag_case(PtagCase, CodeMap, Var, CanFail, CodeModel, PtagCountMap,
             unexpected($pred, "more than one goal for non-shared tag")
         )
     ;
-        ( SecTagLocn = sectag_local
-        ; SecTagLocn = sectag_remote
+        ( SecTagLocn = sectag_local_rest_of_word
+        ; SecTagLocn = sectag_local_bits(_, _)
+        ; SecTagLocn = sectag_remote_word
+        ; SecTagLocn = sectag_remote_bits(_, _)
         ),
         expect(unify(OtherPtags, []), $pred, ">1 ptag with secondary tag"),
         (
@@ -255,7 +260,9 @@ gen_ptag_case(PtagCase, CodeMap, Var, CanFail, CodeModel, PtagCountMap,
 
 :- func make_ptag_match(ptag) = mlds_case_match_cond.
 
-make_ptag_match(Ptag) = match_value(ml_const(mlconst_int(Ptag))).
+make_ptag_match(Ptag) = Cond :-
+    Ptag = ptag(PtagUint8),
+    Cond = match_value(ml_const(mlconst_int(uint8.cast_to_int(PtagUint8)))).
 
 :- pred lookup_code_map(code_map::in, case_id::in, code_model::in,
     mlds_stmt::out, ml_gen_info::in, ml_gen_info::out) is det.
@@ -265,7 +272,8 @@ lookup_code_map(CodeMap, CaseId, CodeModel, Stmt, !Info) :-
     (
         MaybeCode = immediate(Stmt)
     ;
-        MaybeCode = generate(Goal),
+        MaybeCode = generate(EntryPackedArgsMap, Goal),
+        ml_gen_info_set_packed_word_map(EntryPackedArgsMap, !Info),
         ml_gen_goal_as_branch_block(CodeModel, Goal, Stmt, !Info)
     ).
 
@@ -308,23 +316,33 @@ build_stag_rev_map([Entry | Entries], !RevMap) :-
 %---------------------------------------------------------------------------%
 
 :- pred gen_stag_switch(assoc_list(case_id, stags)::in,
-    code_map::in, int::in, sectag_locn::in, prog_var::in,
+    code_map::in, ptag::in, sectag_locn::in, prog_var::in,
     code_model::in, can_fail::in, prog_context::in, mlds_stmt::out,
     ml_gen_info::in, ml_gen_info::out) is det.
 
-gen_stag_switch(Cases, CodeMap, PrimaryTag, StagLocn, Var, CodeModel,
+gen_stag_switch(Cases, CodeMap, Ptag, StagLocn, Var, CodeModel,
         CanFail, Context, Stmt, !Info) :-
     % Generate the rval for the secondary tag.
     ml_variable_type(!.Info, Var, VarType),
     ml_gen_var(!.Info, Var, VarLval),
     VarRval = ml_lval(VarLval),
     (
-        StagLocn = sectag_local,
+        StagLocn = sectag_local_rest_of_word,
         StagRval = ml_unop(unmkbody, VarRval)
     ;
-        StagLocn = sectag_remote,
+        StagLocn = sectag_local_bits(_, Mask),
+        StagRval = ml_binop(bitwise_and(int_type_uint),
+            ml_unop(unmkbody, VarRval), ml_const(mlconst_uint(Mask)))
+    ;
+        StagLocn = sectag_remote_word,
         ml_gen_secondary_tag_rval(!.Info, VarType, VarRval,
-            PrimaryTag, StagRval)
+            Ptag, StagRval)
+    ;
+        StagLocn = sectag_remote_bits(_, Mask),
+        ml_gen_secondary_tag_rval(!.Info, VarType, VarRval,
+            Ptag, StagWordRval),
+        StagRval = ml_binop(bitwise_and(int_type_uint),
+            StagWordRval, ml_const(mlconst_uint(Mask)))
     ;
         ( StagLocn = sectag_none
         ; StagLocn = sectag_none_direct_arg
@@ -339,8 +357,8 @@ gen_stag_switch(Cases, CodeMap, PrimaryTag, StagLocn, Var, CodeModel,
 
     % Package up the results into a switch statement.
     Range = mlds_switch_range_unknown, % XXX could do better
-    SwitchStmt = ml_stmt_switch(mlds_native_int_type, StagRval, Range,
-        StagCases, Default, Context),
+    SwitchStmt = ml_stmt_switch(mlds_builtin_type_int(int_type_int),
+        StagRval, Range, StagCases, Default, Context),
     ml_simplify_switch(SwitchStmt, Stmt, !Info).
 
 %---------------------------------------------------------------------------%

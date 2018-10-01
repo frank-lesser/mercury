@@ -2,8 +2,7 @@
 
 // Copyright (C) 1995-2007, 2009-2011 The University of Melbourne.
 // Copyright (C) 2014, 2016-2018 The Mercury team.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_context.c - handles multithreading stuff.
 
@@ -70,6 +69,7 @@ ENDINIT
 #include "mercury_engine.h"             // for `MR_memdebug'
 #include "mercury_threadscope.h"        // for data types and posting events
 #include "mercury_reg_workarounds.h"    // for `MR_fd*' stuff
+#include "mercury_runtime_util.h"
 
 #ifdef MR_PROFILE_PARALLEL_EXECUTION_SUPPORT
 #define MR_PROFILE_PARALLEL_EXECUTION_FILENAME "parallel_execution_profile.txt"
@@ -1605,7 +1605,9 @@ MR_check_pending_contexts(MR_bool block)
 {
 #ifdef  MR_CAN_DO_PENDING_IO
     int                 err;
-    int                 max_id;
+    char                errbuf[MR_STRERROR_BUF_SIZE];
+    int                 max_fd;
+    int                 num_fds;
     int                 n_ids;
     fd_set              rd_set0;
     fd_set              wr_set0;
@@ -1620,33 +1622,43 @@ MR_check_pending_contexts(MR_bool block)
         return 0;
     }
 
+    // The following code (and the select interface in general) assumes that
+    // relevant file descriptors are all < FD_SETSIZE, but some systems allow
+    // the file descriptor limit to be raised higher.
+    // Fixing this potential problem is not a high priority as pending I/O is
+    // not actually implemented.
+
     MR_fd_zero(&rd_set0);
     MR_fd_zero(&wr_set0);
     MR_fd_zero(&ex_set0);
-    max_id = -1;
+    max_fd = -1;
     for (pctxt = MR_pending_contexts ; pctxt ; pctxt = pctxt -> next) {
         if (pctxt->waiting_mode & MR_PENDING_READ) {
-            if (max_id > pctxt->fd) {
-                max_id = pctxt->fd;
+            if (max_fd > pctxt->fd) {
+                max_fd = pctxt->fd;
             }
             FD_SET(pctxt->fd, &rd_set0);
         }
         if (pctxt->waiting_mode & MR_PENDING_WRITE) {
-            if (max_id > pctxt->fd) {
-                max_id = pctxt->fd;
+            if (max_fd > pctxt->fd) {
+                max_fd = pctxt->fd;
             }
             FD_SET(pctxt->fd, &wr_set0);
         }
         if (pctxt->waiting_mode & MR_PENDING_EXEC) {
-            if (max_id > pctxt->fd) {
-                max_id = pctxt->fd;
+            if (max_fd > pctxt->fd) {
+                max_fd = pctxt->fd;
             }
             FD_SET(pctxt->fd, &ex_set0);
         }
     }
-    max_id++;
 
-    if (max_id == 0) {
+    // If max_fd is still -1, then we have no file descriptors.
+    // If max_fd is not -1, then we *do* some file descriptors.
+    // Their numbers can range from 0 to max_fd, which encompasses
+    // max_fd+1 possible file descriptors.
+    num_fds = max_fd + 1;
+    if (num_fds == 0) {
         MR_fatal_error("no fd's set!");
     }
 
@@ -1655,7 +1667,7 @@ MR_check_pending_contexts(MR_bool block)
             rd_set = rd_set0;
             wr_set = wr_set0;
             ex_set = ex_set0;
-            err = select(max_id, &rd_set, &wr_set, &ex_set, NULL);
+            err = select(num_fds, &rd_set, &wr_set, &ex_set, NULL);
         } while (err == -1 && MR_is_eintr(errno));
     } else {
         do {
@@ -1664,12 +1676,13 @@ MR_check_pending_contexts(MR_bool block)
             ex_set = ex_set0;
             timeout.tv_sec = 0;
             timeout.tv_usec = 0;
-            err = select(max_id, &rd_set, &wr_set, &ex_set, &timeout);
+            err = select(num_fds, &rd_set, &wr_set, &ex_set, &timeout);
         } while (err == -1 && MR_is_eintr(errno));
     }
 
     if (err < 0) {
-        MR_fatal_error("select failed!");
+        MR_fatal_error("select failed: %s",
+            MR_strerror(errno, errbuf, sizeof(errbuf)));
     }
 
     n_ids = 0;

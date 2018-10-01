@@ -749,7 +749,7 @@ the representation of every type used by the module being compiled:
     platforms where they don't fit in words) and the packing of data structures
     as densely as possible.
 
-    Once the representations of all types are known, this module uses
+    Once the representations of all types are known, this module invokes
     add_special_pred.m to declare, and if need be, define the unify and compare
     predicate of each type.
 
@@ -1148,9 +1148,15 @@ so that the compiler does the right thing for options such as
 
 <dt> constraint based mode analysis
 <dd>
-    This is an experimental alternative to the usual mode analysis algorithm.
-    It works by building a system of boolean constraints about where
-    (parts of) variables can be bound, and then solving those constraints.
+    This was an experimental alternative to the usual mode analysis algorithm.
+    It worked by building a system of boolean constraints about where
+    (parts of) variables can be bound, and then solving those constraints
+    using reduced ordered binary decision diagrams (robdds).
+    It has been abandoned in favor of the propagation based constraint
+    solver, for two main reasons. First, its performance was far too dependent
+    on finding a good ordering of variables for the robdds, and we found
+    no heuristics that could ensure such an ordering. And second, even with
+    the best orderings, the performance left a lot to be desired.
 
     <ul>
     <li>
@@ -1194,6 +1200,17 @@ so that the compiler does the right thing for options such as
     <li>
         mcsolver.m contains the constraint solver used by
         ordering_mode_constraints.m.
+    <li>
+        goal_mode.m is intended to help implement the transition
+        from the original mode analysis algorithm implemented by modes.m
+        and related modules to the propagation based constraint solver.
+        It is intended to represent an interface between mode analysis
+        on the one hand, and the rest of the compiler on the other hand,
+        that is sufficiently abstract that it could be implemented on top of
+        both mode analysis systems. Initially, it will be implemented
+        on top of the old mode analysis system. Once the rest of the compiler
+        is transitioned to use this interface, we will transition its
+        implementation to the propagation based constraint solver.
     </ul>
     <p>
 
@@ -1809,7 +1826,8 @@ or perform LLDS-specific transformations on the HLDS:
     <li>
         par_conj_gen.m (parallel conjunctions)
     <li>
-        unify_gen.m (unifications)
+        unify_gen.m, unify_gen_construct.m, unify_gen_deconstruct.m,
+        unify_gen_test.m and unify_gen_util.m (unifications)
     <li>
         closure_gen.m (creating closures)
     <li>
@@ -2073,7 +2091,7 @@ information used for code generation:
 </ul>
 
 <p>
-For the MLDS back-end, we've tried to keep the code generator simple.
+For the MLDS back-end, we have tried to keep the code generator simple.
 So we prefer to do things as HLDS to HLDS transformations where possible,
 rather than complicating the HLDS to MLDS code generator.
 Thus we have a pass which transforms the HLDS to handle trailing:
@@ -2104,7 +2122,9 @@ Thus we have a pass which transforms the HLDS to handle trailing:
 
     <ul>
     <li>
-        ml_unify_gen.m
+        ml_unify_gen.m and its subcontractors ml_unify_gen_construct.m,
+        ml_unify_gen_deconstruct.m, ml_unify_gen_test.m, and
+        ml_unify_gen_util.m,
     <li>
         ml_closure_gen.m
     <li>
@@ -2171,58 +2191,57 @@ There are currently three backends that generate code from MLDS:
 one generates C/C++ code,
 one generates Java,
 and one generates C#.
+There is also a module, mlds_dump.m,
+that dumps out the MLDS in format designed specifically for debugging.
 
+<p>
+The various mlds_to_c_*.m modules together convert MLDS to C/C++ code,
+the various mlds_to_cs_*.m modules together convert it to C# code, while
+the various mlds_to_java_*.m modules together convert it to Java code.
+
+<p>
+Generated C or C# code is intended to be given to a C or C# compiler
+to turn the .c file into a .o file, or the .cs file into a .dll or .exe.
+Generated Java code is intended to be given to a Java compiler (normally javac)
+to turn the .java file into a .class file containing Java bytecodes.
+
+<p>
 <ul>
 <li>
-The various mlds_to_c_*.m modules together convert MLDS to C/C++ code.
-<ul>
-<li>
-The mlds_to_c_file.m module writes out .c and .h files,
+The mlds_to_{c,cs,java}_file.m modules write out
+.c and .h files (for C), .cs files (for C#) and .java files (for Java),
 calling the other modules below as needed.
 <li>
-The mlds_to_c_func.m module outputs
+The mlds_to_{c,cs,java}_func.m modules output
 the declarations and definitions of MLDS functions.
 <li>
-The mlds_to_c_stmt.m module outputs MLDS statements.
+The mlds_to_{c,cs,java}_stmt.m modules output MLDS statements.
 <li>
-The mlds_to_c_data.m module outputs MLDS rvals, lvals, and initializers.
+The mlds_to_{c,cs,java}_data.m modules output
+MLDS rvals, lvals, and initializers.
 <li>
-The mlds_to_c_type.m module outputs MLDS types.
+The mlds_to_{c,cs,java}_type.m modules output MLDS types.
 <li>
-The mlds_to_c_class.m module outputs the definitions of MLDS classes.
+The mlds_to_{c,cs,java}_class.m modules output the definitions of MLDS classes.
 <li>
-The mlds_to_c_global.m module outputs
+The mlds_to_{c,cs,java}_global.m modules output
 the declarations and definitions of global variables.
 <li>
-The mlds_to_c_exports.m module outputs code that exports to C
-(i.e. makes usable from C code) functions and types defined in Mercury.
+The mlds_to_{c,cs,java}_export.m modules output code
+that exports to C, C# or Java (i.e. makes usable from those languages)
+functions and types defined in Mercury.
 <li>
-The mlds_to_c_name.m module outputs the names of various MLDS entities.
+The mlds_to_{c,cs,java}_name.m modules output
+the names of various MLDS entities.
 <li>
-The mlds_to_c_util.m module contains utility types and predicates
+The mlds_to_java_wrap.m module creates wrapper classes around methods
+as way of implementing function pointers.
+<li>
+The mlds_to_{c,cs,java}_util.m modules contain utility types and predicates
 used by the other modules above.
 </ul>
-</ul>
 
 <p>
-
-<ul>
-<li>
-mlds_to_java.m converts MLDS to Java and writes it to a .java file.
-</ul>
-
-After the Java code has been emitted, a Java compiler (normally javac)
-is invoked to turn the .java file into a .class file containing Java bytecodes.
-
-<p>
-
-<ul>
-<li>
-mlds_to_cs.m converts MLDS to C# code.
-</ul>
-
-After the C# code has been emitted, a C# compiler is invoked to turn the .cs
-file into a .dll or .exe.
 
 The mlds_to_target_util.m module contains types, functions and predicates
 that are needed by more than one of these MLDS backends.
@@ -2367,11 +2386,6 @@ This module is part of the transform_hlds.m package.
 The following modules are part of the backend_libs.m package.
 
 <dl>
-<dt> arg_pack:
-<dd>
-    This module defines utility routines to do with argument
-    packing.
-
 <dt> builtin_ops:
 <dd>
     This module defines the types unary_op and binary_op

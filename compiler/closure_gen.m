@@ -29,7 +29,7 @@
     % This predicate constructs or extends a closure.
     % The structure of closures is defined in runtime/mercury_ho_call.h.
     %
-:- pred generate_closure(pred_id::in, proc_id::in, lambda_eval_method::in,
+:- pred construct_closure(pred_id::in, proc_id::in, lambda_eval_method::in,
     prog_var::in, list(prog_var)::in, hlds_goal_info::in, llds_code::out,
     code_info::in, code_info::out, code_loc_dep::in, code_loc_dep::out) is det.
 
@@ -70,7 +70,7 @@
 
 %---------------------------------------------------------------------------%
 
-generate_closure(PredId, ProcId, EvalMethod, Var, Args, GoalInfo, Code,
+construct_closure(PredId, ProcId, EvalMethod, Var, Args, GoalInfo, Code,
         !CI, !CLD) :-
     get_module_info(!.CI, ModuleInfo),
     module_info_get_preds(ModuleInfo, Preds),
@@ -176,20 +176,20 @@ generate_new_closure_from_old(Var, CallPred, CallArgs, GoalInfo, Code,
     NewClosureCode = from_list([
         llds_instr(comment("build new closure from old closure"), ""),
         llds_instr(
-            assign(NumOldArgs, lval(field(yes(0), OldClosure, Two))),
+            assign(NumOldArgs, lval(field(yes(ptag(0u8)), OldClosure, Two))),
             "get number of arguments"),
         llds_instr(incr_hp(NewClosure, no, no,
             binop(int_add(int_type_int), lval(NumOldArgs),
                 NumNewArgsPlusThree_Rval),
             MaybeAllocId, NewClosureMayUseAtomic, no, no_llds_reuse),
             "allocate new closure"),
-        llds_instr(assign(field(yes(0), lval(NewClosure), Zero),
-            lval(field(yes(0), OldClosure, Zero))),
+        llds_instr(assign(field(yes(ptag(0u8)), lval(NewClosure), Zero),
+            lval(field(yes(ptag(0u8)), OldClosure, Zero))),
             "set closure layout structure"),
-        llds_instr(assign(field(yes(0), lval(NewClosure), One),
-            lval(field(yes(0), OldClosure, One))),
+        llds_instr(assign(field(yes(ptag(0u8)), lval(NewClosure), One),
+            lval(field(yes(ptag(0u8)), OldClosure, One))),
             "set closure code pointer"),
-        llds_instr(assign(field(yes(0), lval(NewClosure), Two),
+        llds_instr(assign(field(yes(ptag(0u8)), lval(NewClosure), Two),
             binop(int_add(int_type_int), lval(NumOldArgs),
                 NumNewArgs_Rval)),
             "set new number of arguments"),
@@ -200,15 +200,15 @@ generate_new_closure_from_old(Var, CallPred, CallArgs, GoalInfo, Code,
         llds_instr(assign(LoopCounter, Three),
             "initialize loop counter"),
         % It is possible for the number of hidden arguments to be zero,
-        % in which case the body of this loop should not be executed
-        % at all. This is why we jump to the loop condition test.
+        % in which case the body of this loop should not be executed at all.
+        % This is why we jump to the loop condition test.
         llds_instr(goto(code_label(LoopTest)),
             "enter the copy loop at the conceptual top"),
         llds_instr(label(LoopStart),
             "start of loop, nofulljump"),
         llds_instr(
-            assign(field(yes(0), lval(NewClosure), lval(LoopCounter)),
-                lval(field(yes(0), OldClosure, lval(LoopCounter)))),
+            assign(field(yes(ptag(0u8)), lval(NewClosure), lval(LoopCounter)),
+                lval(field(yes(ptag(0u8)), OldClosure, lval(LoopCounter)))),
             "copy old hidden argument"),
         llds_instr(
             assign(LoopCounter,
@@ -246,8 +246,7 @@ generate_closure_from_scratch(ModuleInfo, PredId, ProcId, PredInfo, ProcInfo,
     Context = goal_info_get_context(GoalInfo),
     term.context_file(Context, FileName),
     term.context_line(Context, LineNumber),
-    GoalId = goal_info_get_goal_id(GoalInfo),
-    GoalId = goal_id(GoalIdNum),
+    goal_id(GoalIdNum) = goal_info_get_goal_id(GoalInfo),
     GoalIdStr = string.int_to_string(GoalIdNum),
     get_proc_label(!.CI, CallerProcLabel),
     get_next_closure_seq_no(SeqNo, !CI),
@@ -271,7 +270,7 @@ generate_closure_from_scratch(ModuleInfo, PredId, ProcId, PredInfo, ProcInfo,
     list.length(ArgsF, NumArgsF),
     NumArgsRF = encode_num_generic_call_vars(NumArgsR, NumArgsF),
     list.append(ArgsR, ArgsF, ArgsRF),
-    Vector = [
+    CellArgs = [
         cell_arg_full_word(ClosureLayoutRval, complete),
         cell_arg_full_word(CodeAddrRval, complete),
         cell_arg_full_word(const(llconst_int(NumArgsRF)), complete)
@@ -281,9 +280,9 @@ generate_closure_from_scratch(ModuleInfo, PredId, ProcId, PredInfo, ProcInfo,
     % something which is not construct_in_region(_).
     HowToConstruct = construct_dynamically,
     MaybeSize = no,
-    maybe_add_alloc_site_info(Context, "closure", length(Vector),
+    maybe_add_alloc_site_info(Context, "closure", length(CellArgs),
         MaybeAllocId, !CI),
-    assign_cell_to_var(Var, no, 0, Vector, HowToConstruct,
+    assign_cell_to_var(Var, no, ptag(0u8), CellArgs, HowToConstruct,
         MaybeSize, MaybeAllocId, MayUseAtomic, Code, !CI, !CLD).
 
 :- pred generate_extra_closure_args(list(prog_var)::in, lval::in,
@@ -293,12 +292,11 @@ generate_closure_from_scratch(ModuleInfo, PredId, ProcId, PredInfo, ProcInfo,
 generate_extra_closure_args([], _, _, empty, _CI, !CLD).
 generate_extra_closure_args([Var | Vars], LoopCounter, NewClosure, Code,
         CI, !CLD) :-
-    FieldLval = field(yes(0), lval(NewClosure), lval(LoopCounter)),
+    FieldLval = field(yes(ptag(0u8)), lval(NewClosure), lval(LoopCounter)),
     IsDummy = variable_is_of_dummy_type(CI, Var),
     (
         IsDummy = is_dummy_type,
-        ProduceCode = empty,
-        AssignCode = singleton(
+        ProduceAssignCode = singleton(
             llds_instr(assign(FieldLval, const(llconst_int(0))),
                 "set new argument field (dummy type)")
         )
@@ -308,7 +306,8 @@ generate_extra_closure_args([Var | Vars], LoopCounter, NewClosure, Code,
         AssignCode = singleton(
             llds_instr(assign(FieldLval, Value),
                 "set new argument field")
-        )
+        ),
+        ProduceAssignCode = ProduceCode ++ AssignCode
     ),
     IncrCode = singleton(
         llds_instr(assign(LoopCounter,
@@ -316,9 +315,10 @@ generate_extra_closure_args([Var | Vars], LoopCounter, NewClosure, Code,
                 const(llconst_int(1)))),
             "increment argument counter")
     ),
+    VarCode = ProduceAssignCode ++ IncrCode,
     generate_extra_closure_args(Vars, LoopCounter, NewClosure, VarsCode,
         CI, !CLD),
-    Code = ProduceCode ++ AssignCode ++ IncrCode ++ VarsCode.
+    Code = VarCode ++ VarsCode.
 
 :- pred generate_pred_args(code_info::in, vartypes::in, list(prog_var)::in,
     list(arg_info)::in, list(cell_arg)::out, list(cell_arg)::out,

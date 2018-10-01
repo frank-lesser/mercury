@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1998-2009,2012 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2013-2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_stack_trace.c - implements stack traces.
 //
@@ -16,10 +16,6 @@
 #include "mercury_trace_base.h"
 #include "mercury_tabling.h"
 #include <stdio.h>
-
-#if defined(MR_HAVE__SNPRINTF) && ! defined(MR_HAVE_SNPRINTF)
-  #define snprintf  _snprintf
-#endif
 
 static int          MR_compare_proc_layout_ptrs(
                         const void *pl1, const void *pl2);
@@ -1391,7 +1387,7 @@ MR_traverse_nondet_stack_from_layout(MR_Word *base_maxfr,
                     MR_traverse_nondet_stack_frame, &func_info,
                     level_number, base_maxfr);
                 if (problem != NULL) {
-                    MR_fatal_error(problem);
+                    MR_fatal_error("%s", problem);
                 }
             }
         }
@@ -1441,7 +1437,7 @@ MR_init_nondet_branch_infos(MR_Word *base_maxfr,
         result = MR_stack_walk_step(proc_layout, &label_layout,
             &stack_pointer, &current_frame, &reused_frames, &problem);
         if (result == MR_STEP_ERROR_BEFORE || result == MR_STEP_ERROR_AFTER) {
-            MR_fatal_error(problem);
+            MR_fatal_error("%s", problem);
         }
 
     } while (label_layout != NULL);
@@ -1965,9 +1961,9 @@ MR_print_call_trace_info(FILE *fp, const MR_ProcLayout *proc_layout,
             // Do not print the context id, since it is not standardized.
             event_num = MR_standardize_event_num(event_num);
             call_num = MR_standardize_call_num(call_num);
-            snprintf(buf, 64, "E%lu", event_num);
+            MR_snprintf(buf, 64, "E%lu", event_num);
             fprintf(fp, "%7s ", buf);
-            snprintf(buf, 64, "C%lu", call_num);
+            MR_snprintf(buf, 64, "C%lu", call_num);
             fprintf(fp, "%7s ", buf);
             fprintf(fp, "%4lu ", depth);
         } else {

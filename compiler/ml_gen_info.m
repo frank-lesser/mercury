@@ -106,6 +106,85 @@
 :- pred ml_gen_info_new_conv_var(conv_seq::out,
     ml_gen_info::in, ml_gen_info::out) is det.
 
+:- type bitfield
+    --->    bitfield(arg_shift, arg_num_bits, fill_kind).
+            % A bitfield inside a packed argument word. It is defined by
+            % its position, size and the nature of the value inside it.
+
+:- type bitfield_value
+    --->    bv_var(prog_var)
+    ;       bv_rval(mlds_rval)
+    ;       bv_const(uint).
+
+:- type filled_bitfield
+    --->    filled_bitfield(bitfield, bitfield_value).
+
+:- type packed_word == one_or_more(bitfield).
+:- type filled_packed_word == one_or_more(filled_bitfield).
+
+    % get_unfilled_filled_packed_words(HeadFilledBitfield, TailFilledBitfields,
+    %     PackedWord, FilledPackedWord):
+    %
+    % Given a word containing [HeadFilledBitfield | TailFilledBitfields],
+    % return its filled_packed_word representation as FilledPackedWord,
+    % and its unfilled version (obtaining by simply throwing away the value
+    % of every bitfield) as PackedWord.
+    %
+:- pred get_unfilled_filled_packed_words(
+    filled_bitfield::in, list(filled_bitfield)::in,
+    packed_word::out, filled_packed_word::out) is det.
+
+    % A filled_packed_word is an instance of a packed_word if it has
+    % the exact same sequence of bitfields inside it, but with a value
+    % in each bitfield. We record the rval where the filled in instance
+    % is available.
+:- type packed_word_instance
+    --->    packed_word_instance(filled_packed_word, mlds_rval).
+
+    % Given a packed word represented as a sequence of bitfields,
+    % return a list of the different ways in which we have seen those
+    % bitfields have been filled, with each way being accompanied
+    % by the rval that stores the resulting word value.
+    %
+    % We support three different ways to specify a packed word.
+    %
+    % - Packed word scheme 1 contains two or more arguments packed into
+    %   one word in a memory cell, with the first being apw_partial_first
+    %   and the others being apw_partial_shifted.
+    %
+    % - Packed word scheme 2 contains a remote secondary tag and one or more
+    %   arguments packed into the first word in a memory cell, with the first
+    %   bitfield being the remote sectag and the rest being the arguments,
+    %   which must all be apw_partial_shifted.
+    %
+    % - Packed word scheme 3 contains a primary tag, a local secondary tag
+    %   and one or more arguments packed into a word (which need not be
+    %   in memory, but could be in a register), with the first bitfield
+    %   being the *combined* ptag and sectag, and rest being the arguments,
+    %   which again must all be apw_partial_shifted.
+    %
+    % Some rules apply to all three schemes:
+    %
+    % - All three schemes require the bitfields involved to be nonoverlapping.
+    % - All imply that any bits not covered by any of the bitfields
+    %   will be zeroes.
+    % - None of them contain any bitfields for apw_none_shifted arguments,
+    %   since those bitfields would contain zero bits.
+    % - In all three cases, the arguments should be in the list in ascending
+    %   order of argument number, which means that they should be in
+    %   *descending* order of offset. This rule applies *only* to the bitfields
+    %   containing arguments: a bitfield contain a tag or tags always has
+    %   to be at the front of the list, even though it will always have
+    %   the lowest offset.
+    %   
+:- type packed_word_map == map(packed_word, one_or_more(packed_word_instance)).
+
+    % Generate a new unique `ml_packed_args' variable. Such compiler-generated
+    % variables hold the packed-together values of two or more user variables.
+    %
+:- pred ml_gen_info_new_packed_word_var(mlds_compiler_var::out,
+    ml_gen_info::in, ml_gen_info::out) is det.
+
 :- type ml_ground_term
     --->    ml_ground_term(
                 % The value of the ground term.
@@ -367,6 +446,7 @@
                 mgti_aux_var_counter        :: counter,
                 mgti_cond_var_counter       :: counter,
                 mgti_conv_var_counter       :: counter,
+                mgti_packed_word_counter    :: counter,
                 mgti_tail_rec_info          :: tail_rec_info
             ).
 
@@ -427,7 +507,7 @@
 :- pred ml_gen_info_get_nondet_copy_out(ml_gen_info::in, bool::out) is det.
 :- pred ml_gen_info_get_use_atomic_cells(ml_gen_info::in, bool::out) is det.
 :- pred ml_gen_info_get_profile_memory(ml_gen_info::in, bool::out) is det.
-:- pred ml_gen_info_get_num_ptag_bits(ml_gen_info::in, int::out) is det.
+:- pred ml_gen_info_get_num_ptag_bits(ml_gen_info::in, uint8::out) is det.
 :- pred ml_gen_info_get_const_struct_map(ml_gen_info::in,
     map(int, ml_ground_term)::out) is det.
 :- pred ml_gen_info_get_var_lvals(ml_gen_info::in,
@@ -440,6 +520,8 @@
     tail_rec_info::out) is det.
 :- pred ml_gen_info_get_byref_output_vars(ml_gen_info::in,
     set_of_progvar::out) is det.
+:- pred ml_gen_info_get_packed_word_map(ml_gen_info::in,
+    packed_word_map::out) is det.
 
 :- pred ml_gen_info_set_const_var_map(map(prog_var, ml_ground_term)::in,
     ml_gen_info::in, ml_gen_info::out) is det.
@@ -461,6 +543,8 @@
     ml_gen_info::in, ml_gen_info::out) is det.
 :- pred ml_gen_info_set_byref_output_vars(set_of_progvar::in,
     ml_gen_info::in, ml_gen_info::out) is det.
+:- pred ml_gen_info_set_packed_word_map(packed_word_map::in,
+    ml_gen_info::in, ml_gen_info::out) is det.
 
 %---------------------------------------------------------------------------%
 
@@ -472,6 +556,7 @@
 :- import_module int.
 :- import_module stack.
 :- import_module string.
+:- import_module uint8.
 
 %---------------------------------------------------------------------------%
 
@@ -520,6 +605,24 @@ ml_gen_info_new_conv_var(conv_seq(ConvNum), !Info) :-
     ml_gen_info_get_conv_var_counter(!.Info, ConvCounter0),
     counter.allocate(ConvNum, ConvCounter0, ConvCounter),
     ml_gen_info_set_conv_var_counter(ConvCounter, !Info).
+
+get_unfilled_filled_packed_words(HeadFilledBitfield, TailFilledBitfields,
+        PackedWord, FilledPackedWord) :-
+    HeadBitfield = get_unfilled_bitfield(HeadFilledBitfield),
+    TailBitfields = list.map(get_unfilled_bitfield, TailFilledBitfields),
+    PackedWord = one_or_more(HeadBitfield, TailBitfields),
+    FilledPackedWord = one_or_more(HeadFilledBitfield, TailFilledBitfields).
+
+:- func get_unfilled_bitfield(filled_bitfield) = bitfield.
+
+get_unfilled_bitfield(FilledBitfield) = Bitfield :-
+    FilledBitfield = filled_bitfield(Bitfield, _Value).
+
+ml_gen_info_new_packed_word_var(LocalVarName, !Info) :-
+    ml_gen_info_get_packed_word_counter(!.Info, PackedWordCounter0),
+    counter.allocate(PackedWordNum, PackedWordCounter0, PackedWordCounter),
+    LocalVarName = lvnc_packed_word(PackedWordNum),
+    ml_gen_info_set_packed_word_counter(PackedWordCounter, !Info).
 
 ml_gen_info_set_const_var(Var, GroundTerm, !Info) :-
     ml_gen_info_get_const_var_map(!.Info, ConstVarMap0),
@@ -672,14 +775,12 @@ generate_tail_rec_start_label(TsccKind, Id) = Label :-
 /*  - */        mgri_use_atomic_cells   :: bool,
 /*  - */        mgri_profile_memory     :: bool,
 
-                % Should this be an int8, to allow it to be packed
-                % with the previous block of enum fields?
-/*  6 */        mgri_num_ptag_bits      :: int,
+/*  - */        mgri_num_ptag_bits      :: uint8,
 
                 % The map of the constant ground structures generated by
                 % ml_code_gen before we start generating code for procedures. 
                 % Read-only.
-/*  7 */        mgri_const_struct_map   :: map(int, ml_ground_term),
+/*  6 */        mgri_const_struct_map   :: map(int, ml_ground_term),
 
                 % Normally, we convert each HLDS variable to its own MLDS lval
                 % each time the HLDS code refers it, using a simple
@@ -717,15 +818,15 @@ generate_tail_rec_start_label(TsccKind, Id) = Label :-
                 % of consumers.
                 %
                 % Writeable.
-/*  8 */        mgri_var_lvals          :: map(prog_var, mlds_lval),
+/*  7 */        mgri_var_lvals          :: map(prog_var, mlds_lval),
 
                 % The set of used environment variables. Writeable.
-/*  9 */        mgri_env_var_names      :: set(string),
+/*  8 */        mgri_env_var_names      :: set(string),
 
                 % The set of warnings disabled in the current scope. Writeable.
-/* 10 */        mgri_disabled_warnings  :: set(goal_warning),
+/*  9 */        mgri_disabled_warnings  :: set(goal_warning),
 
-/* 11 */        % For each procedure to whose tail calls we can apply
+/* 10 */        % For each procedure to whose tail calls we can apply
                 % tail recursion optimization, this maps the label of that
                 % procedure to (a) the information we need to generate
                 % the code to jump to the start of that procedure, and
@@ -747,14 +848,17 @@ generate_tail_rec_start_label(TsccKind, Id) = Label :-
                 % (We used to store the list of output arguments that are
                 % returned as values in another field, but we don't need that
                 % information anymore.)
-/*  1 */        mgsi_byref_output_vars  :: set_of_progvar,
+/*  1 */        mgsi_byref_output_vars      :: set_of_progvar,
 
-/*  2 */        mgsi_label_counter      :: counter,
-/*  3 */        mgsi_aux_var_counter    :: counter,
-/*  4 */        mgsi_cond_var_counter   :: counter,
+/*  2 */        mgsi_label_counter          :: counter,
+/*  3 */        mgsi_aux_var_counter        :: counter,
+/*  4 */        mgsi_cond_var_counter       :: counter,
 
-/*  5 */        mgsi_success_cont_stack :: stack(success_cont),
-/*  6 */        mgsi_func_nest_depth    :: int
+/*  5 */        mgsi_packed_word_counter    :: counter,
+/*  6 */        mgsi_packed_word_map        :: packed_word_map,
+
+/*  7 */        mgsi_success_cont_stack     :: stack(success_cont),
+/*  8 */        mgsi_func_nest_depth        :: int
             ).
 
 % Access stats for the ml_gen_info structure:
@@ -799,6 +903,7 @@ init_ml_gen_tscc_info(ModuleInfo, InSccMap, TsccKind, TsccInfo) :-
     counter.init(0, LabelCounter),
     counter.init(0, AuxVarCounter),
     counter.init(0, CondVarCounter),
+    counter.init(0, PackedWordCounter),
     counter.init(0, ConvVarCounter),
 
     module_info_get_globals(ModuleInfo, Globals),
@@ -845,10 +950,17 @@ init_ml_gen_tscc_info(ModuleInfo, InSccMap, TsccKind, TsccInfo) :-
     ),
     TailRecInfo = tail_rec_info(InSccMap, LoopKind, TsccKind),
     TsccInfo = ml_gen_tscc_info(FuncLabelCounter, LabelCounter,
-        AuxVarCounter, CondVarCounter, ConvVarCounter, TailRecInfo).
+        AuxVarCounter, CondVarCounter, PackedWordCounter, ConvVarCounter,
+        TailRecInfo).
 
 ml_gen_info_init(ModuleInfo, Target, ConstStructMap, PredProcId, ProcInfo,
         GlobalData, TsccInfo) = Info :-
+    TsccInfo = ml_gen_tscc_info(FuncLabelCounter, LabelCounter,
+        AuxVarCounter, CondVarCounter, PackedWordCounter, ConvVarCounter,
+        TailRecInfo),
+
+    proc_info_get_varset(ProcInfo, VarSet),
+    proc_info_get_vartypes(ProcInfo, VarTypes),
     module_info_get_globals(ModuleInfo, Globals),
     globals.lookup_bool_option(Globals, highlevel_data, HighLevelData),
     globals.get_gc_method(Globals, GC),
@@ -856,24 +968,11 @@ ml_gen_info_init(ModuleInfo, Target, ConstStructMap, PredProcId, ProcInfo,
     globals.lookup_bool_option(Globals, nondet_copy_out, NondetCopyOut),
     globals.lookup_bool_option(Globals, use_atomic_cells, UseAtomicCells),
     globals.lookup_bool_option(Globals, profile_memory, ProfileMemory),
-    globals.lookup_int_option(Globals, num_ptag_bits, NumPtagBits),
-
-    proc_info_get_varset(ProcInfo, VarSet),
-    proc_info_get_vartypes(ProcInfo, VarTypes),
-    set_of_var.init(ByRefOutputVars),
-
-    TsccInfo = ml_gen_tscc_info(FuncLabelCounter, LabelCounter,
-        AuxVarCounter, CondVarCounter, ConvVarCounter, TailRecInfo),
-
-    map.init(ConstVarMap),
-    stack.init(SuccContStack),
-    FuncNestDepth = 0,
+    globals.lookup_int_option(Globals, num_ptag_bits, NumPtagBitsInt),
+    NumPtagBits = uint8.det_from_int(NumPtagBitsInt),
     map.init(VarLvals),
-    ClosureWrapperDefns = [],
     set.init(EnvVarNames),
     set.init(DisabledWarnings),
-    UsedSucceededVar = no,
-
     RareInfo = ml_gen_rare_info(
         ModuleInfo,
         PredProcId,
@@ -893,14 +992,25 @@ ml_gen_info_init(ModuleInfo, Target, ConstStructMap, PredProcId, ProcInfo,
         DisabledWarnings,
         TailRecInfo
     ),
+
+    set_of_var.init(ByRefOutputVars),
+    map.init(PackedWordMap),
+    stack.init(SuccContStack),
+    FuncNestDepth = 0,
     SubInfo = ml_gen_sub_info(
         ByRefOutputVars,
         LabelCounter,
         AuxVarCounter,
         CondVarCounter,
+        PackedWordCounter,
+        PackedWordMap,
         SuccContStack,
         FuncNestDepth
     ),
+
+    map.init(ConstVarMap),
+    UsedSucceededVar = no,
+    ClosureWrapperDefns = [],
     Info = ml_gen_info(
         ConstVarMap,
         FuncLabelCounter,
@@ -948,11 +1058,14 @@ ml_gen_info_final(Info, EnvVarNames, ClosureWrapperDefns, GlobalData,
         LabelCounter,
         AuxVarCounter,
         CondVarCounter,
+        PackedWordCounter,
+        _PackedWordMap,
         _SuccContStack,
         _FuncNestDepth
     ),
     TsccInfo = ml_gen_tscc_info(FuncLabelCounter, LabelCounter,
-        AuxVarCounter, CondVarCounter, ConvVarCounter, TailRecInfo).
+        AuxVarCounter, CondVarCounter, PackedWordCounter, ConvVarCounter,
+        TailRecInfo).
 
 %---------------------------------------------------------------------------%
 
@@ -961,6 +1074,8 @@ ml_gen_info_final(Info, EnvVarNames, ClosureWrapperDefns, GlobalData,
 :- pred ml_gen_info_get_label_counter(ml_gen_info::in, counter::out) is det.
 :- pred ml_gen_info_get_aux_var_counter(ml_gen_info::in, counter::out) is det.
 :- pred ml_gen_info_get_cond_var_counter(ml_gen_info::in, counter::out) is det.
+:- pred ml_gen_info_get_packed_word_counter(ml_gen_info::in,
+    counter::out) is det.
 :- pred ml_gen_info_get_success_cont_stack(ml_gen_info::in,
     stack(success_cont)::out) is det.
 
@@ -1020,6 +1135,10 @@ ml_gen_info_get_aux_var_counter(Info, X) :-
     X = Info ^ mgi_sub_info ^ mgsi_aux_var_counter.
 ml_gen_info_get_cond_var_counter(Info, X) :-
     X = Info ^ mgi_sub_info ^ mgsi_cond_var_counter.
+ml_gen_info_get_packed_word_counter(Info, X) :-
+    X = Info ^ mgi_sub_info ^ mgsi_packed_word_counter.
+ml_gen_info_get_packed_word_map(Info, X) :-
+    X = Info ^ mgi_sub_info ^ mgsi_packed_word_map.
 ml_gen_info_get_success_cont_stack(Info, X) :-
     X = Info ^ mgi_sub_info ^ mgsi_success_cont_stack.
 ml_gen_info_get_func_nest_depth(Info, X) :-
@@ -1038,6 +1157,8 @@ ml_gen_info_get_func_nest_depth(Info, X) :-
 :- pred ml_gen_info_set_aux_var_counter(counter::in,
     ml_gen_info::in, ml_gen_info::out) is det.
 :- pred ml_gen_info_set_cond_var_counter(counter::in,
+    ml_gen_info::in, ml_gen_info::out) is det.
+:- pred ml_gen_info_set_packed_word_counter(counter::in,
     ml_gen_info::in, ml_gen_info::out) is det.
 :- pred ml_gen_info_set_success_cont_stack(stack(success_cont)::in,
     ml_gen_info::in, ml_gen_info::out) is det.
@@ -1124,6 +1245,20 @@ ml_gen_info_set_cond_var_counter(X, !Info) :-
     SubInfo0 = !.Info ^ mgi_sub_info,
     SubInfo = SubInfo0 ^ mgsi_cond_var_counter := X,
     !Info ^ mgi_sub_info := SubInfo.
+ml_gen_info_set_packed_word_counter(X, !Info) :-
+    SubInfo0 = !.Info ^ mgi_sub_info,
+    SubInfo = SubInfo0 ^ mgsi_packed_word_counter := X,
+    !Info ^ mgi_sub_info := SubInfo.
+ml_gen_info_set_packed_word_map(X, !Info) :-
+    SubInfo0 = !.Info ^ mgi_sub_info,
+    ( if
+        private_builtin.pointer_equal(X, SubInfo0 ^ mgsi_packed_word_map)
+    then
+        true
+    else
+        SubInfo = SubInfo0 ^ mgsi_packed_word_map := X,
+        !Info ^ mgi_sub_info := SubInfo
+    ).
 ml_gen_info_set_success_cont_stack(X, !Info) :-
     SubInfo0 = !.Info ^ mgi_sub_info,
     SubInfo = SubInfo0 ^ mgsi_success_cont_stack := X,

@@ -47,7 +47,6 @@
 :- implementation.
 
 :- import_module backend_libs.
-:- import_module backend_libs.foreign.
 :- import_module backend_libs.rtti.
 :- import_module hlds.
 :- import_module hlds.hlds_data.
@@ -791,11 +790,16 @@ mlds_output_stmt_atomic(Opts, Indent, Stmt, !IO) :-
     (
         AtomicStmt = comment(Comment),
         ( if Comment = "" then
-            io.nl(!IO)
+            true
         else
             CommentLines = split_at_separator(char.is_line_separator, Comment),
             write_comment_lines(Indent, CommentLines, !IO)
-        )
+        ),
+        % If a comment statement somehow ends up constituting
+        % the entirety of e.g. an if-then-else statement's then part,
+        % then it needs to be a C statement syntactically.
+        output_n_indents(Indent, !IO),
+        io.write_string(";\n", !IO)
     ;
         AtomicStmt = assign(Lval, Rval),
         output_n_indents(Indent, !IO),
@@ -818,9 +822,7 @@ mlds_output_stmt_atomic(Opts, Indent, Stmt, !IO) :-
         mlds_output_rval(Opts, Rval, !IO),
         io.write_string(");\n", !IO)
     ;
-        AtomicStmt = new_object(_Target, _Ptag, _ExplicitSecTag, _Type,
-            _MaybeSize, _MaybeCtorName, _ArgRvalsTypes, _MayUseAtomic,
-            _MaybeAllocId),
+        AtomicStmt = new_object(_, _, _, _, _, _, _, _, _),
         mlds_output_stmt_atomic_new_object(Opts, Indent, AtomicStmt, Context,
             !IO)
     ;
@@ -948,7 +950,7 @@ mlds_output_stmt_atomic_new_object(Opts, Indent, AtomicStmt, Context, !IO) :-
     output_n_indents(Indent + 1, !IO),
     write_lval_or_string(Opts, Base, !IO),
     io.write_string(" = ", !IO),
-    ( if Ptag = 0 then
+    ( if Ptag = ptag(0u8) then
         % XXX We should not need the cast here, but currently the type that
         % we include in the call to MR_new_object() is not always correct.
         mlds_output_cast(Opts, Type, !IO),
@@ -972,7 +974,11 @@ mlds_output_stmt_atomic_new_object(Opts, Indent, AtomicStmt, Context, !IO) :-
     (
         MaybeSize = yes(Size),
         io.write_string("(", !IO),
-        mlds_output_rval(Opts, Size, !IO),
+        ( if Size = ml_const(mlconst_int(SizeInt)) then
+            io.write_int(SizeInt, !IO)
+        else
+            mlds_output_rval(Opts, Size, !IO)
+        ),
         io.write_string(" * sizeof(MR_Word))", !IO)
     ;
         MaybeSize = no,
@@ -1078,10 +1084,10 @@ type_needs_forwarding_pointer_space(Type) = NeedsForwardingPtrSpace :-
         ; Type = mlds_cont_type(_)
         ; Type = mlds_commit_type
         ; Type = mlds_native_bool_type
-        ; Type = mlds_native_int_type
-        ; Type = mlds_native_uint_type
-        ; Type = mlds_native_float_type
-        ; Type = mlds_native_char_type
+        ; Type = mlds_builtin_type_int(_)
+        ; Type = mlds_builtin_type_float
+        ; Type = mlds_builtin_type_string
+        ; Type = mlds_builtin_type_char
         ; Type = mlds_foreign_type(_)
         ; Type = mlds_class_type(_)
         ; Type = mlds_array_type(_)
@@ -1093,7 +1099,7 @@ type_needs_forwarding_pointer_space(Type) = NeedsForwardingPtrSpace :-
         ),
         NeedsForwardingPtrSpace = no
     ;
-        Type = mercury_type(_, _, TypeCategory),
+        Type = mercury_nb_type(_, TypeCategory),
         NeedsForwardingPtrSpace =
             is_introduced_type_info_type_category(TypeCategory)
     ;

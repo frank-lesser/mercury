@@ -618,19 +618,6 @@ check_option_values(!OptionTable, Target, GC_Method, TagsMethod,
         add_error(phase_options, TargetEnvTypeSpec, !Specs)
     ),
 
-    ( if
-        HostEnvType = env_type_posix,
-        CSharp_CompilerType = csharp_microsoft
-    then
-        PosixCSMSpec =
-            [words_quote("--host-env-type posix"),
-            words("is incompatible with"),
-            words_quote("--csharp-compiler-type microsoft"), suffix("."), nl],
-        add_error(phase_options, PosixCSMSpec, !Specs)
-    else
-        true
-    ),
-
     raw_lookup_accumulating_option(!.OptionTable, limit_error_contexts,
         LimitErrorContextsOptionStrs),
     convert_limit_error_contexts(LimitErrorContextsOptionStrs,
@@ -743,9 +730,7 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         TagsMethod0 = tags_none,
         NumPtagBits0 = 0
     ;
-        ( TagsMethod0 = tags_low
-        ; TagsMethod0 = tags_high
-        ),
+        TagsMethod0 = tags_low,
         globals.lookup_int_option(!.Globals, num_ptag_bits, NumPtagBits0)
     ),
 
@@ -884,7 +869,7 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         %
         % C# should be the same as Java, except that:
         %   - C# supports pass-by-reference, but for reasons explained in
-        %     mlds_to_cs.m, we pretend it doesn't at the MLDS level
+        %     mlds_to_cs_stmt.m, we pretend it doesn't at the MLDS level.
 
         globals.set_gc_method(gc_automatic, !Globals),
         globals.set_option(gc, string("automatic"), !Globals),
@@ -2285,12 +2270,12 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         % of a non-enum du type to an integer.
         Target = target_c,
 
-        % To ensure that all constants in general du types are
-        % allocated in one word, make_tags.m need to have at least one
-        % tag bit left over after --reserve-tags possibly takes one.
-        ( TagsMethod = tags_low
-        ; TagsMethod = tags_high
-        ),
+        % We cannot represent constants in general du types in one word
+        % unless we are using primary tags in the low-order bits of a word.
+        TagsMethod = tags_low,
+
+        % Since we have never targeted 16-bit platforms, the minimum number
+        % of low ptag bits we ever configure is two.
         NumPtagBits >= 2
     then
         globals.set_option(can_compare_constants_as_ints, bool(yes), !Globals)
@@ -2556,6 +2541,7 @@ convert_dump_alias("vars", "npBis").    % Var instantiations, liveness etc.
 convert_dump_alias("statevar", "gvCP").
 convert_dump_alias("lco", "agiuvzD").
 convert_dump_alias("poly", "vxX").
+convert_dump_alias("du", "TL").
 
 %---------------------------------------------------------------------------%
 
@@ -2567,7 +2553,7 @@ raw_lookup_bool_option(OptionTable, Option, BoolValue) :-
         BoolValue = BoolValuePrime
     else
         OptionStr = string.string(Option),
-        unexpected($pred, OptionStr ++ "is not a bool")
+        unexpected($pred, OptionStr ++ " is not a bool")
     ).
 
 :- pred raw_lookup_int_option(option_table::in, option::in, int::out) is det.
@@ -2578,7 +2564,7 @@ raw_lookup_int_option(OptionTable, Option, IntValue) :-
         IntValue = IntValuePrime
     else
         OptionStr = string.string(Option),
-        unexpected($pred, OptionStr ++ "is not an int")
+        unexpected($pred, OptionStr ++ " is not an int")
     ).
 
 :- pred raw_lookup_string_option(option_table::in, option::in,
@@ -2590,7 +2576,7 @@ raw_lookup_string_option(OptionTable, Option, StringValue) :-
         StringValue = StringValuePrime
     else
         OptionStr = string.string(Option),
-        unexpected($pred, OptionStr ++ "is not a string")
+        unexpected($pred, OptionStr ++ " is not a string")
     ).
 
 :- pred raw_lookup_accumulating_option(option_table::in, option::in,
@@ -2602,7 +2588,7 @@ raw_lookup_accumulating_option(OptionTable, Option, AccumulatingValue) :-
         AccumulatingValue = AccumulatingValuePrime
     else
         OptionStr = string.string(Option),
-        unexpected($pred, OptionStr ++ "is not accumulating")
+        unexpected($pred, OptionStr ++ " is not accumulating")
     ).
 
 %---------------------------------------------------------------------------%

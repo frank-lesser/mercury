@@ -2,8 +2,7 @@
 % vim: ts=4 sw=4 et ft=mercury
 %---------------------------------------------------------------------------%
 % Copyright (C) 2016, 2018 The Mercury team.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % This module defines the "terrain" on which the grade solver operates,
@@ -471,7 +470,7 @@ init_requirement_specs = [
 
 % Requirements of values of svar_datarep.
     requirement_spec(
-        "Representing data using classes data requires the MLDS backend.",
+        "Representing data using classes requires the MLDS backend.",
         (svar_datarep `being` svalue_datarep_classes) `implies_that`
         (svar_backend `is_one_of` [svalue_backend_mlds])
     ),

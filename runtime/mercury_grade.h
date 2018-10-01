@@ -2,8 +2,7 @@
 
 // Copyright (C) 1997-2012 The University of Melbourne.
 // Copyright (C) 2013-2014, 2016-2018 The Mercury team.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // The main purpose of this file is to define the MR_GRADE_VAR macro,
 // which we use to get the linker to generate an error if the object files
@@ -357,9 +356,6 @@
 
 #if MR_TAGBITS == 0
   #define MR_GRADE_PART_10      MR_PASTE2(MR_GRADE_PART_9, _notags)
-#elif defined(MR_HIGHTAGS)
-  #define MR_GRADE_PART_10      MR_PASTE2(MR_GRADE_PART_9,              \
-                                        MR_PASTE2(_hightags, MR_TAGBITS))
 #else
   #define MR_GRADE_PART_10      MR_PASTE2(MR_GRADE_PART_9,              \
                                         MR_PASTE2(_tags, MR_TAGBITS))

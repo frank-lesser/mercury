@@ -381,6 +381,10 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
 
 :- type constructor
     --->    ctor(
+                % The ordinal number of the functor. The first functor
+                % in a type definition has ordinal number 0.
+                cons_ordinal        :: int,
+
                 % Existential constraints, if any.
                 cons_maybe_exist    :: maybe_cons_exist_constraints,
 
@@ -435,9 +439,12 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
             ).
 
     % The arg_pos_width type and its components specify how much space
-    % does a constructor argument occupy in the memory cell that
-    % represents a term with that constructor, and where.
+    % does a constructor argument occupy in the memory that represents
+    % a term with that constructor, and where. This memory will usually be
+    % in a heap cell, so this is what the discussion below assumes,
+    % but see below for an exception.
     %
+    % XXX ARG_PACK document the CellOffset fields.
     % `apw_full(ArgOnlyOffset)' indicates that the argument fully occupies
     % a single word, and this word is ArgOnlyOffset words after the first word
     % of the memory cell cell that starts storing visible arguments.
@@ -480,16 +487,29 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
     % argument is missing, or if either is full word sized or larger,
     % then the arguments in the run will all be apw_none_nowhere.
     %
-    % The EBNF grammar of possible sequences of argument representations is:
+    % The exception mentioned above is that if a function symbol only has
+    % a small number of small (subword-sized) arguments, then we try to fit
+    % the representation of all the arguments next to the primary and local
+    % secondary tags, *without* using a heap cell. In this case, all these
+    % arguments will be represented by apw_partial_shifted with -1 as the
+    % offset (both kinds), unless they are of a dummy type, in which case
+    % their representation will be apw_none_shifted, also with -1 as offset.
     %
-    % constructor
-    %   :  integral_word_unit*
+    % The EBNF grammar of possible sequences of representations of nonconstant
+    % terms is:
     %
-    % integral_word_unit
-    %   :  apw_none_nowhere
-    %   |  apw_full
-    %   |  apw_double
-    %   |  apw_partial_first (apw_none_shifted* apw_partial_shifted)+
+    % repn:
+    %   :   ptag ptr_to_heap_cell
+    %   |   ptag local_sectag (apw_none_shifted | apw_partial_shifted)+
+    %
+    % heap_cell
+    %   :   remote_sectag_word? integral_cell_word_unit*
+    %
+    % integral_cell_word_unit
+    %   :   apw_none_nowhere
+    %   |   apw_full
+    %   |   apw_double
+    %   |   apw_partial_first (apw_none_shifted* apw_partial_shifted)+
     %
     % We wrap function symbols around the integer arguments mentioned above
     % to make the different integers harder to confuse with each other.
@@ -501,7 +521,8 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
     ;       fill_int32
     ;       fill_uint8
     ;       fill_uint16
-    ;       fill_uint32.
+    ;       fill_uint32
+    ;       fill_char21.
 
 :- type double_word_kind
     --->    dw_float
@@ -564,7 +585,7 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
 
                 awpf_ao_offset      :: arg_only_offset,
                 awpf_cell_offset    :: cell_offset,
-                % The shift is implicitly zero.
+                awpf_shift          :: arg_shift,
                 awpf_num_bits       :: arg_num_bits,
                 awpf_mask           :: arg_mask,
                 awpf_fill           :: fill_kind
@@ -689,7 +710,6 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
             % A type expression with an explicit kind annotation.
             % (These are not yet used.)
 
-
     % This type enumerates all of the builtin primitive types in Mercury.
     % If you add a new alternative then you may also need to update the
     % following predicates:
@@ -774,7 +794,7 @@ arg_pos_width_to_width_only(ArgPosWidth) = ArgWidth :-
         ArgPosWidth = apw_double(_, _, _),
         ArgWidth = aw_double_word
     ;
-        ( ArgPosWidth = apw_partial_first(_, _, _, _, _)
+        ( ArgPosWidth = apw_partial_first(_, _, _, _, _, _)
         ; ArgPosWidth = apw_partial_shifted(_, _, _, _, _, _)
         ),
         ArgWidth = aw_partial_word
@@ -1554,18 +1574,18 @@ valid_trace_grade_name(GradeName) :-
     % What kind of promise does a promise item contain?
     %
 :- type promise_type
-            % promise ex declarations
     --->    promise_type_exclusive
-            % Each disjunct is mutually exclusive.
+            % Two disjunct cannot be true at once.
 
     ;       promise_type_exhaustive
-            % Disjunction cannot fail.
+            % At least one disjunct will be true.
 
     ;       promise_type_exclusive_exhaustive
-            % Both of the above assertions
+            % Both of the above assertions, which means that
+            % *exactly* one disjunct will be true.
 
     ;       promise_type_true.
-            % Promise goal is true.
+            % Promise that the given goal is true.
 
     % A predicate or function declaration may either give (a) only the types
     % of the arguments, or (b) both their types and modes.

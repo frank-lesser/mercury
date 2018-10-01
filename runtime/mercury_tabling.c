@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1997-2007, 2011 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2016-2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // This module contains the functions related to tabling that are not
 // specific to minimal model tabling.
@@ -13,6 +13,7 @@
 #include "mercury_array_macros.h"
 #include "mercury_builtin_types.h"
 #include "mercury_deconstruct.h"
+#include "mercury_deconstruct_macros.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1667,10 +1668,7 @@ void mercury_sys_init_table_modules_write_out_proc_statics(FILE *fp)
 static void
 MR_table_assert_failed(const char *file, unsigned line)
 {
-    char    buf[256];
-
-    snprintf(buf, 256, "assertion failed: file %s, line %d", file, line);
-    MR_fatal_error(buf);
+    MR_fatal_error("assertion failed: file %s, line %d", file, line);
 }
 #endif
 

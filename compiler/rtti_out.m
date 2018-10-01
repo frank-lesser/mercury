@@ -107,6 +107,7 @@
 :- import_module backend_libs.c_util.
 :- import_module backend_libs.name_mangle.
 :- import_module backend_libs.type_ctor_info.
+:- import_module hlds.hlds_data.
 :- import_module hlds.hlds_rtti.
 :- import_module libs.
 :- import_module libs.globals.
@@ -130,6 +131,8 @@
 :- import_module pair.
 :- import_module require.
 :- import_module string.
+:- import_module uint.
+:- import_module uint8.
 :- import_module univ.
 
 %-----------------------------------------------------------------------------%
@@ -709,8 +712,8 @@ output_type_ctor_details_defn(Info, RttiTypeCtor, TypeCtorDetails,
         MaybeFunctorsName, MaybeLayoutName, HaveFunctorNumberMap,
         !DeclSet, !IO) :-
     (
-        TypeCtorDetails = tcd_enum(_, EnumFunctors, EnumByRep, EnumByName,
-            _IsDummy, FunctorNumberMap),
+        TypeCtorDetails = tcd_enum(_, _IsDummy, EnumFunctors,
+            EnumByRep, EnumByName, FunctorNumberMap),
         list.foldl2(output_enum_functor_defn(Info, RttiTypeCtor), EnumFunctors,
             !DeclSet, !IO),
         output_enum_value_ordered_table(Info, RttiTypeCtor, EnumByRep,
@@ -911,24 +914,40 @@ output_du_functor_defn(Info, RttiTypeCtor, DuFunctor, !DeclSet, !IO) :-
         Rep = du_hl_rep(_),
         unexpected($module, $pred, "du_hl_rep")
     ),
+    Ptag = ptag(PtagUint8),
     (
         SectagAndLocn = sectag_locn_none,
         Locn = "MR_SECTAG_NONE",
-        Stag = -1
+        Stag = -1,
+        NumSectagBits = 0u8
     ;
         SectagAndLocn = sectag_locn_none_direct_arg,
         Locn = "MR_SECTAG_NONE_DIRECT_ARG",
-        Stag = -1
+        Stag = -1,
+        NumSectagBits = 0u8
     ;
-        SectagAndLocn = sectag_locn_local(Stag),
-        Locn = "MR_SECTAG_LOCAL"
+        SectagAndLocn = sectag_locn_local_rest_of_word(StagUint),
+        Locn = "MR_SECTAG_LOCAL_REST_OF_WORD",
+        Stag = uint.cast_to_int(StagUint),
+        NumSectagBits = 0u8
     ;
-        SectagAndLocn = sectag_locn_remote(Stag),
-        Locn = "MR_SECTAG_REMOTE"
+        SectagAndLocn = sectag_locn_local_bits(StagUint, NumSectagBits, _Mask),
+        Locn = "MR_SECTAG_LOCAL_BITS",
+        Stag = uint.cast_to_int(StagUint)
+    ;
+        SectagAndLocn = sectag_locn_remote_word(StagUint),
+        Locn = "MR_SECTAG_REMOTE_FULL_WORD",
+        Stag = uint.cast_to_int(StagUint),
+        NumSectagBits = 0u8
+    ;
+        SectagAndLocn = sectag_locn_remote_bits(StagUint, NumSectagBits,
+            _Mask),
+        Locn = "MR_SECTAG_REMOTE_BITS",
+        Stag = uint.cast_to_int(StagUint)
     ),
     io.write_string(Locn, !IO),
     io.write_string(",\n\t", !IO),
-    io.write_int(Ptag, !IO),
+    io.write_uint8(PtagUint8, !IO),
     io.write_string(",\n\t", !IO),
     io.write_int(Stag, !IO),
     io.write_string(",\n\t", !IO),
@@ -972,6 +991,8 @@ output_du_functor_defn(Info, RttiTypeCtor, DuFunctor, !DeclSet, !IO) :-
     ),
     io.write_string(",\n\t", !IO),
     output_functor_subtype_info(FunctorSubtypeInfo, !IO),
+    io.write_string(",\n\t", !IO),
+    io.write_uint8(NumSectagBits, !IO),
     io.write_string("\n};\n", !IO).
 
 :- pred output_functor_subtype_info(functor_subtype_info::in, io::di, io::uo)
@@ -1155,14 +1176,15 @@ output_du_arg_locns_loop([ArgInfo | ArgInfos], !IO) :-
     ;
         (
             ArgWidth = apw_partial_first(arg_only_offset(ArgOnlyOffset), _,
-                arg_num_bits(NumBits0), _Mask, Fill),
-            Shift = 0
+                arg_shift(Shift), arg_num_bits(NumBits0), _Mask, Fill)
         ;
             ArgWidth = apw_partial_shifted(arg_only_offset(ArgOnlyOffset), _,
                 arg_shift(Shift), arg_num_bits(NumBits0), _Mask, Fill)
         ),
         (
-            Fill = fill_enum,
+            ( Fill = fill_enum
+            ; Fill = fill_char21
+            ),
             NumBits = NumBits0
         ;
             Fill = fill_int8,
@@ -1284,12 +1306,13 @@ output_du_name_ordered_table(Info, RttiTypeCtor, NameArityMap,
     io.write_string("};\n", !IO).
 
 :- pred output_du_stag_ordered_table(llds_out_info::in, rtti_type_ctor::in,
-    pair(int, sectag_table)::in, decl_set::in, decl_set::out,
+    pair(ptag, sectag_table)::in, decl_set::in, decl_set::out,
     io::di, io::uo) is det.
 
 output_du_stag_ordered_table(Info, RttiTypeCtor, Ptag - SectagTable,
         !DeclSet, !IO) :-
-    SectagTable = sectag_table(_SectagLocn, _NumSharers, SectagMap),
+    SectagTable = sectag_table(_SectagLocn, _NumSectagBits, _NumSharers,
+        SectagMap),
     map.values(SectagMap, SectagFunctors),
     FunctorNames = list.map(du_functor_rtti_name, SectagFunctors),
     output_generic_rtti_data_defn_start(Info,
@@ -1300,7 +1323,7 @@ output_du_stag_ordered_table(Info, RttiTypeCtor, Ptag - SectagTable,
     io.write_string("\n};\n", !IO).
 
 :- pred output_du_ptag_ordered_table(llds_out_info::in, rtti_type_ctor::in,
-    map(int, sectag_table)::in, decl_set::in, decl_set::out,
+    map(ptag, sectag_table)::in, decl_set::in, decl_set::out,
     io::di, io::uo) is det.
 
 output_du_ptag_ordered_table(Info, RttiTypeCtor, PtagMap, !DeclSet, !IO) :-
@@ -1311,12 +1334,8 @@ output_du_ptag_ordered_table(Info, RttiTypeCtor, PtagMap, !DeclSet, !IO) :-
         ctor_rtti_id(RttiTypeCtor, type_ctor_du_ptag_ordered_table),
         !DeclSet, !IO),
     io.write_string(" = {\n", !IO),
-    ( if PtagList = [1 - _ | _] then
-        % Output a dummy ptag definition for the reserved tag first.
-        output_dummy_ptag_layout_defn(!IO),
-        FirstPtag = 1
-    else if PtagList = [0 - _ | _] then
-        FirstPtag = 0
+    ( if PtagList = [ptag(0u8) - _ | _] then
+        FirstPtag = ptag(0u8)
     else
         unexpected($module, $pred, "bad ptag list")
     ),
@@ -1324,42 +1343,35 @@ output_du_ptag_ordered_table(Info, RttiTypeCtor, PtagMap, !DeclSet, !IO) :-
     io.write_string("\n};\n", !IO).
 
 :- pred output_du_ptag_ordered_table_body(rtti_type_ctor::in,
-    assoc_list(int, sectag_table)::in, int::in, io::di, io::uo) is det.
+    assoc_list(ptag, sectag_table)::in, ptag::in, io::di, io::uo) is det.
 
 output_du_ptag_ordered_table_body(_RttiTypeCtor, [], _CurPtag, !IO).
 output_du_ptag_ordered_table_body(RttiTypeCtor,
         [Ptag - SectagTable | PtagTail], CurPtag, !IO) :-
     expect(unify(Ptag, CurPtag), $module, $pred, "ptag mismatch"),
-    SectagTable = sectag_table(SectagLocn, NumSharers, _SectagMap),
+    SectagTable = sectag_table(SectagLocn, NumSectagBits, NumSharers,
+        _SectagMap),
     io.write_string("\t{ ", !IO),
-    io.write_int(NumSharers, !IO),
+    io.write_uint(NumSharers, !IO),
     io.write_string(", ", !IO),
     rtti.sectag_locn_to_string(SectagLocn, _TargetPrefixes, LocnStr),
     io.write_string(LocnStr, !IO),
     io.write_string(",\n\t", !IO),
     output_ctor_rtti_id(RttiTypeCtor, type_ctor_du_stag_ordered_table(Ptag),
         !IO),
+    io.write_string(",\n\t", !IO),
+    io.write_int8(NumSectagBits, !IO),
     (
         PtagTail = [],
         io.write_string(" }\n", !IO)
     ;
         PtagTail = [_ | _],
         io.write_string(" },\n", !IO),
+        CurPtag = ptag(CurPtagUint8),
+        NextPtag = ptag(CurPtagUint8 + 1u8),
         output_du_ptag_ordered_table_body(RttiTypeCtor, PtagTail,
-            CurPtag + 1, !IO)
+            NextPtag, !IO)
     ).
-
-    % Output a `dummy' ptag layout, for use by tags that aren't *real* tags,
-    % such as the tag reserved when --reserve-tag is on.
-    %
-    % XXX Note that if one of these dummy ptag definitions is actually accessed
-    % by the Mercury runtime, the result will be undefined. This should be
-    % fixed by adding a MR_SECTAG_DUMMY and handling it gracefully.
-    %
-:- pred output_dummy_ptag_layout_defn(io::di, io::uo) is det.
-
-output_dummy_ptag_layout_defn(!IO) :-
-    io.write_string("\t{ 0, MR_SECTAG_VARIABLE, NULL },\n", !IO).
 
 %-----------------------------------------------------------------------------%
 

@@ -89,6 +89,7 @@
 :- import_module assoc_list.
 :- import_module bool.
 :- import_module int.
+:- import_module int8.
 :- import_module map.
 :- import_module maybe.
 :- import_module pair.
@@ -96,6 +97,7 @@
 :- import_module set.
 :- import_module string.
 :- import_module term.
+:- import_module uint.
 :- import_module univ.
 :- import_module varset.
 
@@ -537,8 +539,8 @@ make_mercury_enum_details(CtorRepns, IsDummy, EqualityAxioms, Details) :-
     list.foldl2(make_enum_maps, EnumFunctors,
         ValueMap0, ValueMap, NameMap0, NameMap),
     FunctorNumberMap = make_functor_number_map(CtorRepns),
-    Details = tcd_enum(EqualityAxioms, EnumFunctors, ValueMap, NameMap,
-        IsDummy, FunctorNumberMap).
+    Details = tcd_enum(EqualityAxioms, IsDummy, EnumFunctors,
+        ValueMap, NameMap, FunctorNumberMap).
 
     % Create an enum_functor structure for each functor in an enum type.
     % The functors are given to us in ordinal order (since that's how the HLDS
@@ -552,16 +554,18 @@ make_mercury_enum_details(CtorRepns, IsDummy, EqualityAxioms, Details) :-
     int::in, list(enum_functor)::out) is det.
 
 make_enum_functors([], _, _, []).
-make_enum_functors([FunctorRepn | FunctorRepns], IsDummy, NextOrdinal,
+make_enum_functors([FunctorRepn | FunctorRepns], IsDummy, CurOrdinal,
         [EnumFunctor | EnumFunctors]) :-
-    FunctorRepn = ctor_repn(MaybeExistConstraints, SymName, ConsTag,
+    FunctorRepn = ctor_repn(Ordinal, MaybeExistConstraints, SymName, ConsTag,
         _FunctorArgRepns, Arity, _Context),
+    % XXX ARG_PACK We should not need CurOrdinal.
+    expect(unify(Ordinal, CurOrdinal), $pred, "Ordinal != CurOrdinal"),
     expect(unify(MaybeExistConstraints, no_exist_constraints), $pred,
         "existential constraints in functor in enum"),
     expect(unify(Arity, 0), $pred, "functor in enum has nonzero arity"),
     (
         IsDummy = enum_is_not_dummy,
-        expect(unify(ConsTag, int_tag(int_tag_int(NextOrdinal))), $pred,
+        expect(unify(ConsTag, int_tag(int_tag_int(CurOrdinal))), $pred,
             "enum functor's tag is not the expected int_tag")
     ;
         IsDummy = enum_is_dummy,
@@ -569,8 +573,8 @@ make_enum_functors([FunctorRepn | FunctorRepns], IsDummy, NextOrdinal,
             "dummy functor's tag is not dummy_tag")
     ),
     FunctorName = unqualify_name(SymName),
-    EnumFunctor = enum_functor(FunctorName, NextOrdinal),
-    make_enum_functors(FunctorRepns, IsDummy, NextOrdinal + 1, EnumFunctors).
+    EnumFunctor = enum_functor(FunctorName, CurOrdinal),
+    make_enum_functors(FunctorRepns, IsDummy, CurOrdinal + 1, EnumFunctors).
 
 :- pred make_enum_maps(enum_functor::in,
     map(int, enum_functor)::in, map(int, enum_functor)::out,
@@ -612,10 +616,12 @@ make_foreign_enum_details(Lang, CtorRepns, EqualityAxioms, Details) :-
     list(foreign_enum_functor)::out) is det.
 
 make_foreign_enum_functors(_, [], _, []).
-make_foreign_enum_functors(Lang, [FunctorRepn | FunctorRepns], NextOrdinal,
+make_foreign_enum_functors(Lang, [FunctorRepn | FunctorRepns], CurOrdinal,
         [ForeignEnumFunctor | ForeignEnumFunctors]) :-
-    FunctorRepn = ctor_repn(MaybeExistConstraints, SymName, ConsTag,
+    FunctorRepn = ctor_repn(Ordinal, MaybeExistConstraints, SymName, ConsTag,
         _FunctorArgRepns, Arity, _Context),
+    % XXX ARG_PACK We should not need CurOrdinal.
+    expect(unify(Ordinal, CurOrdinal), $pred, "Ordinal != CurOrdinal"),
     expect(unify(MaybeExistConstraints, no_exist_constraints), $pred,
         "existential constraints in functor in enum"),
     expect(unify(Arity, 0), $pred,
@@ -638,20 +644,19 @@ make_foreign_enum_functors(Lang, [FunctorRepn | FunctorRepns], NextOrdinal,
         ; ConsTag = tabling_info_tag(_, _)
         ; ConsTag = deep_profiling_proc_layout_tag(_, _)
         ; ConsTag = table_io_entry_tag(_, _)
-        ; ConsTag = single_functor_tag
-        ; ConsTag = unshared_tag(_)
         ; ConsTag = direct_arg_tag(_)
-        ; ConsTag = shared_remote_tag(_, _, _)
-        ; ConsTag = shared_local_tag(_, _)
+        ; ConsTag = shared_local_tag_no_args(_, _, _)
+        ; ConsTag = local_args_tag(_)
+        ; ConsTag = remote_args_tag(_)
         ; ConsTag = no_tag
         ; ConsTag = dummy_tag
         ),
         unexpected($pred, "non foreign tag for foreign enum functor")
     ),
     FunctorName = unqualify_name(SymName),
-    ForeignEnumFunctor = foreign_enum_functor(FunctorName, NextOrdinal,
+    ForeignEnumFunctor = foreign_enum_functor(FunctorName, CurOrdinal,
         ForeignTagValue),
-    make_foreign_enum_functors(Lang, FunctorRepns, NextOrdinal + 1,
+    make_foreign_enum_functors(Lang, FunctorRepns, CurOrdinal + 1,
         ForeignEnumFunctors).
 
 :- pred make_foreign_enum_maps(foreign_enum_functor::in,
@@ -700,9 +705,11 @@ make_du_details(ModuleInfo, Ctors, TypeArity, EqualityAxioms, Details) :-
 
 make_du_functors(_, [], _, _, []).
 make_du_functors(ModuleInfo, [CtorRepn | CtorRepns],
-        NextOrdinal, TypeArity, [DuFunctor | DuFunctors]) :-
-    CtorRepn = ctor_repn(MaybeExistConstraints, SymName, ConsTag,
+        CurOrdinal, TypeArity, [DuFunctor | DuFunctors]) :-
+    CtorRepn = ctor_repn(Ordinal, MaybeExistConstraints, SymName, ConsTag,
         ConsArgRepns, Arity, _Context),
+    % XXX ARG_PACK We should not need CurOrdinal.
+    expect(unify(Ordinal, CurOrdinal), $pred, "Ordinal != CurOrdinal"),
     FunctorName = unqualify_name(SymName),
     get_du_rep(ConsTag, DuRep),
     (
@@ -718,36 +725,74 @@ make_du_functors(ModuleInfo, [CtorRepn | CtorRepns],
     ),
     list.map_foldl(generate_du_arg_info(TypeArity, ExistTVars),
         ConsArgRepns, ArgInfos, functor_subtype_none, FunctorSubtypeInfo),
-    DuFunctor = du_functor(FunctorName, Arity, NextOrdinal, DuRep,
+    DuFunctor = du_functor(FunctorName, Arity, CurOrdinal, DuRep,
         ArgInfos, MaybeExistInfo, FunctorSubtypeInfo),
 
     make_du_functors(ModuleInfo, CtorRepns,
-        NextOrdinal + 1, TypeArity, DuFunctors).
+        CurOrdinal + 1, TypeArity, DuFunctors).
 
 :- pred get_du_rep(cons_tag::in, du_rep::out) is det.
 
 get_du_rep(ConsTag, DuRep) :-
     (
-        ( ConsTag = single_functor_tag
-        ; ConsTag = dummy_tag
+        ConsTag = dummy_tag,
+        DuRep = du_ll_rep(ptag(0u8), sectag_locn_none)
+    ;
+        ConsTag = direct_arg_tag(Ptag),
+        DuRep = du_ll_rep(Ptag, sectag_locn_none_direct_arg)
+    ;
+        ConsTag = shared_local_tag_no_args(Ptag, LocalSectag, MustMask),
+        LocalSectag = local_sectag(SectagUint, _PrimSec, SectagBits),
+        (
+            MustMask = lsectag_always_rest_of_word,
+            SectagAndLocn = sectag_locn_local_rest_of_word(SectagUint)
+        ;
+            MustMask = lsectag_must_be_masked,
+            SectagBits = sectag_bits(NumBits, Mask),
+            SectagAndLocn = sectag_locn_local_bits(SectagUint, NumBits, Mask)
         ),
-        ConsPtag = 0,
-        SecTagLocn = sectag_locn_none,
-        DuRep = du_ll_rep(ConsPtag, SecTagLocn)
+        DuRep = du_ll_rep(Ptag, SectagAndLocn)
     ;
-        ConsTag = unshared_tag(ConsPtag),
-        SecTagLocn = sectag_locn_none,
-        DuRep = du_ll_rep(ConsPtag, SecTagLocn)
+        ConsTag = local_args_tag(LocalArgsTagInfo),
+        (
+            LocalArgsTagInfo = local_args_only_functor,
+            Ptag = ptag(0u8),
+            SectagUint = 0u,
+            NumSectagBits = 0u8,
+            SectagMask = 0u
+        ;
+            LocalArgsTagInfo = local_args_not_only_functor(Ptag, LocalSectag),
+            LocalSectag = local_sectag(SectagUint, _PrimSec, SectagBits),
+            SectagBits = sectag_bits(NumSectagBits, SectagMask)
+        ),
+        SectagAndLocn = sectag_locn_local_bits(SectagUint,
+            NumSectagBits, SectagMask),
+        DuRep = du_ll_rep(Ptag, SectagAndLocn)
     ;
-        ConsTag = direct_arg_tag(ConsPtag),
-        SecTagLocn = sectag_locn_none_direct_arg,
-        DuRep = du_ll_rep(ConsPtag, SecTagLocn)
-    ;
-        ConsTag = shared_local_tag(ConsPtag, ConsStag),
-        DuRep = du_ll_rep(ConsPtag, sectag_locn_local(ConsStag))
-    ;
-        ConsTag = shared_remote_tag(ConsPtag, ConsStag, _),
-        DuRep = du_ll_rep(ConsPtag, sectag_locn_remote(ConsStag))
+        ConsTag = remote_args_tag(RemoteArgsTagInfo),
+        (
+            RemoteArgsTagInfo = remote_args_only_functor,
+            DuRep = du_ll_rep(ptag(0u8), sectag_locn_none)
+        ;
+            RemoteArgsTagInfo = remote_args_unshared(Ptag),
+            DuRep = du_ll_rep(Ptag, sectag_locn_none)
+        ;
+            RemoteArgsTagInfo = remote_args_shared(Ptag, RemoteSectag),
+            RemoteSectag = remote_sectag(SectagUint, SectagSize),
+            (
+                SectagSize = rsectag_word,
+                SectagAndLocn = sectag_locn_remote_word(SectagUint)
+            ;
+                SectagSize = rsectag_subword(SectagBits),
+                SectagBits = sectag_bits(NumSectagBits, SectagMask),
+                SectagAndLocn = sectag_locn_remote_bits(SectagUint,
+                    NumSectagBits, SectagMask)
+            ),
+            DuRep = du_ll_rep(Ptag, SectagAndLocn)
+        ;
+            RemoteArgsTagInfo = remote_args_ctor(Data),
+            DuRep = du_hl_rep(Data)
+        )
     ;
         ( ConsTag = no_tag
         ; ConsTag = string_tag(_)
@@ -870,8 +915,8 @@ first_matching_type_class_info([Constraint | Constraints], TVar,
 
 %---------------------------------------------------------------------------%
 
-:- pred make_du_ptag_ordered_table(du_functor::in, map(int, sectag_table)::in,
-    map(int, sectag_table)::out) is det.
+:- pred make_du_ptag_ordered_table(du_functor::in,
+    map(ptag, sectag_table)::in, map(ptag, sectag_table)::out) is det.
 
 make_du_ptag_ordered_table(DuFunctor, !PtagTable) :-
     DuRep = DuFunctor ^ du_rep,
@@ -880,33 +925,55 @@ make_du_ptag_ordered_table(DuFunctor, !PtagTable) :-
         (
             SectagAndLocn = sectag_locn_none,
             SectagLocn = sectag_none,
-            Sectag = 0
+            Sectag = 0u,
+            NumSectagBits = -1i8
         ;
             SectagAndLocn = sectag_locn_none_direct_arg,
             SectagLocn = sectag_none_direct_arg,
-            Sectag = 0
+            Sectag = 0u,
+            NumSectagBits = -1i8
         ;
-            SectagAndLocn = sectag_locn_local(Sectag),
-            SectagLocn = sectag_local
+            SectagAndLocn = sectag_locn_local_rest_of_word(Sectag),
+            SectagLocn = sectag_local_rest_of_word,
+            NumSectagBits = -1i8
         ;
-            SectagAndLocn = sectag_locn_remote(Sectag),
-            SectagLocn = sectag_remote
-        ),
-        ( if map.search(!.PtagTable, Ptag, SectagTable0) then
-            SectagTable0 = sectag_table(Locn0, NumSharers0, SectagMap0),
-            expect(unify(SectagLocn, Locn0), $pred,
-                "sectag locn disagreement"),
-            map.det_insert(Sectag, DuFunctor, SectagMap0, SectagMap),
-            SectagTable = sectag_table(Locn0, NumSharers0 + 1, SectagMap),
-            map.det_update(Ptag, SectagTable, !PtagTable)
-        else
-            SectagMap = map.singleton(Sectag, DuFunctor),
-            SectagTable = sectag_table(SectagLocn, 1, SectagMap),
-            map.det_insert(Ptag, SectagTable, !PtagTable)
+            SectagAndLocn = sectag_locn_local_bits(Sectag, NumSectagBitsUint8,
+                Mask),
+            SectagLocn = sectag_local_bits(NumSectagBitsUint8, Mask),
+            NumSectagBits = int8.cast_from_uint8(NumSectagBitsUint8)
+        ;
+            SectagAndLocn = sectag_locn_remote_word(Sectag),
+            SectagLocn = sectag_remote_word,
+            NumSectagBits = -1i8
+        ;
+            SectagAndLocn = sectag_locn_remote_bits(Sectag,
+                NumSectagBitsUint8, Mask),
+            SectagLocn = sectag_remote_bits(NumSectagBitsUint8, Mask),
+            NumSectagBits = int8.cast_from_uint8(NumSectagBitsUint8)
         )
     ;
-        DuRep = du_hl_rep(_),
-        unexpected($pred, "du_hl_rep")
+        DuRep = du_hl_rep(Data),
+        % Treat this as it were
+        %   du_ll_rep(ptag(0u8), sectag_locn_remote_word(Data)).
+        Ptag = ptag(0u8),
+        Sectag = Data,
+        SectagLocn = sectag_remote_word,
+        NumSectagBits = -1i8
+    ),
+    ( if map.search(!.PtagTable, Ptag, SectagTable0) then
+        SectagTable0 = sectag_table(Locn0, NumSectagBits0, NumSharers0,
+            SectagMap0),
+        expect(unify(NumSectagBits0, NumSectagBits), $pred,
+            "sectag num bits disagreement"),
+        map.det_insert(Sectag, DuFunctor, SectagMap0, SectagMap),
+        SectagTable = sectag_table(Locn0, NumSectagBits0, NumSharers0 + 1u,
+            SectagMap),
+        map.det_update(Ptag, SectagTable, !PtagTable)
+    else
+        SectagMap = map.singleton(Sectag, DuFunctor),
+        SectagTable = sectag_table(SectagLocn, NumSectagBits, 1u,
+            SectagMap),
+        map.det_insert(Ptag, SectagTable, !PtagTable)
     ).
 
 :- pred make_du_name_ordered_table(du_functor::in,

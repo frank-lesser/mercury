@@ -104,18 +104,6 @@
     %
 :- func ml_gen_array_elem_type(array_elem_type) = mlds_type.
 
-    % Return the MLDS type corresponding to a Mercury string type.
-    %
-:- func ml_string_type = mlds_type.
-
-    % Return the MLDS type corresponding to a Mercury int type.
-    %
-:- func ml_int_type = mlds_type.
-
-    % Return the MLDS type corresponding to a Mercury char type.
-    %
-:- func ml_char_type = mlds_type.
-
     % Allocate one or several fresh type variables, with kind `star',
     % to use as the Mercury types of boxed objects (e.g. to get the
     % argument types for tuple constructors or closure constructors).
@@ -468,7 +456,6 @@
 
 :- implementation.
 
-:- import_module backend_libs.foreign.
 :- import_module check_hlds.
 :- import_module check_hlds.mode_util.
 :- import_module check_hlds.type_util.
@@ -576,24 +563,30 @@ ml_combine_conj(FirstCodeModel, Context, DoGenFirst, DoGenRest,
 
         FirstCodeModel = model_non,
 
-        % allocate a name for the `succ_func'
+        % Allocate a name for the `succ_func'.
         ml_gen_new_func_label(no, RestFuncLabel, RestFuncLabelRval, !Info),
 
-        % generate <First && succ_func()>
+        % Generate <First && succ_func()>.
         ml_get_env_ptr(EnvPtrRval),
         SuccessCont = success_cont(RestFuncLabelRval, EnvPtrRval, []),
         ml_gen_info_push_success_cont(SuccessCont, !Info),
         DoGenFirst(FirstLocalVarDefns, FirstFuncDefns, FirstStmts, !Info),
         ml_gen_info_pop_success_cont(!Info),
 
-        % generate the `succ_func'
-        % push nesting level
+        % Generate the `succ_func'.
+        % Do not take any information about packed args into the new function
+        % depth, since that may cause dangling cross-function references
+        % when the new function depth is flattened out.
+        ml_gen_info_set_packed_word_map(map.init, !Info),
         ml_gen_info_increment_func_nest_depth(!Info),
         DoGenRest(RestLocalVarDefns, RestFuncDefns, RestStmts, !Info),
         ml_gen_info_decrement_func_nest_depth(!Info),
+        % Do not take any information about packed args out of the new function
+        % depth, for the same reason.
+        ml_gen_info_set_packed_word_map(map.init, !Info),
+
         RestStmt = ml_gen_block(RestLocalVarDefns, RestFuncDefns, RestStmts,
             Context),
-        % pop nesting level
         ml_gen_nondet_label_func(!.Info, RestFuncLabel, Context,
             RestStmt, RestFunc),
 
@@ -627,43 +620,46 @@ ml_gen_label_func(Info, MaybeAux, FuncParams, Context, Stmt, Func) :-
 %
 
 ml_int_tag_to_rval_const(IntTag, MerType, MLDS_Type) = Rval :-
+    % Keep this code in sync with ml_generate_test_rval_is_int_tag
+    % in ml_unify_gen_test.m.
     (
         IntTag = int_tag_int(Int),
         ( if MerType = int_type then
-            Rval = ml_const(mlconst_int(Int))
+            Const = mlconst_int(Int)
         else if MerType = char_type then
-            Rval = ml_const(mlconst_char(Int))
+            Const = mlconst_char(Int)
         else
-            Rval = ml_const(mlconst_enum(Int, MLDS_Type))
+            Const = mlconst_enum(Int, MLDS_Type)
         )
     ;
         IntTag = int_tag_uint(UInt),
-        Rval = ml_const(mlconst_uint(UInt))
+        Const = mlconst_uint(UInt)
     ;
         IntTag = int_tag_int8(Int8),
-        Rval = ml_const(mlconst_int8(Int8))
+        Const = mlconst_int8(Int8)
     ;
         IntTag = int_tag_uint8(UInt8),
-        Rval = ml_const(mlconst_uint8(UInt8))
+        Const = mlconst_uint8(UInt8)
     ;
         IntTag = int_tag_int16(Int16),
-        Rval = ml_const(mlconst_int16(Int16))
+        Const = mlconst_int16(Int16)
     ;
         IntTag = int_tag_uint16(UInt16),
-        Rval = ml_const(mlconst_uint16(UInt16))
+        Const = mlconst_uint16(UInt16)
     ;
         IntTag = int_tag_int32(Int32),
-        Rval = ml_const(mlconst_int32(Int32))
+        Const = mlconst_int32(Int32)
     ;
         IntTag = int_tag_uint32(UInt32),
-        Rval = ml_const(mlconst_uint32(UInt32))
+        Const = mlconst_uint32(UInt32)
     ;
         IntTag = int_tag_int64(Int64),
-        Rval = ml_const(mlconst_int64(Int64))
+        Const = mlconst_int64(Int64)
     ;
         IntTag = int_tag_uint64(UInt64),
-        Rval = ml_const(mlconst_uint64(UInt64))
-    ).
+        Const = mlconst_uint64(UInt64)
+    ),
+    Rval = ml_const(Const).
 
 %---------------------------------------------------------------------------%
 %
@@ -685,19 +681,10 @@ ml_gen_array_elem_type(ElemType) = MLDS_Type :-
 
 :- func ml_gen_scalar_array_elem_type(scalar_array_elem_type) = mlds_type.
 
-ml_gen_scalar_array_elem_type(scalar_elem_string) = ml_string_type.
-ml_gen_scalar_array_elem_type(scalar_elem_int) = mlds_native_int_type.
+ml_gen_scalar_array_elem_type(scalar_elem_string) = mlds_builtin_type_string.
+ml_gen_scalar_array_elem_type(scalar_elem_int) =
+    mlds_builtin_type_int(int_type_int).
 ml_gen_scalar_array_elem_type(scalar_elem_generic) = mlds_generic_type.
-
-ml_string_type =
-    mercury_type(string_type, no, ctor_cat_builtin(cat_builtin_string)).
-
-ml_int_type =
-    mercury_type(int_type, no,
-        ctor_cat_builtin(cat_builtin_int(int_type_int))).
-
-ml_char_type =
-    mercury_type(char_type, no, ctor_cat_builtin(cat_builtin_char)).
 
 ml_make_boxed_type = BoxedType :-
     varset.init(TypeVarSet0),
@@ -1085,7 +1072,7 @@ ml_must_box_field_type_category(CtorCat, UnboxedFloat, UnboxedInt64s, Width)
 ml_gen_box_const_rval(ModuleInfo, Context, MLDS_Type, Width, Rval, BoxedRval,
         !GlobalData) :-
     ( if
-        ( MLDS_Type = mercury_type(type_variable(_, _), _, _)
+        ( MLDS_Type = mercury_nb_type(type_variable(_, _), _)
         ; MLDS_Type = mlds_generic_type
         )
     then
@@ -1097,18 +1084,12 @@ ml_gen_box_const_rval(ModuleInfo, Context, MLDS_Type, Width, Rval, BoxedRval,
         % is just a cast (casts are OK in static initializers, but calls
         % to malloc() are not).
         (
-            MLDS_Type = mlds_native_float_type,
+            MLDS_Type = mlds_builtin_type_float,
             ConstVarKind = mgcv_float
         ;
-            MLDS_Type = mercury_type(builtin_type(BuiltinType), _, _),
-            (
-                BuiltinType = builtin_type_float,
-                ConstVarKind = mgcv_float
-            ;
-                BuiltinType = builtin_type_int(IntType),
-                ( IntType = int_type_int64, ConstVarKind = mgcv_int64
-                ; IntType = int_type_uint64, ConstVarKind = mgcv_uint64
-                )
+            MLDS_Type = mlds_builtin_type_int(IntType),
+            ( IntType = int_type_int64, ConstVarKind = mgcv_int64
+            ; IntType = int_type_uint64, ConstVarKind = mgcv_uint64
             )
         ),
         ml_global_data_get_target(!.GlobalData, ml_target_c)
@@ -1698,7 +1679,8 @@ lookup_ground_rval(FinalConstVarMap, Var, Rval) :-
 ml_generate_field_assign(OutVarLval, FieldType, FieldId, VectorCommon,
         StructType, IndexRval, Context, Stmt, !Info) :-
     BaseRval = ml_vector_common_row_addr(VectorCommon, IndexRval),
-    FieldLval = ml_field(yes(0), BaseRval, FieldId, FieldType, StructType),
+    FieldLval = ml_field(yes(ptag(0u8)), BaseRval, StructType,
+        FieldId, FieldType),
     AtomicStmt = assign(OutVarLval, ml_lval(FieldLval)),
     Stmt = ml_stmt_atomic(AtomicStmt, Context).
 

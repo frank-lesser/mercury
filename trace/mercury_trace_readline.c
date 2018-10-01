@@ -1,13 +1,10 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1998-2002, 2005-2007 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014-2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // A simple interface to read a line, normally done using GNU readline.
-//
-// This module is compiled with warnings disabled (mgnuc --no-check),
-// since the GNU readline headers don't use prototypes, const, etc.
 //
 // Main authors: fjh, zs.
 
@@ -20,9 +17,11 @@
 #include "mercury_trace_readline.h"
 #include "mercury_trace_completion.h"
 
-#ifndef MR_NO_USE_READLINE
-  #ifdef MR_HAVE_READLINE_READLINE_H
-    #include "readline/readline.h"
+#if defined(MR_USE_READLINE) || defined(MR_USE_EDITLINE)
+  #if defined(MR_HAVE_READLINE_READLINE_H)
+    #include <readline/readline.h>
+  #elif defined(MR_HAVE_EDITLINE_READLINE_H)
+     #include <editline/readline.h>
   #else
     extern FILE         *rl_instream;
     extern FILE         *rl_outstream;
@@ -32,7 +31,7 @@
     extern void         (*rl_deprep_term_function)(void);
   #endif
   #ifdef MR_HAVE_READLINE_HISTORY_H
-    #include "readline/history.h"
+    #include <readline/history.h>
   #endif
   #ifdef MR_HAVE_UNISTD_H
      #include <unistd.h>    // for isatty()
@@ -53,7 +52,7 @@ MR_trace_readline(const char *prompt, FILE *in, FILE *out)
 {
 #if (defined(isatty) || defined(MR_HAVE_ISATTY)) \
  && (defined(fileno) || defined(MR_HAVE_FILENO)) \
- && !defined(MR_NO_USE_READLINE)
+ && (defined(MR_USE_READLINE) || defined(MR_USE_EDITLINE))
     char    *line;
     MR_bool in_isatty;
     char    *last_nl;
@@ -120,7 +119,7 @@ MR_trace_readline(const char *prompt, FILE *in, FILE *out)
 
         return line;
     }
-#endif // have isatty && have fileno && !MR_NO_USE_READLINE
+#endif // have isatty && have fileno && (have readline || have editline)
 
     // Otherwise, don't use readline.
     fprintf(out, "%s", prompt);

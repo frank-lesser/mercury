@@ -18,6 +18,7 @@ ORDINARY_PROGS = \
 	array_sort \
 	array_test \
 	array_test2 \
+	array_unify_compare \
 	bag_various \
 	bidirectional \
 	bigtest \
@@ -42,6 +43,7 @@ ORDINARY_PROGS = \
 	bug452 \
 	bug455_mod_a \
 	bug_pack_bits \
+	bulk_compare_packed \
 	c89_neg_int \
 	c_write_string \
 	calendar_test \
@@ -63,6 +65,7 @@ ORDINARY_PROGS = \
 	constraint_order \
 	construct_bug \
 	construct_mangle \
+	construct_packed \
 	construct_test \
 	construct_test_exist \
 	contains_char \
@@ -218,6 +221,7 @@ ORDINARY_PROGS = \
 	lexer_zero \
 	list_series_int \
 	list_split_take_drop \
+	local_args \
 	lookup_disj \
 	lookup_switch_simple \
 	lookup_switch_simple_bitvec \
@@ -304,6 +308,7 @@ ORDINARY_PROGS = \
 	rnd \
 	rtree_test \
 	rtti_strings \
+	sectag_bits \
 	seek_test \
 	semi_disj \
 	semi_tail_call_in_nonlast_disjunct \
@@ -317,6 +322,7 @@ ORDINARY_PROGS = \
 	special_char \
 	stable_sort \
 	static_no_tag \
+	static_term_bug \
 	stdlib_init \
 	stream_format \
 	stream_ignore_ws \
@@ -363,6 +369,7 @@ ORDINARY_PROGS = \
 	test_char_digits \
 	test_cord \
 	test_cord2 \
+	test_generic_ref \
 	test_imported_no_tag \
 	test_infinity \
 	test_int_hash \
@@ -399,6 +406,7 @@ ORDINARY_PROGS = \
 	uint16_switch_test \
 	uint32_from_bytes \
 	uint32_switch_test \
+	uint32_to_uint64 \
 	uint64_from_bytes \
 	uint64_ground_term \
 	uint64_switch_test \
@@ -690,6 +698,7 @@ ifeq "$(findstring profdeep,$(GRADE))" ""
 		cmp_uint8 \
 		dir_test \
 		final_excp \
+		ho_array_ops \
 		int8_static_data \
 		init_excp \
 		intermod_try_goal \
@@ -907,13 +916,18 @@ final_excp.out: final_excp
 	fi
 
 # init_excp.out is expected to fail (it calls throw/1).
+# We need to filter the output for the C# and Java backends in order to remove
+# the stack trace in those grades.   Because the exception is thrown from
+# an initialiser rather than from main/2 we don't have any control over
+# whether the stack trace is printed or not.
 #
 init_excp.out: init_excp
 	if MERCURY_SUPPRESS_STACK_TRACE=yes ./init_excp > $@.tmp 2>&1; then \
 		grep  . $@.tmp; \
 		exit 1; \
 	else \
-		mv $@.tmp $@; \
+		grep -v "at\ j\?mercury\|System\|\-\-\-" $@.tmp > $@; \
+		rm -f $@.tmp; \
 	fi
 
 # functor_ho_inst_excp.out is expected to throw an exception or cause

@@ -2,8 +2,7 @@
 
 // Copyright (C) 1997-2007, 2009-2011 The University of Melbourne.
 // Copyright (C) 2013-2018 The Mercury team.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_conf_param.h:
 // Defines various configuration parameters.
@@ -153,7 +152,6 @@
 // MR_STACK_SEGMENTS
 // MR_TRAIL_SEGMENTS
 // MR_INLINE_ALLOC
-// MR_HIGHTAGS
 // MR_TAGBITS
 // MR_USE_REGIONS
 // MR_RBMM_DEBUG

@@ -54,7 +54,6 @@
 :- import_module backend_libs.
 :- import_module backend_libs.builtin_ops.
 :- import_module backend_libs.c_util.
-:- import_module backend_libs.foreign.
 :- import_module backend_libs.rtti.
 :- import_module libs.
 :- import_module libs.globals.
@@ -84,21 +83,22 @@
 
 mlds_output_ptag(Ptag, !IO) :-
     io.write_string("MR_mktag(", !IO),
-    io.write_int(Ptag, !IO),
+    Ptag = ptag(PtagUint8),
+    io.write_uint8(PtagUint8, !IO),
     io.write_string(")", !IO).
 
 %---------------------------------------------------------------------------%
 
 mlds_output_lval(Opts, Lval, !IO) :-
     (
-        Lval = ml_field(MaybePtag, PtrRval, FieldId, FieldType, PtrType),
+        Lval = ml_field(MaybePtag, PtrRval, PtrType, FieldId, FieldType),
         (
             FieldId = ml_field_offset(OffsetRval),
             ( if
                 (
                     FieldType = mlds_generic_type
                 ;
-                    FieldType = mercury_type(MercuryType, _, _),
+                    FieldType = mercury_nb_type(MercuryType, _),
                     MercuryType = type_variable(_, _)
                     % We could also accept other types that are the same size
                     % as MR_Box, such as builtin_type(builtin_type_int) and
@@ -128,7 +128,7 @@ mlds_output_lval(Opts, Lval, !IO) :-
         ;
             FieldId = ml_field_named(QualFieldVarName, CtorType),
             io.write_string("(", !IO),
-            ( if MaybePtag = yes(0) then
+            ( if MaybePtag = yes(ptag(0u8)) then
                 ( if PtrType = CtorType then
                     true
                 else
@@ -310,16 +310,16 @@ mlds_output_boxed_rval(Opts, Type, Rval, !IO) :-
             Type = mlds_generic_type,
             mlds_output_boxed_rval_generic(Opts, Rval, !IO)
         ;
-            Type = mlds_native_float_type,
+            Type = mlds_builtin_type_float,
             mlds_output_boxed_rval_float(Opts, Rval, !IO)
         ;
-            ( Type = mlds_native_char_type
-            ; Type = mlds_native_bool_type
-            ; Type = mlds_native_int_type       % XXX ARG_PACK
+            ( Type = mlds_native_bool_type
+            ; Type = mlds_builtin_type_char
+            % ; Type = mlds_builtin_type_int(int_type_int)    % XXX ARG_PACK
             ),
             mlds_output_boxed_rval_smaller_than_word(Opts, Rval, !IO)
         ;
-            ( Type = mlds_native_uint_type
+            ( Type = mlds_builtin_type_string
             ; Type = mlds_array_type(_)
             ; Type = mlds_mercury_array_type(_)
             ; Type = mlds_mostly_generic_array_type(_)
@@ -338,43 +338,33 @@ mlds_output_boxed_rval(Opts, Type, Rval, !IO) :-
             ),
             mlds_output_boxed_rval_default(Opts, Rval, !IO)
         ;
-            Type = mercury_type(MercuryType, _, _),
+            Type = mlds_builtin_type_int(IntType),
             (
-                MercuryType = builtin_type(BuiltinType),
-                (
-                    BuiltinType = builtin_type_float,
-                    mlds_output_boxed_rval_float(Opts, Rval, !IO)
-                ;
-                    BuiltinType = builtin_type_int(IntType),
-                    (
-                        IntType = int_type_int64,
-                        mlds_output_boxed_rval_int64(Opts, Rval, !IO)
-                    ;
-                        IntType = int_type_uint64,
-                        mlds_output_boxed_rval_uint64(Opts, Rval, !IO)
-                    ;
-                        ( IntType = int_type_int
-                        ; IntType = int_type_uint
-                        ),
-                        mlds_output_boxed_rval_default(Opts, Rval, !IO)
-                    ;
-                        ( IntType = int_type_int8
-                        ; IntType = int_type_uint8
-                        ; IntType = int_type_int16
-                        ; IntType = int_type_uint16
-                        ; IntType = int_type_int32
-                        ; IntType = int_type_uint32
-                        ),
-                        mlds_output_boxed_rval_smaller_than_word(Opts, Rval,
-                            !IO)
-                    )
-                ;
-                    BuiltinType = builtin_type_char,
-                    mlds_output_boxed_rval_smaller_than_word(Opts, Rval, !IO)
-                ;
-                    BuiltinType = builtin_type_string,
-                    mlds_output_boxed_rval_default(Opts, Rval, !IO)
-                )
+                ( IntType = int_type_int
+                ; IntType = int_type_uint
+                ),
+                mlds_output_boxed_rval_default(Opts, Rval, !IO)
+            ;
+                ( IntType = int_type_int8
+                ; IntType = int_type_uint8
+                ; IntType = int_type_int16
+                ; IntType = int_type_uint16
+                ; IntType = int_type_int32
+                ; IntType = int_type_uint32
+                ),
+                mlds_output_boxed_rval_smaller_than_word(Opts, Rval, !IO)
+            ;
+                IntType = int_type_int64,
+                mlds_output_boxed_rval_int64(Opts, Rval, !IO)
+            ;
+                IntType = int_type_uint64,
+                mlds_output_boxed_rval_uint64(Opts, Rval, !IO)
+            )
+        ;
+            Type = mercury_nb_type(MercuryType, _),
+            (
+                MercuryType = builtin_type(_BuiltinType),
+                unexpected($pred, "mercury_nb_type but builtin_type")
             ;
                 MercuryType = type_variable(_, _),
                 mlds_output_boxed_rval_generic(Opts, Rval, !IO)
@@ -555,16 +545,16 @@ is_an_address(Rval) = IsAddr :-
 
 mlds_output_unboxed_rval(Opts, Type, Rval, !IO) :-
     (
-        Type = mlds_native_float_type,
+        Type = mlds_builtin_type_float,
         mlds_output_unboxed_rval_float(Opts, Rval, !IO)
     ;
-        ( Type = mlds_native_char_type
-        ; Type = mlds_native_bool_type
-        ; Type = mlds_native_int_type   % XXX ARG_PACK
+        ( Type = mlds_native_bool_type
+        ; Type = mlds_builtin_type_char
+        % ; Type = mlds_builtin_type_int(int_type_int)    % XXX ARG_PACK
         ),
         mlds_output_unboxed_rval_smaller_than_word(Opts, Type, Rval, !IO)
     ;
-        ( Type = mlds_native_uint_type
+        ( Type = mlds_builtin_type_string
         ; Type = mlds_array_type(_)
         ; Type = mlds_mercury_array_type(_)
         ; Type = mlds_mostly_generic_array_type(_)
@@ -584,46 +574,35 @@ mlds_output_unboxed_rval(Opts, Type, Rval, !IO) :-
         ),
         mlds_output_unboxed_rval_default(Opts, Type, Rval, !IO)
     ;
-        Type = mercury_type(MercuryType, _, _),
+        Type = mlds_builtin_type_int(IntType),
         (
-            MercuryType = builtin_type(BuiltinType),
-            (
-                BuiltinType = builtin_type_float,
-                mlds_output_unboxed_rval_float(Opts, Rval, !IO)
-            ;
-                BuiltinType = builtin_type_int(IntType),
-                (
-                    IntType = int_type_int64,
-                    mlds_output_unboxed_rval_int64(Opts, Rval, !IO)
-                ;
-                    IntType = int_type_uint64,
-                    mlds_output_unboxed_rval_uint64(Opts, Rval, !IO)
-                ;
-                    ( IntType = int_type_int
-                    ; IntType = int_type_uint
-                    ),
-                    mlds_output_unboxed_rval_default(Opts, Type, Rval, !IO)
-                ;
-                    % The following integer types are all (potentially) smaller
-                    % than MR_Word.
-                    ( IntType = int_type_int8
-                    ; IntType = int_type_uint8
-                    ; IntType = int_type_int16
-                    ; IntType = int_type_uint16
-                    ; IntType = int_type_int32
-                    ; IntType = int_type_uint32
-                    ),
-                    mlds_output_unboxed_rval_smaller_than_word(Opts,
-                        Type, Rval, !IO)
-                )
-            ;
-                BuiltinType = builtin_type_char,
-                mlds_output_unboxed_rval_smaller_than_word(Opts,
-                    Type, Rval, !IO)
-            ;
-                BuiltinType = builtin_type_string,
-                mlds_output_unboxed_rval_default(Opts, Type, Rval, !IO)
-            )
+            IntType = int_type_int64,
+            mlds_output_unboxed_rval_int64(Opts, Rval, !IO)
+        ;
+            IntType = int_type_uint64,
+            mlds_output_unboxed_rval_uint64(Opts, Rval, !IO)
+        ;
+            ( IntType = int_type_int
+            ; IntType = int_type_uint
+            ),
+            mlds_output_unboxed_rval_default(Opts, Type, Rval, !IO)
+        ;
+            ( IntType = int_type_int8
+            ; IntType = int_type_uint8
+            ; IntType = int_type_int16
+            ; IntType = int_type_uint16
+            ; IntType = int_type_int32
+            ; IntType = int_type_uint32
+            ),
+            % These integer types are all (potentially) smaller
+            % than MR_Word.
+            mlds_output_unboxed_rval_smaller_than_word(Opts, Type, Rval, !IO)
+        )
+    ;
+        Type = mercury_nb_type(MercuryType, _),
+        (
+            MercuryType = builtin_type(_BuiltinType),
+            unexpected($pred, "mercury_nb_type but builtin_type")
         ;
             ( MercuryType = type_variable(_, _)
             ; MercuryType = defined_type(_, _, _)
@@ -848,8 +827,6 @@ mlds_output_binop(Opts, Op, X, Y, !IO) :-
         ; Op = int_gt(_), OpStr = ">"
         ; Op = int_le(_), OpStr = "<="
         ; Op = int_ge(_), OpStr = ">="
-        ; Op = unchecked_left_shift(_), OpStr = "<<"
-        ; Op = unchecked_right_shift(_), OpStr = ">>"
         ; Op = bitwise_and(_), OpStr = "&"
         ; Op = bitwise_or(_), OpStr = "|"
         ; Op = bitwise_xor(_), OpStr = "^"
@@ -864,6 +841,23 @@ mlds_output_binop(Opts, Op, X, Y, !IO) :-
         io.write_string(OpStr, !IO),
         io.write_string(" ", !IO),
         mlds_output_rval_as_op_arg(Opts, Y, !IO),
+        io.write_string(")", !IO)
+    ;
+        ( Op = unchecked_left_shift(_), OpStr = "<<"
+        ; Op = unchecked_right_shift(_), OpStr = ">>"
+        ),
+        io.write_string("(", !IO),
+        mlds_output_rval_as_op_arg(Opts, X, !IO),
+        io.write_string(" ", !IO),
+        io.write_string(OpStr, !IO),
+        io.write_string(" ", !IO),
+        % Avoid clutter in the usual case that the shift amount
+        % is a small constant.
+        ( if Y = ml_const(mlconst_int(YInt)) then
+            io.write_int(YInt, !IO)
+        else
+            mlds_output_rval_as_op_arg(Opts, Y, !IO)
+        ),
         io.write_string(")", !IO)
     ;
         Op = str_cmp,
@@ -1037,16 +1031,22 @@ mlds_output_rval_const(_Opts, Const, !IO) :-
         mlds_output_maybe_qualified_global_var_name(MLDS_ModuleName,
             GlobalVarName, !IO)
     ;
-        Const = mlconst_null(_),
-        io.write_string("NULL", !IO)
+        Const = mlconst_null(MLDS_Type),
+        ( if MLDS_Type = mlds_builtin_type_float then
+            io.write_string("0.0", !IO)
+        else
+            io.write_string("NULL", !IO)
+        )
     ).
 
 :- pred is_aligned_dword_field(mlds_rval::in, mlds_rval::in, mlds_rval::out)
     is semidet.
 
-is_aligned_dword_field(X, Y, ml_mem_addr(Lval)) :-
-    X = ml_lval(ml_field(Ptag, Addr, FieldIdX, Type, PtrType) @ Lval),
-    Y = ml_lval(ml_field(Ptag, Addr, FieldIdY, Type, PtrType)),
+is_aligned_dword_field(RvalX, RvalY, ml_mem_addr(LvalX)) :-
+    RvalX = ml_lval(LvalX),
+    RvalY = ml_lval(LvalY),
+    LvalX = ml_field(Ptag, PtrRval, PtrType, FieldIdX, FieldType),
+    LvalY = ml_field(Ptag, PtrRval, PtrType, FieldIdY, FieldType),
     FieldIdX = ml_field_offset(ml_const(mlconst_int(Offset))),
     FieldIdY = ml_field_offset(ml_const(mlconst_int(Offset + 1))),
     int.even(Offset).

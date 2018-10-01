@@ -99,7 +99,7 @@
 :- import_module ll_backend.middle_rec.
 :- import_module ll_backend.stack_layout.
 :- import_module ll_backend.trace_gen.
-:- import_module ll_backend.unify_gen.
+:- import_module ll_backend.unify_gen_construct.
 :- import_module mdbcomp.
 :- import_module mdbcomp.prim_data.
 :- import_module mdbcomp.program_representation.
@@ -514,12 +514,12 @@ generate_proc_code(ModuleInfo0, ConstStructMap, PredId, PredInfo,
             )
         ),
         proc_info_get_oisu_kind_fors(ProcInfo, OISUKindFors),
-        ProcLayout = proc_layout_info(RttiProcLabel, EntryLabel,
-            Detism, TotalSlots, MaybeSuccipSlot, EvalMethod,
-            EffTraceLevel, MaybeTraceCallLabel, MaxTraceRegR, MaxTraceRegF,
-            HeadVars, ArgModes, Goal, NeedGoalRep, InstMap0,
-            TraceSlotInfo, ForceProcId, VarSet, VarTypes,
-            InternalMap, MaybeTableInfo, NeedsAllNames, OISUKindFors,
+        ProcLayout = proc_layout_info(Detism, EffTraceLevel, EvalMethod,
+            NeedGoalRep, ForceProcId, NeedsAllNames,
+            RttiProcLabel, EntryLabel, TotalSlots, MaybeSuccipSlot,
+            MaybeTraceCallLabel, MaxTraceRegR, MaxTraceRegF,
+            HeadVars, ArgModes, Goal, InstMap0, TraceSlotInfo,
+            VarSet, VarTypes, InternalMap, MaybeTableInfo, OISUKindFors,
             MaybeDeepProfInfo),
         global_data_add_new_proc_layout(proc(PredId, ProcId), ProcLayout,
             !GlobalData)

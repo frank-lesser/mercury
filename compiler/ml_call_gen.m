@@ -83,6 +83,7 @@
 :- import_module backend_libs.builtin_ops.
 :- import_module check_hlds.
 :- import_module check_hlds.type_util.
+:- import_module hlds.hlds_data.
 :- import_module hlds.hlds_module.
 :- import_module mdbcomp.
 :- import_module mdbcomp.prim_data.
@@ -173,8 +174,9 @@ ml_gen_main_generic_call(GenericCall, ArgVars, ArgModes, Determinism, Context,
         ml_gen_var(!.Info, ClosureVar, ClosureLval),
         FieldId = ml_field_offset(ml_const(mlconst_int(1))),
         % XXX are these types right?
-        FuncLval = ml_field(yes(0), ml_lval(ClosureLval), FieldId,
-            mlds_generic_type, ClosureArgType),
+        FuncLval = ml_field(yes(ptag(0u8)),
+            ml_lval(ClosureLval), ClosureArgType,
+            FieldId, mlds_generic_type),
         FuncType = mlds_func_type(Params),
         FuncRval = ml_unbox(FuncType, ml_lval(FuncLval))
     ;
@@ -188,16 +190,17 @@ ml_gen_main_generic_call(GenericCall, ArgVars, ArgModes, Determinism, Context,
 
         % Extract the base_typeclass_info from the typeclass_info.
         BaseTypeclassInfoFieldId = ml_field_offset(ml_const(mlconst_int(0))),
-        BaseTypeclassInfoLval = ml_field(yes(0),
-            ml_lval(TypeClassInfoLval), BaseTypeclassInfoFieldId,
-            mlds_generic_type, ClosureArgType),
+        BaseTypeclassInfoLval = ml_field(yes(ptag(0u8)),
+            ml_lval(TypeClassInfoLval), ClosureArgType,
+            BaseTypeclassInfoFieldId, mlds_generic_type),
 
         % Extract the method address from the base_typeclass_info.
         Offset = ml_base_typeclass_info_method_offset,
         MethodFieldNum = MethodNum + Offset,
         MethodFieldId = ml_field_offset(ml_const(mlconst_int(MethodFieldNum))),
-        FuncLval = ml_field(yes(0), ml_lval(BaseTypeclassInfoLval),
-            MethodFieldId, mlds_generic_type, mlds_generic_type),
+        FuncLval = ml_field(yes(ptag(0u8)),
+            ml_lval(BaseTypeclassInfoLval), mlds_generic_type,
+            MethodFieldId, mlds_generic_type),
         FuncType = mlds_func_type(Params),
         FuncRval = ml_unbox(FuncType, ml_lval(FuncLval))
     ),
@@ -401,10 +404,10 @@ ml_gen_plain_tail_call(CalleePredProcId, CodeModel, Context, ArgVars, Features,
                         ;
                             TsccKind = tscc_self_and_mutual_rec,
                             IdInTSCC = proc_id_in_tscc(TsccProcNum),
+                            IntType = mlds_builtin_type_int(int_type_int),
                             SelectorVar =
                                 lvn_comp_var(lvnc_tscc_proc_selector),
-                            SelectorLval =
-                                ml_local_var(SelectorVar, ml_int_type),
+                            SelectorLval = ml_local_var(SelectorVar, IntType),
                             SetSelectorStmt = ml_stmt_atomic(
                                 assign(SelectorLval,
                                     ml_const(mlconst_int(TsccProcNum))),
@@ -906,7 +909,7 @@ ml_gen_builtin(PredId, ProcId, ArgVars, CodeModel, Context,
                 % We need to avoid generating assignments to dummy variables
                 % introduced for types such as io.state.
                 Lval = ml_local_var(_VarName, VarType),
-                VarType = mercury_type(ProgDataType, _, _),
+                VarType = mercury_nb_type(ProgDataType, _),
                 is_type_a_dummy(ModuleInfo, ProgDataType) = is_dummy_type
             then
                 Stmts = []
@@ -940,13 +943,10 @@ ml_gen_builtin(PredId, ProcId, ArgVars, CodeModel, Context,
             ml_gen_set_success(TestRval, Context, Stmt, !Info),
             Stmts = [Stmt]
         ;
-            SimpleCode = ref_assign(_, _),
-            unexpected($pred, "malformed model_semi builtin predicate")
-        ;
-            SimpleCode = assign(_, _),
-            unexpected($pred, "malformed model_semi builtin predicate")
-        ;
-            SimpleCode = noop(_),
+            ( SimpleCode = ref_assign(_, _)
+            ; SimpleCode = assign(_, _)
+            ; SimpleCode = noop(_)
+            ),
             unexpected($pred, "malformed model_semi builtin predicate")
         )
     ;
@@ -1065,7 +1065,7 @@ may_lval_yield_dangling_stack_ref(Lval) = MayYieldDanglingStackRef :-
         Lval = ml_local_var(_Var0, _),
         MayYieldDanglingStackRef = may_yield_dangling_stack_ref
     ;
-        Lval = ml_field(_MaybeTag, Rval, _FieldId, _, _),
+        Lval = ml_field(_MaybeTag, Rval, _, _, _),
         MayYieldDanglingStackRef = may_rval_yield_dangling_stack_ref(Rval)
     ;
         ( Lval = ml_mem_ref(_, _)

@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1996-2007, 2010 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2013-2014, 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 #include    "mercury_imp.h"
 #include    "mercury_dlist.h"
@@ -1314,14 +1314,7 @@ MR_debug_log_message(const char *format, ...)
     buffer = MR_GC_malloc(len);
     while (1) {
         va_start(args, format);
-#ifdef MR_HAVE_VSNPRINTF
-        result = vsnprintf(buffer, len, format, args);
-#elif MR_HAVE__VSNPRINTF
-        result = _vsnprintf(buffer, len, formst, args);
-#else
-        MR_fatal_error(
-            "MR_debug_log_message: Don't have vsnprintf or _vsnprintf\n");
-#endif
+        result = MR_vsnprintf(buffer, len, format, args);
         va_end(args);
         if (result < len) {
             break;

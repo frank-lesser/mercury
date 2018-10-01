@@ -38,6 +38,7 @@
 :- import_module pair.
 :- import_module require.
 :- import_module set.
+:- import_module uint.
 :- import_module varset.
 
 %---------------------------------------------------------------------------%
@@ -53,35 +54,72 @@
     % values which do not fit into a word are represented by a (possibly
     % tagged) pointer to memory on the heap.
     %
+    % XXX TYPE_REPN
+    % We should consider a scheme that consolidates the following cons_tags
+    % under these categories:
+    %
+    % - user_const_tag (int, float, string, foreign, dummy, shared_local)
+    % - system_const_tag (type_info, ... tabling)
+    % - ground_term_const_tag
+    % - local_args_tag
+    % - remote_args_tag
+    % - no_or_direct_arg_tag
+    % - closure_tag
+    %
 :- type cons_tag
-    --->    string_tag(string)
-            % Strings are represented using the MR_string_const() macro;
-            % in the current implementation, Mercury strings are represented
-            % just as C null-terminated strings.
+    % The kinds of constants that may appear in user code.
+    --->    int_tag(int_tag)
+            % This means the constant is represented as a word containing
+            % the specified integer value. This is used for enumerations and
+            % character constants, as well as for integer constants of every
+            % possible size and signedness.
 
     ;       float_tag(float)
             % Floats are represented using the MR_float_to_word(),
             % MR_word_to_float(), and MR_float_const() macros. The default
             % implementation of these is to use boxed double-precision floats.
 
-    ;       int_tag(int_tag)
-            % This means the constant is represented as a word containing
-            % the specified integer value. This is used for enumerations and
-            % character constants, as well as for integer constants of every
-            % possible size and signedness.
+    ;       string_tag(string)
+            % Strings are represented using the MR_string_const() macro;
+            % in the current implementation, Mercury strings are represented
+            % just as C null-terminated strings.
 
     ;       foreign_tag(foreign_language, string)
-            % This means the constant is represented by the string which is
+            % This means the constant is represented by the string, which is
             % embedded directly in the target language. This is used for
-            % foreign enumerations, i.e. those enumeration types that are the
-            % subject of a foreign_enum pragma.
+            % foreign enumerations, i.e. those enumeration types that are
+            % the subject of a foreign_enum pragma.
 
-    ;       closure_tag(pred_id, proc_id, lambda_eval_method)
-            % Higher-order pred closures tags. These are represented as
-            % a pointer to an argument vector. For closures with
-            % lambda_eval_method `normal', the first two words of the argument
-            % vector hold the number of args and the address of the procedure
-            % respectively. The remaining words hold the arguments.
+    ;       dummy_tag
+            % This is for constants that are the only function symbol in their
+            % type. Such function symbols contain no information, and thus
+            % do not need to be represented at all.
+
+    ;       shared_local_tag_no_args(ptag, local_sectag, lsectag_mask)
+            % This is for constants in types that also have non-constants.
+            % We allocate a primary tag value to be shared by all the
+            % constants, and distinguish the constants from each other
+            % using a secondary tag stored in the rest of the word,
+            % immediately after the primary tag bits. The second field
+            % says how big the secondary tag is. The third field says
+            % whether this primary tag values is also shared with
+            % some non-constants whose cons_id is shared_local_tag_with_args.
+            % If it is, the third field will be lsectag_must_be_masked,
+            % otherwise, it will be lsectag_always_rest_of_word. (See below.)
+            %
+            % Note that the name may sometimes be misleading. While most uses
+            % of shared_local_tag_no_args (and shared_local_tag_with_args)
+            % *do* share the given primary tag value with another function
+            % symbol, it is possible for this not to be the case. In that case,
+            % the local secondary tag will occupy zero bits.
+
+    % The kinds of constants that cannot appear in user code,
+    % being generated only inside the compiler.
+
+    ;       ground_term_const_tag(int, cons_tag)
+
+    ;       type_info_const_tag(int)
+    ;       typeclass_info_const_tag(int)
 
     ;       type_ctor_info_tag(module_name, string, arity)
             % This is how we refer to type_ctor_info structures represented
@@ -96,38 +134,38 @@
             % uniquely identifies the instance declaration (it is made from
             % the type of the arguments to the instance decl).
 
-    ;       type_info_const_tag(int)
-    ;       typeclass_info_const_tag(int)
-
-    ;       ground_term_const_tag(int, cons_tag)
+    ;       deep_profiling_proc_layout_tag(pred_id, proc_id)
+            % This is for constants representing procedure descriptions for
+            % deep profiling.
 
     ;       tabling_info_tag(pred_id, proc_id)
             % This is how we refer to the global structures containing
             % tabling pointer variables and related data. The word just
             % contains the address of the global struct.
 
-    ;       deep_profiling_proc_layout_tag(pred_id, proc_id)
-            % This is for constants representing procedure descriptions for
-            % deep profiling.
-
     ;       table_io_entry_tag(pred_id, proc_id)
             % This is for constants representing the structure that allows us
             % to decode the contents of the answer block containing the
             % headvars of I/O primitives.
 
-    ;       single_functor_tag
-            % This is for types with a single functor (and possibly also some
-            % constants represented using reserved addresses -- see below).
-            % For these types, we don't need any tags. We just store a pointer
-            % to the argument vector.
+    % The kinds of non-constants that may appear in user code.
 
-    ;       unshared_tag(ptag)
-            % This is for constants or functors which can be distinguished
-            % with just a primary tag. An "unshared" tag is one which fits
-            % on the bottom of a pointer (i.e. two bits for 32-bit
-            % architectures, or three bits for 64-bit architectures), and is
-            % used for just one functor. For constants we store a tagged zero,
-            % for functors we store a tagged pointer to the argument vector.
+    ;       remote_args_tag(remote_args_tag_info)
+
+    ;       local_args_tag(local_args_tag_info)
+            % This cons_id is a variant of shared_local_tag_no_args that is
+            % intended for function symbols that *do* have arguments,
+            % arguments that fit into a single word *after* the primary
+            % and the local secondary tag (if there is a sectag).
+            % If a primary tag value has any such cons_ids allocated for it,
+            % then the bits in a word after the primary tag may include
+            % these arguments, so accessing the secondary tag (if any)
+            % requires masking off all the non-sectag bits.
+
+    ;       no_tag
+            % This is for types with a single functor of arity one. In this
+            % case, we don't need to store the functor, and instead we store
+            % the argument directly.
 
     ;       direct_arg_tag(ptag)
             % This is for functors which can be distinguished with just a
@@ -137,30 +175,15 @@
             % it IS the value of that argument, which must be an untagged
             % pointer to a cell.
 
-    ;       shared_remote_tag(ptag, sectag, sectag_added_by)
-            % This is for functors or constants which require more than just
-            % a primary tag. In this case, we use both a primary and a
-            % secondary tag. Several functors share the primary tag and are
-            % distinguished by the secondary tag. The secondary tag is stored
-            % as the first word of the argument vector. (If it is a constant,
-            % then in this case there is an argument vector of size 1 which
-            % just holds the secondary tag.)
+    % The kinds of non-constants that cannot appear in user code,
+    % being generated only inside the compiler.
 
-    ;       shared_local_tag(ptag, sectag)
-            % This is for constants which require more than a two-bit tag.
-            % In this case, we use both a primary and a secondary tag,
-            % but this time the secondary tag is stored in the rest of the
-            % main word rather than in the first word of the argument vector.
-
-    ;       dummy_tag
-            % This is for constants that are the only function symbol in their
-            % type. Such function symbols contain no information, and thus
-            % do not need to be represented at all.
-
-    ;       no_tag.
-            % This is for types with a single functor of arity one. In this
-            % case, we don't need to store the functor, and instead we store
-            % the argument directly.
+    ;       closure_tag(pred_id, proc_id, lambda_eval_method).
+            % Higher-order pred closures tags. These are represented as
+            % a pointer to an argument vector. For closures with
+            % lambda_eval_method `normal', the first two words of the argument
+            % vector hold the number of args and the address of the procedure
+            % respectively. The remaining words hold the arguments.
 
 :- type int_tag
     --->    int_tag_int(int)
@@ -184,14 +207,162 @@
 
     % The type `ptag' holds a primary tag value.
     % It consists of 2 bits on 32 bit machines and 3 bits on 64 bit machines.
+    % If we are not using primary tags to distinguish function symbols
+    % from each other, the ptag will always be 0u8.
     %
-:- type ptag == int.
+:- type ptag
+    --->    ptag(uint8).
 
-:- type sectag == int.
+:- type local_args_tag_info
+    --->    local_args_only_functor
+            % There are no other function symbols in the type.
+            % The ptag is implicitly zero, and there is no local sectag.
+    ;       local_args_not_only_functor(ptag, local_sectag).
+            % There are other function symbols in the type.
+            % The arguments specify the ptag and the local sectag (if any).
 
-:- type sectag_added_by
-    --->    sectag_added_by_unify
-    ;       sectag_added_by_constructor.
+:- type local_sectag
+    --->    local_sectag(
+                lsectag_value       :: uint,
+
+                % The ptag and the local sectag together.
+                lsectag_prim_sec    :: uint,
+
+                % The size and mask of the sectag. If the number of bits
+                % is zero, then there is no local sectag.
+                lsectag_bits        :: sectag_bits
+            ).
+
+:- type lsectag_mask
+    --->    lsectag_always_rest_of_word
+            % All the local secondary tags in this type are the "traditional"
+            % kind of local tags, which occupy the whole of the word
+            % after the primary tag. In other words, there is never any
+            % argument packed after the primary and secondary tag bits.
+            % Therefore computing the secondary tag needs only the primary tag
+            % bits to be masked off.
+    ;       lsectag_must_be_masked.
+            % At least one of the functors of this type is represented
+            % by a local secondary tag that *is* followed by packed arguments.
+            % Therefore computing the secondary tag needs not only
+            % the primary tag bits to be masked off, but the arguments as well.
+            % The sectag bits argument gives the mask to apply to the
+            % post-primary-tag part of the word.
+
+:- type remote_args_tag_info
+    --->    remote_args_only_functor
+            % This is for functors in types that have only a single functor.
+            % For these types, we don't need any tags, primary or secondary,
+            % to distingish between function symbols. However, we do have
+            % to decide what to put into bottom two or three bits (on 32-
+            % and 64-bit systems respectively) of the representation of
+            % every term, the area reserved for the primary tag. For these
+            % functors, we put zeroes there, which is equivalent to having
+            % zero as a ptag. The rest of the word is a pointer to the
+            % argument vector, which may start with zero or more type_infos
+            % and/or typeclass_infos added by the polymorphism transformation.
+            %
+            % This kind of tag is used by both the low level and the
+            % the high level data representation.
+
+    ;       remote_args_unshared(ptag)
+            % This is for non-constants functors which can be distinguished
+            % from other functors in their type with just the primary tag.
+            % Terms whose functor has a cons_tag using this value are
+            % represented by a word whose bottom two or three bits contain
+            % the given ptag, with the rest of the word being a pointer to the
+            % argument vector, which may start with zero or more type_infos
+            % and/or typeclass_infos added by the polymorphism transformation.
+            %
+            % This kind of tag is used only by the low level data
+            % representation.
+
+    ;       remote_args_shared(ptag, remote_sectag)
+            % This is for non-constants functors which cannot be distinguished
+            % from other functors in their type with just the primary tag,
+            % but need a remote secondary tag as well. Terms whose functor
+            % has a cons_tag using this value are represented by a word
+            % whose bottom two or three bits contain the given ptag, with
+            % the rest of the word being a pointer to the tagword, the word
+            % containing the remote secondary tag. The second argument gives
+            % both the value and the size of the remote sectag.
+            %
+            % If the size is rsectag_word, the remote sectag will occupy
+            % the whole tagword, which may then be followed by zero or more
+            % type_infos and/or typeclass_infos added by the polymorphism
+            % transformation, and then the arguments themselves.
+            %
+            % If the size is rsectag_bits, the remote sectag will occupy
+            % the bottom sectag_num_bits bits of the  tagword, with the
+            % rest of the word containing an initial subsequence of zero or
+            % more subword-sized arguments.
+            %
+            % If the number of subword-size arguments packed in the tagword
+            % is zero, then the tagword may be followed by type_infos and/or
+            % typeclass_infos added by the polymorphism transformation,
+            % followed by the arguments themselves, as usual. However,
+            % if the number of subword-size arguments packed in the tagword
+            % is *not*, zero, then these must be followed immediately by
+            % the rest of the arguments (if any); they may *not* be followed by
+            % any such type_infos and/or typeclass_infos added by polymorphism.
+            % (The implementation uses this implication in reverse: if we
+            % *would* need to add type_infos and/or typeclass_infos, then
+            % du_type_layout will choose not to pack any arguments next
+            % to the remote sectag, even if it otherwise could do so.)
+            %
+            % This restriction preserves the old invariant that the
+            % arguments added by polymorphism go before all user-visible
+            % arguments. Loosening that invariant would require substantial
+            % changes to polymorphism.m.
+            %
+            % Note that all the functors sharing a given ptag value must agree
+            % on the exact size of the remote sectag (i.e. whether it is
+            % a whole word or not, and if not, how many bits it has),
+            % since tests of the form X = f(...) need to know how many
+            % of the bits of the remote tagword to look at.
+            %
+            % This kind of tag is used only by the low level data
+            % representation.
+
+    ;       remote_args_ctor(uint).
+            % The high level data representation does not use either primary
+            % or secondary tags. Instead, the various function symbols
+            % of the type are distinguished by an integer stored in a field
+            % named "data" of the base class (representing terms of the type),
+            % which is inherited by each of the subclasses (each of which
+            % represents terms whose top function symbol is a given functor).
+            % The argument gives the value of "data" for this function symbol.
+            %
+            % This kind of tag is used only by the high level data
+            % representation.
+            %
+            % XXX ARG_PACK Maybe we should include include MaybeCtorName,
+            % the output of the first few lines of the predicate
+            % ml_generate_dynamic_construct_compound, in both
+            % remote_args_tag_infos that may be used by the high level
+            % representation, so that the constructor name, if any,
+            % is computed just once for each function symbol.
+            % This would require separating the low and high level data
+            % uses of remote_args_only_functor.
+
+:- type remote_sectag
+    --->    remote_sectag(
+                rsectag_value       :: uint,
+                rsectag_size        :: rsectag_size
+            ).
+
+:- type rsectag_size
+    --->    rsectag_word
+    ;       rsectag_subword(sectag_bits).
+
+:- type sectag_bits
+    --->    sectag_bits(
+                % A local secondary tag is always next to the primary tag.
+                % A remote secondary tag is always at the start of the word
+                % at offset 0 in the memory cell.
+                sectag_num_bits     :: uint8,
+                sectag_mask         :: uint
+            ).
 
     % Return the primary tag, if any, for a cons_tag.
     % A return value of `no' means the primary tag is unknown.
@@ -203,7 +374,7 @@
     % Return the secondary tag, if any, for a cons_tag.
     % A return value of `no' means there is no secondary tag.
     %
-:- func get_maybe_secondary_tag(cons_tag) = maybe(sectag).
+:- func get_maybe_secondary_tag(cons_tag) = maybe(int).
 
 %---------------------%
 
@@ -220,7 +391,7 @@
 
 :- implementation.
 
-get_maybe_primary_tag(Tag) = MaybePrimaryTag :-
+get_maybe_primary_tag(Tag) = MaybePtag :-
     (
         % In some of the cases where we return `no' here,
         % it would probably be OK to return `yes(0)'.
@@ -240,23 +411,45 @@ get_maybe_primary_tag(Tag) = MaybePrimaryTag :-
         ; Tag = table_io_entry_tag(_, _)
         ; Tag = deep_profiling_proc_layout_tag(_, _)
         ),
-        MaybePrimaryTag = no
+        MaybePtag = no
     ;
         Tag = ground_term_const_tag(_, SubTag),
-        MaybePrimaryTag = get_maybe_primary_tag(SubTag)
+        MaybePtag = get_maybe_primary_tag(SubTag)
     ;
-        Tag = single_functor_tag,
-        MaybePrimaryTag = yes(0)
-    ;
-        ( Tag = unshared_tag(PrimaryTag)
-        ; Tag = direct_arg_tag(PrimaryTag)
-        ; Tag = shared_remote_tag(PrimaryTag, _SecondaryTag, _)
-        ; Tag = shared_local_tag(PrimaryTag, _SecondaryTag)
+        ( Tag = direct_arg_tag(Ptag)
+        ; Tag = shared_local_tag_no_args(Ptag, _, _)
         ),
-        MaybePrimaryTag = yes(PrimaryTag)
+        MaybePtag = yes(Ptag)
+    ;
+        Tag = remote_args_tag(RemoteArgsTagInfo),
+        (
+            RemoteArgsTagInfo = remote_args_only_functor,
+            MaybePtag = yes(ptag(0u8))
+        ;
+            ( RemoteArgsTagInfo = remote_args_unshared(Ptag)
+            ; RemoteArgsTagInfo = remote_args_shared(Ptag, _)
+            ),
+            MaybePtag = yes(Ptag)
+        ;
+            RemoteArgsTagInfo = remote_args_ctor(_),
+            % XXX This is a lie; the high level data representation does not
+            % use primary tags. Our caller should never call us with this
+            % value of RemoteArgsTagInfo.
+            MaybePtag = yes(ptag(0u8))
+        )
+    ;
+        Tag = local_args_tag(LocalArgsTagInfo),
+        (
+            LocalArgsTagInfo = local_args_only_functor,
+            Ptag = ptag(0u8)
+        ;
+            LocalArgsTagInfo = local_args_not_only_functor(Ptag, _LocalSectag)
+        ),
+        MaybePtag = yes(Ptag)
     ).
 
-get_maybe_secondary_tag(Tag) = MaybeSecondaryTag :-
+get_maybe_secondary_tag(Tag) = MaybeSectag :-
+    % XXX Return a uint?
     (
         ( Tag = int_tag(_)
         ; Tag = float_tag(_)
@@ -272,19 +465,48 @@ get_maybe_secondary_tag(Tag) = MaybeSecondaryTag :-
         ; Tag = table_io_entry_tag(_, _)
         ; Tag = no_tag
         ; Tag = dummy_tag
-        ; Tag = unshared_tag(_PrimaryTag)
         ; Tag = direct_arg_tag(_PrimaryTag)
-        ; Tag = single_functor_tag
         ),
-        MaybeSecondaryTag = no
+        MaybeSectag = no
     ;
         Tag = ground_term_const_tag(_, SubTag),
-        MaybeSecondaryTag = get_maybe_secondary_tag(SubTag)
+        MaybeSectag = get_maybe_secondary_tag(SubTag)
     ;
-        ( Tag = shared_remote_tag(_PrimaryTag, SecondaryTag, _)
-        ; Tag = shared_local_tag(_PrimaryTag, SecondaryTag)
+        Tag = shared_local_tag_no_args(_Ptag, LocalSectag, _),
+        LocalSectag = local_sectag(SectagUint, _, _),
+        Sectag = uint.cast_to_int(SectagUint),
+        MaybeSectag = yes(Sectag)
+    ;
+        Tag = local_args_tag(LocalArgsTagInfo),
+        (
+            LocalArgsTagInfo = local_args_only_functor,
+            Sectag = 0
+        ;
+            LocalArgsTagInfo = local_args_not_only_functor(_Ptag, LocalSectag),
+            LocalSectag = local_sectag(SectagUint, _, _),
+            Sectag = uint.cast_to_int(SectagUint)
         ),
-        MaybeSecondaryTag = yes(SecondaryTag)
+        MaybeSectag = yes(Sectag)
+    ;
+        Tag = remote_args_tag(RemoteArgsTagInfo),
+        (
+            ( RemoteArgsTagInfo = remote_args_only_functor
+            ; RemoteArgsTagInfo = remote_args_unshared(_)
+            ),
+            MaybeSectag = no
+        ;
+            RemoteArgsTagInfo = remote_args_shared(_Ptag, RemoteSectag),
+            RemoteSectag = remote_sectag(SectagUint, _),
+            Sectag = uint.cast_to_int(SectagUint),
+            MaybeSectag = yes(Sectag)
+        ;
+            RemoteArgsTagInfo = remote_args_ctor(Data),
+            % XXX This is a sort-of lie; the high level data representation
+            % does not use secondary tags the same way as the low level
+            % data representation does. Our caller should never call us
+            % with this value of RemoteArgsTagInfo.
+            MaybeSectag = yes(uint.cast_to_int(Data))
+        )
     ).
 
 project_tagged_cons_id_tag(TaggedConsId) = Tag :-
@@ -1063,11 +1285,19 @@ set_type_defn_prev_errors(X, !Defn) :-
                 % XXX TYPE_REPN Include this information in the
                 % constructor_repns in the dur_ctor_repns and dur_ctor_map
                 % fields.
+                % The maybe() wrapper looks to be unnecessary, but we
+                % currently use it to allow the representation of
+                % "where direct_arg is []" annotations on types,
+                % such as in tests/invalid/where_direct_arg.m.
                 dur_direct_arg_ctors        :: maybe(list(sym_name_and_arity))
             ).
 
 :- type constructor_repn
     --->    ctor_repn(
+                % The ordinal number of the functor. The first functor
+                % in a type definition has ordinal number 0.
+                cr_ordinal          :: int,
+
                 % Existential constraints, if any.
                 cr_maybe_exist      :: maybe_cons_exist_constraints,
 
@@ -1200,7 +1430,7 @@ constructor_cons_ids(TypeCtor, Ctors) = SortedConsIds :-
 
 gather_constructor_cons_ids(_TypeCtor, [], !ConsIds).
 gather_constructor_cons_ids(TypeCtor, [Ctor | Ctors], !ConsIds) :-
-    Ctor = ctor(_MaybeExistConstraints, SymName, _Args, Arity, _Ctxt),
+    Ctor = ctor(_Ordinal, _MaybeExistConstraints, SymName, _Args, Arity, _Ctxt),
     ConsId = cons(SymName, Arity, TypeCtor),
     !:ConsIds = [ConsId | !.ConsIds],
     gather_constructor_cons_ids(TypeCtor, Ctors, !ConsIds).
@@ -1268,8 +1498,8 @@ asserted_word_aligned_pointer(foreign_type_assertions(Set)) :-
 :- interface.
 
     % The type definitions for no_tag types have information mirrored in a
-    % separate table for faster lookups. mode_util.mode_to_arg_mode makes
-    % heavy use of type_util.type_is_no_tag_type.
+    % separate table for faster lookups. mode_util.mode_to_top_functor_mode
+    % makes heavy use of type_util.type_is_no_tag_type.
     %
 :- type no_tag_type
     --->    no_tag_type(

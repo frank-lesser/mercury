@@ -2,8 +2,7 @@
 
 // Copyright (C) 1998-2012 The University of Melbourne.
 // Copyright (C) 2013-2018 The Mercury team.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // This file contains the top level of the code of the internal, in-process
 // debugger. The functions implementing the commands themselves are in the
@@ -115,10 +114,6 @@
 
 #define MDBRC_FILENAME          ".mdbrc"
 #define DEFAULT_MDBRC_FILENAME  "mdbrc"
-
-#if defined(MR_HAVE__SNPRINTF) && ! defined(MR_HAVE_SNPRINTF)
-  #define snprintf  _snprintf
-#endif
 
 // XXX We should consider whether all the static variables in this module
 // should be thread local.
@@ -263,8 +258,7 @@ static const char MR_trace_banner[] =
 "Melbourne Mercury Debugger, mdb version %s.\n\
 Copyright 1998-2012 The University of Melbourne.\n\
 Copyright 2013-2018 The Mercury team.\n\
-mdb is free software, covered by the GNU General Public License.\n\
-There is absolutely no warranty for mdb.\n";
+mdb is free software; there is absolutely no warranty for mdb.\n";
 
 static FILE *
 MR_try_fopen(const char *filename, const char *mode, FILE *default_file)
@@ -1383,9 +1377,9 @@ MR_trace_event_print_internal_report(MR_EventInfo *event_info)
 
         event_num = MR_standardize_event_num(event_info->MR_event_number);
         call_num = MR_standardize_call_num(event_info->MR_call_seqno);
-        snprintf(buf, 64, "E%ld", (long) event_num);
+        MR_snprintf(buf, 64, "E%ld", (long) event_num);
         fprintf(MR_mdb_out, "%8s: ", buf);
-        snprintf(buf, 64, "C%ld", (long) call_num);
+        MR_snprintf(buf, 64, "C%ld", (long) call_num);
         fprintf(MR_mdb_out, "%6s ", buf);
         fprintf(MR_mdb_out, "%s",
             MR_simplified_port_names[event_info->MR_trace_port]);

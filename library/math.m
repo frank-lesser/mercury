@@ -1,10 +1,9 @@
 %---------------------------------------------------------------------------%
-% vim: ft=mercury ts=4 sw=4 et wm=0 tw=0
+% vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1995-2007, 2011-2012 The University of Melbourne.
-% Copyright (C) 2014, 2016-2017 The Mercury team.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2014, 2016-2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: math.m.
@@ -57,21 +56,25 @@
 
     % ceiling(X) = Ceil is true if Ceil is the smallest integer
     % not less than X.
+    % If X is of infinite magnitude then Ceil = X.
     %
 :- func ceiling(float) = float.
 
     % floor(X) = Floor is true if Floor is the largest integer
     % not greater than X.
+    % If X is of infinite magnitude then Floor = X.
     %
 :- func floor(float) = float.
 
     % round(X) = Round is true if Round is the integer closest to X.
     % If X has a fractional value of 0.5, it is rounded up.
+    % If X is of infinite magnitude then Round = X.
     %
 :- func round(float) = float.
 
     % truncate(X) = Trunc is true if Trunc is the integer closest to X
     % such that |Trunc| =< |X|.
+    % If X is of infinite magnitude then Trunc = X.
     %
 :- func truncate(float) = float.
 
@@ -236,14 +239,12 @@
 
     #include <math.h>
 
-    /*
-    ** Mathematical constants.
-    **
-    ** The maximum number of significant decimal digits which
-    ** can be packed into an IEEE-754 extended precision
-    ** floating point number is 18. Therefore 20 significant
-    ** decimal digits for these constants should be plenty.
-    */
+    // Mathematical constants.
+    //
+    // The maximum number of significant decimal digits which can be packed
+    // into an IEEE-754 extended precision floating point number is 18.
+    // Therefore 20 significant decimal digits for these constants
+    // should be plenty.
 
     #define ML_FLOAT_E      2.7182818284590452354
     #define ML_FLOAT_PI     3.1415926535897932384
@@ -257,7 +258,6 @@
     // For pi and e we use the constants defined in System.Math.
 
     public static double ML_FLOAT_LN2 = 0.69314718055994530941;
-
 
 ").
 
@@ -455,7 +455,14 @@ e = 2.7182818284590452353602874713526625.
     round(Num::in) = (Rounded::out),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    Rounded = java.lang.Math.round(Num);
+    // For +/- infinity Java's round method will return Long.{MAX,MIN}_VALUE.
+    // This does not match the documented Mercury behaviour for round with
+    // infinities.
+    if (java.lang.Double.isInfinite(Num)) {
+        Rounded = Num;
+    } else {
+        Rounded = java.lang.Math.round(Num);
+    }
 ").
 :- pragma foreign_proc("Erlang",
     round(Num::in) = (Rounded::out),

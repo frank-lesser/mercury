@@ -1,9 +1,9 @@
 %---------------------------------------------------------------------------%
-% vim: ft=mercury ts=4 sw=4 et wm=0 tw=0
+% vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1994-1997, 2000-2008, 2010-2011 The University of Melbourne.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% Copyright (C) 2013-2018 The Mercury team.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: store.m.
@@ -677,8 +677,8 @@ copy_ref_value(Ref, Val) -->
 "
     #include ""mercury_type_info.h""
     #include ""mercury_heap.h""
-    #include ""mercury_misc.h""         /* for MR_fatal_error() */
-    #include ""mercury_deconstruct.h""  /* for MR_arg() */
+    #include ""mercury_misc.h""         // for MR_fatal_error()
+    #include ""mercury_deconstruct.h""  // for MR_arg()
 ").
 
 :- pragma foreign_proc("C",
@@ -688,16 +688,16 @@ copy_ref_value(Ref, Val) -->
     MR_TypeInfo         type_info;
     MR_TypeInfo         arg_type_info;
     MR_TypeInfo         exp_arg_type_info;
-    MR_Word             *arg_ref;
-    const MR_DuArgLocn  *arg_locn;
+    MR_Word             arg_value;
+    MR_Word             *word_sized_arg_ptr;
 
     type_info = (MR_TypeInfo) TypeInfo_for_T;
     exp_arg_type_info = (MR_TypeInfo) TypeInfo_for_ArgT;
 
     MR_save_transient_registers();
 
-    if (!MR_arg(type_info, (MR_Word *) Ref, ArgNum, &arg_type_info,
-        &arg_ref, &arg_locn, MR_NONCANON_ABORT))
+    if (!MR_arg(type_info, (MR_Word *) Ref, MR_NONCANON_ABORT, ArgNum,
+        &arg_type_info, &arg_value, &word_sized_arg_ptr))
     {
         MR_fatal_error(""store.arg_ref: argument number out of range"");
     }
@@ -710,15 +710,13 @@ copy_ref_value(Ref, Val) -->
 
     MR_restore_transient_registers();
 
-    if (arg_locn != NULL && arg_locn->MR_arg_bits != 0) {
+    if (word_sized_arg_ptr == NULL) {
         MR_offset_incr_hp_msg(ArgRef, MR_SIZE_SLOT_SIZE,
             MR_SIZE_SLOT_SIZE + 1, MR_ALLOC_ID, ""store.ref/2"");
         MR_define_size_slot(0, ArgRef, 1);
-        // XXX I (zs) don't think this will work for arguments
-        // that are stored unboxed in two words.
-        * (MR_Word *) ArgRef = MR_arg_value(arg_ref, arg_locn);
+        * (MR_Word *) ArgRef = arg_value;
     } else {
-        ArgRef = (MR_Word) arg_ref;
+        ArgRef = (MR_Word) word_sized_arg_ptr;
     }
     S = S0;
 }").
@@ -727,11 +725,9 @@ copy_ref_value(Ref, Val) -->
     arg_ref(Ref::in, ArgNum::in, ArgRef::out, _S0::di, _S::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    /*
-    ** XXX Some dynamic type-checking should be done here to check that
-    ** the type of the specified Arg matches the type supplied by the caller.
-    ** This will require RTTI.
-    */
+    // XXX Some dynamic type-checking should be done here to check that
+    // the type of the specified Arg matches the type supplied by the caller.
+    // This will require RTTI.
 
     ArgRef = new store.Ref(Ref.getValue(), ArgNum);
 ").
@@ -740,11 +736,9 @@ copy_ref_value(Ref, Val) -->
     arg_ref(Ref::in, ArgNum::in, ArgRef::out, _S0::di, _S::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    /*
-    ** XXX Some dynamic type-checking should be done here to check that
-    ** the type of the specified Arg matches the type supplied by the caller.
-    ** This will require RTTI.
-    */
+    // XXX Some dynamic type-checking should be done here to check that
+    // the type of the specified Arg matches the type supplied by the caller.
+    // This will require RTTI.
 
     ArgRef = new store.Ref(Ref.getValue(), ArgNum);
 ").
@@ -756,16 +750,16 @@ copy_ref_value(Ref, Val) -->
     MR_TypeInfo         type_info;
     MR_TypeInfo         arg_type_info;
     MR_TypeInfo         exp_arg_type_info;
-    MR_Word             *arg_ref;
-    const MR_DuArgLocn  *arg_locn;
+    MR_Word             arg_value;
+    MR_Word             *word_sized_arg_ptr;
 
     type_info = (MR_TypeInfo) TypeInfo_for_T;
     exp_arg_type_info = (MR_TypeInfo) TypeInfo_for_ArgT;
 
     MR_save_transient_registers();
 
-    if (!MR_arg(type_info, (MR_Word *) &Val, ArgNum, &arg_type_info,
-        &arg_ref, &arg_locn, MR_NONCANON_ABORT))
+    if (!MR_arg(type_info, (MR_Word *) &Val, MR_NONCANON_ABORT, ArgNum,
+        &arg_type_info, &arg_value, &word_sized_arg_ptr))
     {
         MR_fatal_error(""store.new_arg_ref: argument number out of range"");
     }
@@ -778,27 +772,23 @@ copy_ref_value(Ref, Val) -->
 
     MR_restore_transient_registers();
 
-    if (arg_locn != NULL && arg_locn->MR_arg_bits != 0) {
+    if (word_sized_arg_ptr == NULL) {
         MR_offset_incr_hp_msg(ArgRef, MR_SIZE_SLOT_SIZE,
             MR_SIZE_SLOT_SIZE + 1, MR_ALLOC_ID, ""store.ref/2"");
         MR_define_size_slot(0, ArgRef, 1);
-        // XXX I (zs) don't think this will work for arguments
-        // that are stored unboxed in two words.
-        * (MR_Word *) ArgRef = MR_arg_value(arg_ref, arg_locn);
-    } else if (arg_ref == &Val) {
-        /*
-        ** For no_tag types, the argument may have the same address as the
-        ** term. Since the term (Val) is currently on the C stack, we can't
-        ** return a pointer to it; so if that is the case, then we need
-        ** to copy it to the heap before returning.
-        */
+        * (MR_Word *) ArgRef = arg_value;
+    } else if (word_sized_arg_ptr == &Val) {
+        // For no_tag types, the argument may have the same address as the
+        // term. Since the term (Val) is currently on the C stack, we can't
+        // return a pointer to it; so if that is the case, then we need
+        // to copy it to the heap before returning.
 
         MR_offset_incr_hp_msg(ArgRef, MR_SIZE_SLOT_SIZE,
             MR_SIZE_SLOT_SIZE + 1, MR_ALLOC_ID, ""store.ref/2"");
         MR_define_size_slot(0, ArgRef, 1);
         * (MR_Word *) ArgRef = Val;
     } else {
-        ArgRef = (MR_Word) arg_ref;
+        ArgRef = (MR_Word) word_sized_arg_ptr;
     }
     S = S0;
 }").
@@ -807,11 +797,9 @@ copy_ref_value(Ref, Val) -->
     new_arg_ref(Val::di, ArgNum::in, ArgRef::out, _S0::di, _S::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    /*
-    ** XXX Some dynamic type-checking should be done here to check that
-    ** the type of the specified Arg matches the type supplied by the caller.
-    ** This will require RTTI.
-    */
+    // XXX Some dynamic type-checking should be done here to check that
+    // the type of the specified Arg matches the type supplied by the caller.
+    // This will require RTTI.
 
     ArgRef = new store.Ref(Val, ArgNum);
 ").
@@ -820,11 +808,9 @@ copy_ref_value(Ref, Val) -->
     new_arg_ref(Val::di, ArgNum::in, ArgRef::out, _S0::di, _S::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    /*
-    ** XXX Some dynamic type-checking should be done here to check that
-    ** the type of the specified Arg matches the type supplied by the caller.
-    ** This will require RTTI.
-    */
+    // XXX Some dynamic type-checking should be done here to check that
+    // the type of the specified Arg matches the type supplied by the caller.
+    // This will require RTTI.
 
     ArgRef = new store.Ref(Val, ArgNum);
 ").
@@ -857,6 +843,13 @@ copy_ref_value(Ref, Val) -->
 "
     * (MR_Word *) Ref = Val;
     S = S0;
+").
+
+:- pragma foreign_proc("C#",
+    set_ref_value(Ref::in, Val::di, _S0::di, _S::uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    Ref.setValue(Val);
 ").
 
 :- pragma foreign_proc("Java",
@@ -893,7 +886,7 @@ copy_ref_value(Ref, Val) -->
     unsafe_arg_ref(Ref::in, Arg::in, ArgRef::out, S0::di, S::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "{
-    /* unsafe - does not check type & arity, won't handle no_tag types */
+    // Unsafe - does not check type & arity, won't handle no_tag types.
     MR_Word *Ptr;
 
     Ptr = (MR_Word *) MR_strip_tag((MR_Word) Ref);
@@ -919,7 +912,7 @@ copy_ref_value(Ref, Val) -->
     unsafe_new_arg_ref(Val::di, Arg::in, ArgRef::out, S0::di, S::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "{
-    /* unsafe - does not check type & arity, won't handle no_tag types */
+    // Unsafe - does not check type & arity, won't handle no_tag types.
     MR_Word *Ptr;
 
     Ptr = (MR_Word *) MR_strip_tag((MR_Word) Val);

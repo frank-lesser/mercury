@@ -32,9 +32,7 @@
 %-----------------------------------------------------------------------------%
 
 :- type unary_op
-    --->    mktag
-    ;       tag
-    ;       unmktag
+    --->    tag
     ;       strip_tag
     ;       mkbody
     ;       unmkbody
@@ -284,9 +282,7 @@ builtin_translation(ModuleName, PredName, ProcNum, Args, Code) :-
             PredName = "trace_set_io_state", ProcNum = 0, Args = [_X],
             Code = noop([])
         ;
-            ( PredName = "store_at_ref"
-            ; PredName = "store_at_ref_impure"
-            ),
+            PredName = "store_at_ref_impure",
             ProcNum = 0, Args = [X, Y],
             Code = ref_assign(X, Y)
         ;

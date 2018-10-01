@@ -48,7 +48,7 @@
 :- import_module ml_backend.ml_global_data.
 :- import_module ml_backend.ml_proc_gen.
 :- import_module ml_backend.ml_type_gen.
-:- import_module ml_backend.ml_unify_gen.
+:- import_module ml_backend.ml_unify_gen_construct.
 :- import_module ml_backend.ml_util.
 :- import_module parse_tree.prog_data.
 :- import_module parse_tree.prog_data_foreign.
@@ -77,7 +77,7 @@ ml_code_gen(Target, MLDS, !ModuleInfo, !Specs) :-
     ml_gen_types(!.ModuleInfo, Target, TypeDefns),
     ml_gen_table_structs(!.ModuleInfo, TableStructDefns),
     ml_gen_init_global_data(!.ModuleInfo, Target, GlobalData0),
-    ml_gen_const_structs(!.ModuleInfo, Target, ConstStructMap,
+    ml_generate_const_structs(!.ModuleInfo, Target, ConstStructMap,
         GlobalData0, GlobalData1),
     ml_gen_exported_enums(!.ModuleInfo, ExportedEnums),
     module_info_user_init_pred_c_names(!.ModuleInfo, InitPreds),

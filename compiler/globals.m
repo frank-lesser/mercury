@@ -113,8 +113,7 @@
 
 :- type tags_method
     --->    tags_none
-    ;       tags_low
-    ;       tags_high.
+    ;       tags_low.
 
 :- type termination_norm
     --->    norm_simple
@@ -434,7 +433,6 @@ convert_gc_method("automatic", gc_automatic).
 
 convert_tags_method("none", tags_none).
 convert_tags_method("low", tags_low).
-convert_tags_method("high", tags_high).
 
 convert_termination_norm("simple", norm_simple).
 convert_termination_norm("total", norm_total).
@@ -679,15 +677,15 @@ gc_is_conservative(gc_automatic) = no.
                 g_options                   :: option_table,
                 g_op_mode                   :: op_mode,
                 g_trace_suppress_items      :: trace_suppress_items,
-                g_c_compiler_type           :: c_compiler_type,
-                g_csharp_compiler_type      :: csharp_compiler_type,
                 g_reuse_strategy            :: reuse_strategy,
                 g_maybe_feedback            :: maybe(feedback_info),
                 g_file_install_cmd          :: file_install_cmd,
                 g_limit_error_contexts_map  :: limit_error_contexts_map,
+                g_c_compiler_type           :: c_compiler_type,
 
                 % The sub-word-sized arguments, clustered together
                 % to allow them to be packed together.
+                g_csharp_compiler_type      :: csharp_compiler_type,
                 g_target                    :: compilation_target,
                 g_gc_method                 :: gc_method,
                 g_tags_method               :: tags_method,
@@ -707,11 +705,10 @@ globals_init(Options, OpMode, Target, GC_Method, TagsMethod,
         ReuseStrategy, MaybeFeedback, HostEnvType, SystemEnvType,
         TargetEnvType, FileInstallCmd, LimitErrorContextsMap, Globals) :-
     Globals = globals(Options, OpMode, TraceSuppress,
-        C_CompilerType, CSharp_CompilerType, ReuseStrategy, MaybeFeedback,
-        FileInstallCmd, LimitErrorContextsMap,
-        Target, GC_Method, TagsMethod, TerminationNorm, Termination2Norm,
-        TraceLevel, SSTraceLevel, MaybeThreadSafe,
-        HostEnvType, SystemEnvType, TargetEnvType).
+        ReuseStrategy, MaybeFeedback, FileInstallCmd, LimitErrorContextsMap,
+        C_CompilerType, CSharp_CompilerType, Target, GC_Method, TagsMethod,
+        TerminationNorm, Termination2Norm, TraceLevel, SSTraceLevel,
+        MaybeThreadSafe, HostEnvType, SystemEnvType, TargetEnvType).
 
 get_options(Globals, Globals ^ g_options).
 get_op_mode(Globals, Globals ^ g_op_mode).

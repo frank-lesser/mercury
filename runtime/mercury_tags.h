@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1993-2001, 2003-2007 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_tags.h - defines macros for tagging and untagging words.
 // Also defines macros for accessing the Mercury list type from C.
@@ -23,38 +23,16 @@
 // that we can use for tags.
 
 #ifndef MR_TAGBITS
-  #ifdef MR_HIGHTAGS
-    #error "MR_HIGHTAGS defined but MR_TAGBITS undefined"
-  #else
-    #define MR_TAGBITS  MR_LOW_TAG_BITS
-  #endif
+  #define MR_TAGBITS  MR_LOW_TAG_BITS
 #endif
-
-#if MR_TAGBITS > 0 && defined(MR_HIGHTAGS) && defined(MR_CONSERVATIVE_GC)
-  #error "Conservative GC does not work with high tag bits"
-#endif
-
-#ifdef  MR_HIGHTAGS
-
-#define MR_mktag(t)     ((MR_Word)(t) << (MR_WORDBITS - MR_TAGBITS))
-#define MR_unmktag(w)   ((MR_Word)(w) >> (MR_WORDBITS - MR_TAGBITS))
-#define MR_tag(w)       (((MR_Word)(w)) & ~(~(MR_Word)0 >> MR_TAGBITS))
-#define MR_mkbody(i)    (i)
-#define MR_unmkbody(w)  (w)
-#define MR_body(w, t)   ((w) & (~(MR_Word)0 >> MR_TAGBITS))
-#define MR_strip_tag(w) ((w) & (~(MR_Word)0 >> MR_TAGBITS))
-
-#else // ! MR_HIGHTAGS
 
 #define MR_mktag(t)     (t)
 #define MR_unmktag(w)   (w)
-#define MR_tag(w)       (((MR_Word)(w)) & ((1 << MR_TAGBITS) - 1))
+#define MR_tag(w)       (((MR_Word) (w)) & ((1 << MR_TAGBITS) - 1))
 #define MR_mkbody(i)    ((i) << MR_TAGBITS)
 #define MR_unmkbody(w)  ((MR_Word) (w) >> MR_TAGBITS)
 #define MR_body(w, t)   ((MR_Word) (w) - (t))
-#define MR_strip_tag(w) ((w) & (~(MR_Word)0 << MR_TAGBITS))
-
-#endif // ! MR_HIGHTAGS
+#define MR_strip_tag(w) ((w) & ((~ (MR_Word) 0) << MR_TAGBITS))
 
 // The result of MR_mkword() is cast to (MR_Word *), not to (MR_Word)
 // because MR_mkword() may be used in initializers for static constants
@@ -63,7 +41,7 @@
 // some ANSI C compilers won't allow assignments where the RHS is of type
 // const and the LHS is not declared const.
 
-#define MR_mkword(t, p)             ((MR_Word *)((char *)(p) + (t)))
+#define MR_mkword(t, p)             ((MR_Word *) ((char *) (p) + (t)))
 #define MR_tmkword(t, p)            (MR_mkword(MR_mktag(t), p))
 #define MR_tbmkword(t, p)           (MR_mkword(MR_mktag(t), MR_mkbody(p)))
 
@@ -234,11 +212,10 @@
     MR_typed_list_cons_msg(MR_type_info_for_pseudo_type_info, (head),   \
         MR_type_info_for_list_of_pseudo_type_info, (tail), alloc_id)
 
-// Convert an enumeration declaration into one which assigns the same
-// values to the enumeration constants as Mercury's tag allocation scheme
-// assigns. (This is necessary because in .rt grades Mercury enumerations are
-// not assigned the same values as 'normal' C enumerations).
-// XXX We don't have .rt grades anymore.
+// When we still had .rt (reserve_tag) grades, we used this macro to ensure
+// that the values of enum constants do not collide with the reserved tag
+// value. However, since do not support .rt grades anymore, such chicanery
+// is no longer necessary.
 //
 // Note that enums have the same size as ints, but not necessarily the same
 // size as MR_Words. Types that are defined this way should not be used by
@@ -251,20 +228,13 @@
 
 #define MR_GET_ENUM_VALUE(x)            (x)
 
-// For each enumeration constant defined in the runtime (not in Mercury)
-// that we need the compiler to be able to generate, we define it using two
-// names; first we define the unqualified name, and then we define
-// another enumeration constant whose name is the unqualified name
-// prefixed with `mercury__private_builtin__' and whose value is
-// the same as that of the unqualified name.
-// The qualified versions are used by the MLDS->C back-end,
-// which generates references to them.
+// We used to define each enumeration constant in the runtime (not in Mercury)
+// twice, with the same value: once under its plain name, and once prefixed
+// with the string `mercury__private_builtin__'. The qualified version was
+// used by the MLDS->C back-end, back when it forcibly either module- or
+// type-qualified everything. We do not do that anymore.
 
-#define MR_DEFINE_BUILTIN_ENUM_CONST(x)                                 \
-        MR_PASTE2(x, _val),                                             \
-        x = MR_CONVERT_C_ENUM_CONSTANT(MR_PASTE2(x, _val)),             \
-        MR_PASTE2(mercury__private_builtin__,x) = x,                    \
-        MR_PASTE2(x, _dummy) = MR_PASTE2(x, _val)
+#define MR_DEFINE_BUILTIN_ENUM_CONST(x) x
 
 #define MR_INT_EQ(rval, val)    (((MR_Integer) (rval)) == ((MR_Integer) (val)))
 #define MR_INT_NE(rval, val)    (((MR_Integer) (rval)) != ((MR_Integer) (val)))

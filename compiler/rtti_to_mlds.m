@@ -53,8 +53,8 @@
 
 :- implementation.
 
-:- import_module backend_libs.foreign.
 :- import_module backend_libs.type_ctor_info.
+:- import_module hlds.hlds_data.
 :- import_module hlds.hlds_pred.
 :- import_module hlds.hlds_rtti.
 :- import_module libs.
@@ -70,19 +70,19 @@
 :- import_module ml_backend.ml_util.
 :- import_module parse_tree.
 :- import_module parse_tree.prog_data.
-:- import_module parse_tree.prog_type.
 
 :- import_module assoc_list.
 :- import_module bool.
 :- import_module counter.
 :- import_module digraph.
-:- import_module int.
 :- import_module map.
 :- import_module maybe.
 :- import_module pair.
 :- import_module require.
 :- import_module set.
 :- import_module term.
+:- import_module uint.
+:- import_module uint8.
 :- import_module univ.
 
 %-----------------------------------------------------------------------------%
@@ -606,8 +606,8 @@ gen_functors_layout_info(ModuleInfo, Target, RttiTypeCtor, TypeCtorDetails,
         !GlobalData) :-
     module_info_get_name(ModuleInfo, ModuleName),
     (
-        TypeCtorDetails = tcd_enum(_, EnumFunctors, EnumByValue, EnumByName,
-            _IsDummy, FunctorNumberMap),
+        TypeCtorDetails = tcd_enum(_, _IsDummy, EnumFunctors,
+            EnumByValue, EnumByName, FunctorNumberMap),
         list.foldl(gen_enum_functor_desc(ModuleInfo, RttiTypeCtor),
             EnumFunctors, !GlobalData),
         gen_enum_value_ordered_table(ModuleInfo, RttiTypeCtor,
@@ -732,7 +732,8 @@ gen_notag_functor_desc(ModuleInfo, Target, RttiTypeCtor, NotagFunctorDesc,
     Initializer = init_struct(mlds_rtti_type(item_type(RttiId)), [
         gen_init_string(FunctorName),
         PTIInitializer,
-        gen_init_maybe(ml_string_type, gen_init_string, MaybeArgName),
+        gen_init_maybe(mlds_builtin_type_string, gen_init_string,
+            MaybeArgName),
         gen_init_functor_subtype_info(FunctorSubtypeInfo)
     ]),
     rtti_id_and_init_to_defn(RttiId, Initializer, !GlobalData).
@@ -799,25 +800,42 @@ gen_du_functor_desc(ModuleInfo, Target, RttiTypeCtor, DuFunctor,
                 ctor_rtti_id(RttiTypeCtor, type_ctor_exist_info(0)))))
     ),
     (
-        Rep = du_ll_rep(Ptag, SectagAndLocn)
+        Rep = du_ll_rep(Ptag, SectagAndLocn),
+        Ptag = ptag(PtagUint8),
+        PtagInt = uint8.cast_to_int(PtagUint8)
     ;
-        Rep = du_hl_rep(_),
-        unexpected($module, $pred, "du_hl_rep")
+        Rep = du_hl_rep(Data),
+        PtagInt = 0,
+        SectagAndLocn = sectag_locn_remote_word(Data)
     ),
     (
         SectagAndLocn = sectag_locn_none,
         Locn = sectag_none,
-        Stag = -1
+        Stag = -1,
+        NumSectagBits = 0u8
     ;
         SectagAndLocn = sectag_locn_none_direct_arg,
         Locn = sectag_none_direct_arg,
-        Stag = -1
+        Stag = -1,
+        NumSectagBits = 0u8
     ;
-        SectagAndLocn = sectag_locn_local(Stag),
-        Locn = sectag_local
+        SectagAndLocn = sectag_locn_local_rest_of_word(StagUint),
+        Locn = sectag_local_rest_of_word,
+        Stag = uint.cast_to_int(StagUint),
+        NumSectagBits = 0u8
     ;
-        SectagAndLocn = sectag_locn_remote(Stag),
-        Locn = sectag_remote
+        SectagAndLocn = sectag_locn_local_bits(StagUint, NumSectagBits, Mask),
+        Locn = sectag_local_bits(NumSectagBits, Mask),
+        Stag = uint.cast_to_int(StagUint)
+    ;
+        SectagAndLocn = sectag_locn_remote_word(StagUint),
+        Locn = sectag_remote_word,
+        Stag = uint.cast_to_int(StagUint),
+        NumSectagBits = 0u8
+    ;
+        SectagAndLocn = sectag_locn_remote_bits(StagUint, NumSectagBits, Mask),
+        Locn = sectag_remote_bits(NumSectagBits, Mask),
+        Stag = uint.cast_to_int(StagUint)
     ),
     RttiName = type_ctor_du_functor_desc(Ordinal),
     RttiId = ctor_rtti_id(RttiTypeCtor, RttiName),
@@ -826,14 +844,15 @@ gen_du_functor_desc(ModuleInfo, Target, RttiTypeCtor, DuFunctor,
         gen_init_int(Arity),
         gen_init_int(ContainsVarBitVector),
         gen_init_sectag_locn(Locn),
-        gen_init_int(Ptag),
+        gen_init_int(PtagInt),
         gen_init_int(Stag),
         gen_init_int(Ordinal),
         ArgTypeInitializer,
         ArgNameInitializer,
         ArgLocnsInitializer,
         ExistInfoInitializer,
-        gen_init_functor_subtype_info(FunctorSubtypeInfo)
+        gen_init_functor_subtype_info(FunctorSubtypeInfo),
+        wrap_init_obj(ml_const(mlconst_uint8(NumSectagBits)))
     ]),
     rtti_id_and_init_to_defn(RttiId, Initializer, !GlobalData).
 
@@ -958,11 +977,8 @@ gen_field_types(ModuleInfo, Target, RttiTypeCtor, Ordinal, Types,
     list(maybe(string))::in, ml_global_data::in, ml_global_data::out) is det.
 
 gen_field_names(_ModuleInfo, RttiTypeCtor, Ordinal, MaybeNames, !GlobalData) :-
-    StrType = builtin_type(builtin_type_string),
     Initializer = gen_init_array(
-        gen_init_maybe(
-            mercury_type(StrType, no, ctor_cat_builtin(cat_builtin_string)),
-            gen_init_string),
+        gen_init_maybe(mlds_builtin_type_string, gen_init_string),
         MaybeNames),
     RttiName = type_ctor_field_names(Ordinal),
     rtti_name_and_init_to_defn(RttiTypeCtor, RttiName, Initializer,
@@ -1022,8 +1038,7 @@ gen_field_locn(RttiId, ArgInfo, ArgLocnInitializer) :-
     ;
         (
             ArgPosWidth = apw_partial_first(arg_only_offset(ArgOnlyOffset),
-                _, arg_num_bits(NumBits0), _, Fill),
-            Shift = 0
+                _, arg_shift(Shift), arg_num_bits(NumBits0), _, Fill)
         ;
             ArgPosWidth = apw_partial_shifted(arg_only_offset(ArgOnlyOffset),
                 _, arg_shift(Shift), arg_num_bits(NumBits0), _, Fill)
@@ -1031,7 +1046,9 @@ gen_field_locn(RttiId, ArgInfo, ArgLocnInitializer) :-
         % NumBits = -4 to -9 mean the argument takes part a word
         % and contains an 8, 16 or 32 bit sized int or uint.
         (
-            Fill = fill_enum,
+            ( Fill = fill_enum
+            ; Fill = fill_char21
+            ),
             NumBits = NumBits0
         ;
             Fill = fill_int8,
@@ -1133,7 +1150,7 @@ gen_foreign_enum_name_ordered_table(ModuleInfo, RttiTypeCtor,
         !GlobalData).
 
 :- pred gen_du_ptag_ordered_table(module_info::in, rtti_type_ctor::in,
-    map(int, sectag_table)::in, ml_global_data::in, ml_global_data::out)
+    map(ptag, sectag_table)::in, ml_global_data::in, ml_global_data::out)
     is det.
 
 gen_du_ptag_ordered_table(ModuleInfo, RttiTypeCtor, PtagMap, !GlobalData) :-
@@ -1143,67 +1160,55 @@ gen_du_ptag_ordered_table(ModuleInfo, RttiTypeCtor, PtagMap, !GlobalData) :-
         !GlobalData),
     (
         PtagList = [],
-        PtagInitPrefix = [],
-        FirstPtag = 0
+        FirstPtag = ptag(0u8)
     ;
         PtagList = [FirstPtag - _ | _],
-        ( if FirstPtag = 0 then
-            PtagInitPrefix = [],
-            FirstPtag = 0
-        else if  FirstPtag = 1 then
-            % Output a dummy ptag definition for the reserved tag first.
-            sectag_locn_to_string(sectag_none, SecTagTargetPrefixes, _),
-            RttiElemName = type_ctor_du_ptag_layout(0),
-            RttiElemId = ctor_rtti_id(RttiTypeCtor, RttiElemName),
-            PtagInitPrefix = [
-                init_struct(mlds_rtti_type(item_type(RttiElemId)),
-                [gen_init_int(0),
-                gen_init_builtin_const(SecTagTargetPrefixes,
-                    "MR_SECTAG_VARIABLE"),
-                gen_init_null_pointer(
-                    mlds_rtti_type(item_type(
-                        ctor_rtti_id(RttiTypeCtor,
-                            type_ctor_du_stag_ordered_table(0)))))]
-            )],
-            FirstPtag = 1
+        ( if FirstPtag = ptag(0u8) then
+            true
         else
             unexpected($module, $pred, "bad ptag list")
         )
     ),
-    PtagInitializers = gen_du_ptag_ordered_table_body(ModuleName, RttiTypeCtor,
-        PtagList, FirstPtag),
+    gen_du_ptag_ordered_table_body(ModuleName, RttiTypeCtor, FirstPtag,
+        PtagList, PtagInitializers),
     RttiName = type_ctor_du_ptag_ordered_table,
-    Initializer = init_array(PtagInitPrefix ++ PtagInitializers),
+    Initializer = init_array(PtagInitializers),
     rtti_name_and_init_to_defn(RttiTypeCtor, RttiName, Initializer,
         !GlobalData).
 
-:- func gen_du_ptag_ordered_table_body(module_name, rtti_type_ctor,
-    assoc_list(int, sectag_table), int) = list(mlds_initializer).
+:- pred gen_du_ptag_ordered_table_body(module_name::in, rtti_type_ctor::in,
+    ptag::in, assoc_list(ptag, sectag_table)::in, list(mlds_initializer)::out)
+    is det.
 
-gen_du_ptag_ordered_table_body(_, _, [], _) = [].
-gen_du_ptag_ordered_table_body(ModuleName, RttiTypeCtor,
-        [Ptag - SectagTable | PtagTail], CurPtag)
-        = [Initializer | Initializers] :-
+gen_du_ptag_ordered_table_body(_, _, _, [], []).
+gen_du_ptag_ordered_table_body(ModuleName, RttiTypeCtor, CurPtag,
+        [Ptag - SectagTable | PtagTail], [Initializer | Initializers]) :-
     expect(unify(Ptag, CurPtag), $module, $pred, "ptag mismatch"),
-    SectagTable = sectag_table(SectagLocn, NumSharers, _SectagMap),
+    SectagTable = sectag_table(SectagLocn, NumSectagBits, NumSharers,
+        _SectagMap),
     RttiName = type_ctor_du_ptag_layout(Ptag),
     RttiId = ctor_rtti_id(RttiTypeCtor, RttiName),
     Initializer = init_struct(mlds_rtti_type(item_type(RttiId)), [
-        gen_init_int(NumSharers),
+        % XXX ARG_PACK Why isn't the num_sharers field itself unsigned?
+        gen_init_int(uint.cast_to_int(NumSharers)),
         gen_init_sectag_locn(SectagLocn),
         gen_init_rtti_name(ModuleName, RttiTypeCtor,
-            type_ctor_du_stag_ordered_table(Ptag))
+            type_ctor_du_stag_ordered_table(Ptag)),
+        init_obj(ml_const(mlconst_int8(NumSectagBits)))
     ]),
-    Initializers = gen_du_ptag_ordered_table_body(ModuleName, RttiTypeCtor,
-        PtagTail, CurPtag + 1).
+    CurPtag = ptag(CurPtagUint8),
+    NextPtag = ptag(CurPtagUint8 + 1u8),
+    gen_du_ptag_ordered_table_body(ModuleName, RttiTypeCtor, NextPtag,
+        PtagTail, Initializers).
 
 :- pred gen_du_stag_ordered_table(module_name::in, rtti_type_ctor::in,
-    pair(int, sectag_table)::in,
+    pair(ptag, sectag_table)::in,
     ml_global_data::in, ml_global_data::out) is det.
 
 gen_du_stag_ordered_table(ModuleName, RttiTypeCtor, Ptag - SectagTable,
         !GlobalData) :-
-    SectagTable = sectag_table(_SectagLocn, _NumSharers, SectagMap),
+    SectagTable = sectag_table(_SectagLocn, _NumSectagBits, _NumSharers,
+        SectagMap),
     map.values(SectagMap, SectagFunctors),
     FunctorRttiNames = list.map(du_functor_rtti_name, SectagFunctors),
     Initializer = gen_init_rtti_names_array(ModuleName, RttiTypeCtor,
@@ -1263,7 +1268,7 @@ gen_init_cast_rtti_data(DestType, ModuleName, RttiData) = Initializer :-
         RttiData = rtti_data_pseudo_type_info(type_var(VarNum))
     then
         % rtti_data_to_id/3 does not handle this case
-        SrcType = mlds_native_int_type,
+        SrcType = mlds_builtin_type_int(int_type_int),
         Initializer = init_obj(gen_cast(SrcType, DestType,
             ml_const(mlconst_int(VarNum))))
     else if
@@ -1735,17 +1740,15 @@ add_rtti_defn_arcs_rval(DefnGlobalVarName, Rval, !Graph) :-
 
 add_rtti_defn_arcs_lval(DefnGlobalVarName, Lval, !Graph) :-
     (
-        Lval = ml_field(_, SubRval, _, _, _),
+        ( Lval = ml_field(_, SubRval, _, _, _)
+        ; Lval = ml_mem_ref(SubRval, _)
+        ),
         add_rtti_defn_arcs_rval(DefnGlobalVarName, SubRval, !Graph)
     ;
-        Lval = ml_mem_ref(SubRval, _Type),
-        add_rtti_defn_arcs_rval(DefnGlobalVarName, SubRval, !Graph)
-    ;
-        Lval = ml_target_global_var_ref(env_var_ref(_))
-    ;
-        Lval = ml_local_var(_, _)
-    ;
-        Lval = ml_global_var(_, _)
+        ( Lval = ml_target_global_var_ref(env_var_ref(_))
+        ; Lval = ml_local_var(_, _)
+        ; Lval = ml_global_var(_, _)
+        )
     ).
 
 :- pred add_rtti_defn_arcs_const(mlds_global_var_name::in,

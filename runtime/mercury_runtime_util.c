@@ -1,9 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 2001-2002, 2006 The University of Melbourne.
-// Copyright (C) 2014 The Mercury team.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // This module contains utility functions for the rest of the Mercury runtime.
 //
@@ -24,17 +23,7 @@
 static void
 generic_strerror(char *buf, size_t buflen, int errnum)
 {
-#if defined(MR_HAVE_SNPRINTF)
-    snprintf(buf, buflen, "Error %d", errnum);
-#elif defined(MR_HAVE__SNPRINTF)
-    // _snprintf does not guarantee null termination.
-    _snprintf(buf, buflen, "Error %d", errnum);
-    if (buflen > 0) {
-        buf[buflen - 1] = '\0';
-    }
-#else
-    #error "generic_error: unable to define"
-#endif
+    MR_snprintf(buf, buflen, "Error %d", errnum);
 }
 
 const char *

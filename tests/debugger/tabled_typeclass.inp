@@ -4,6 +4,7 @@ register --quiet
 table_io allow
 table_io start
 finish
-print io *
+print io limits
+print -m 100 io *
 retry -f
 continue

@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1995-2005, 2007, 2011-2012 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2015-2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_string.h - string handling
 
@@ -13,6 +13,32 @@
 
 #include <string.h>             // for strcmp() etc.
 #include <stdarg.h>
+#include <stdio.h>
+
+// On Windows, snprintf/vsnprintf may be synonyms for _snprintf/_vsnprintf and
+// thus not conform to the C99 specification. Since it is next to impossible to
+// tell at compile time which implementation we are getting, just define a
+// wrapper over _vsnprintf if it exists.
+// Beginning with the UCRT in Visual Studio 2015 and Windows 10, snprintf and
+// vsnprintf are C99 standard compliant so we may be able to drop this code
+// eventually.
+
+#if defined(MR_HAVE__VSNPRINTF)
+    extern int
+    MR_vsnprintf(char *str, size_t size, const char *format, va_list ap);
+#elif defined(MR_HAVE_VSNPRINTF)
+    #define MR_vsnprintf vsnprintf
+#else
+    #error "Missing both vsnprintf and _vsnprintf"
+#endif
+
+#if defined(MR_HAVE__SNPRINTF)
+    extern int MR_snprintf(char *str, size_t size, const char *format, ...);
+#elif defined(MR_HAVE_SNPRINTF)
+    #define MR_snprintf snprintf
+#else
+    #error "Missing both snprintf and _snprintf"
+#endif
 
 // Mercury characters (Unicode code points) are given type `MR_Char',
 // which is a typedef for `MR_int_least32_t'.
@@ -383,19 +409,35 @@ MR_Integer      MR_hash_string6(MR_ConstString);
 
 MR_String MR_make_string(MR_AllocSiteInfoPtr alloc_id, const char *fmt, ...);
 
+// Given a Mercury string `string', make a copy that inserts any required
+// character escapes and places double quote marks at the start and end of
+// the copy. On success, returns MR_TRUE and sets `ptr' to point to the copy
+// of the string. Returns MR_FALSE if `string' is not a valid UTF-8 encoded
+// string.
+//
+extern MR_bool MR_escape_string_quote(MR_String *ptr,
+    const char * string);
+
 // True if c is an ASCII code point, i.e. U+0000..U+007f.
 
-#define MR_is_ascii(c)              ((unsigned)(c) <= 0x7f)
+#define MR_is_ascii(c)              ((unsigned) (c) <= 0x7f)
 
 // True if c is a Unicode surrogate code point, i.e. U+D800..U+DFFF.
 
-#define MR_is_surrogate(c)          (((unsigned)(c) & 0xF800) == 0xD800)
+#define MR_is_surrogate(c)          (((unsigned) (c) & 0xF800) == 0xD800)
+
+// True if c is a Unicode control code point, i.e. U+0000..U+001f,
+// U+007f..U+009f.
+
+#define MR_is_control(c) \
+    ((0x00 <= (unsigned) (c) && (unsigned) (c) <= 0x1f) || \
+     (0x7f <= (unsigned) (c) && (unsigned) (c) <= 0x9f))
 
 // UTF-8 manipulation
 
-#define MR_utf8_is_single_byte(c)   (((unsigned)(c) & 0x80) == 0)
-#define MR_utf8_is_lead_byte(c)     (((unsigned)(c) - 0xC0) < 0x3E)
-#define MR_utf8_is_trail_byte(c)    (((unsigned)(c) & 0xC0) == 0x80)
+#define MR_utf8_is_single_byte(c)   (((unsigned) (c) & 0x80) == 0)
+#define MR_utf8_is_lead_byte(c)     (((unsigned) (c) - 0xC0) < 0x3E)
+#define MR_utf8_is_trail_byte(c)    (((unsigned) (c) & 0xC0) == 0x80)
 
 // Advance `*pos' to the beginning of the next code point in `s'.
 // If `*pos' is already at the end of the string, return MR_FALSE

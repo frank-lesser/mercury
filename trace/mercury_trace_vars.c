@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1999-2011 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // This file contains the code for managing information about the
 // variables of the program being debugged for both the internal
@@ -1835,9 +1835,9 @@ char *
 MR_select_specified_subterm(char *path, MR_TypeInfo type_info, MR_Word *value,
     MR_TypeInfo *sub_type_info, MR_Word **sub_value)
 {
-    MR_TypeInfo         new_type_info;
-    MR_Word             *new_value;
-    const MR_DuArgLocn  *arg_locn;
+    MR_TypeInfo         arg_type_info;
+    MR_Word             arg_value;
+    MR_Word             *word_sized_arg_ptr;
     char                *old_path;
     int                 arg_num;
 
@@ -1886,19 +1886,18 @@ MR_select_specified_subterm(char *path, MR_TypeInfo type_info, MR_Word *value,
             path++; // Step over / or ^.
         }
 
-        if (MR_arg(type_info, value, arg_num, &new_type_info, &new_value,
-            &arg_locn, MR_NONCANON_CC))
+        if (MR_arg(type_info, value, MR_NONCANON_CC, arg_num,
+            &arg_type_info, &arg_value, &word_sized_arg_ptr))
         {
-            type_info = new_type_info;
-            if (arg_locn == NULL) {
-                value = new_value;
-            } else {
+            type_info = arg_type_info;
+            if (word_sized_arg_ptr == NULL) {
                 MR_Word storage;
 
                 MR_incr_hp(storage, 1);
-                ((MR_Word *) storage)[0] = MR_arg_value(new_value,
-                    arg_locn);
+                ((MR_Word *) storage)[0] = arg_value;
                 value = (MR_Word *) storage;
+            } else {
+                value = word_sized_arg_ptr;
             }
         } else {
             return old_path;
@@ -2160,27 +2159,15 @@ MR_trace_printed_var_name(const MR_ProcLayout *proc,
             attr = &value->MR_value_attr;
             attr_var_name = MR_hlds_var_name(proc,
                 attr->MR_attr_var_hlds_number, NULL);
-#ifdef  MR_HAVE_SNPRINTF
             if (attr_var_name != NULL && strcmp(attr_var_name, "") != 0) {
-                snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
+                MR_snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
                     "%s (attr %d, %s)", attr->MR_attr_name,
                     attr->MR_attr_num, attr_var_name);
             } else {
-                snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
+                MR_snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
                     "%s (attr %d)", attr->MR_attr_name,
                     attr->MR_attr_num);
             }
-#else
-            if (attr_var_name != NULL && strcmp(attr_var_name, "") != 0) {
-                sprintf(MR_var_name_buf,
-                    "%s (attr %d, %s)", attr->MR_attr_name,
-                    attr->MR_attr_num, attr_var_name);
-            } else {
-                sprintf(MR_var_name_buf,
-                    "%s (attr %d)", attr->MR_attr_name,
-                    attr->MR_attr_num);
-            }
-#endif
             break;
 
         case MR_VALUE_PROG_VAR:
@@ -2193,42 +2180,22 @@ MR_trace_printed_var_name(const MR_ProcLayout *proc,
                 ! MR_streq(var->MR_var_basename, "HeadVar__"))
             {
                 if (var->MR_var_is_ambiguous) {
-#ifdef  MR_HAVE_SNPRINTF
-                    snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
+                    MR_snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
                         "%s(%d) (arg %d)", var->MR_var_fullname,
                         var->MR_var_hlds_number, var->MR_var_is_headvar);
-#else
-                    sprintf(MR_var_name_buf, "%s(%d) (arg %d)",
-                        var->MR_var_fullname,
-                        var->MR_var_hlds_number, var->MR_var_is_headvar);
-#endif
                 } else {
-#ifdef  MR_HAVE_SNPRINTF
-                    snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
+                    MR_snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
                         "%s (arg %d)", var->MR_var_fullname,
                         var->MR_var_is_headvar);
-#else
-                    sprintf(MR_var_name_buf, "%s (arg %d)",
-                        var->MR_var_fullname, var->MR_var_is_headvar);
-#endif
                 }
             } else {
                 if (var->MR_var_is_ambiguous) {
-#ifdef  MR_HAVE_SNPRINTF
-                    snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
+                    MR_snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
                         "%s(%d)", var->MR_var_fullname,
                         var->MR_var_hlds_number);
-#else
-                    sprintf(MR_var_name_buf, "%s(%d)",
-                        var->MR_var_fullname, var->MR_var_hlds_number);
-#endif
                 } else {
-#ifdef  MR_HAVE_SNPRINTF
-                    snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE, "%s",
-                        var->MR_var_fullname);
-#else
-                    sprintf(MR_var_name_buf, "%s", var->MR_var_fullname);
-#endif
+                    MR_snprintf(MR_var_name_buf, MR_TRACE_VAR_NAME_BUF_SIZE,
+                        "%s", var->MR_var_fullname);
                 }
             }
 

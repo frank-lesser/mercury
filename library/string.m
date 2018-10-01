@@ -3,8 +3,7 @@
 %---------------------------------------------------------------------------%
 % Copyright (C) 1993-2012 The University of Melbourne.
 % Copyright (C) 2013-2018 The Mercury team.
-% This file may only be copied under the terms of the GNU Library General
-% Public License - see the file COPYING.LIB in the Mercury distribution.
+% This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
 % File: string.m.
@@ -1418,6 +1417,7 @@
 :- import_module require.
 :- import_module string.format.
 :- import_module string.to_string.
+:- import_module term_io.
 
 % Many routines in this module are implemented using foreign language code.
 
@@ -1428,8 +1428,8 @@
 #include <stdio.h>
 #include <inttypes.h>
 
-#include ""mercury_string.h""   /* for MR_allocate_aligned_string*() etc. */
-#include ""mercury_tags.h""     /* for MR_list_cons*() */
+#include ""mercury_string.h""   // for MR_allocate_aligned_string*() etc.
+#include ""mercury_tags.h""     // for MR_list_cons*()
 ").
 
 %---------------------------------------------------------------------------%
@@ -1575,15 +1575,13 @@ from_char_list(Chars::in, Str::uo) :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, may_not_duplicate, no_sharing],
 "{
-    /* mode (uo, in) is det */
+    // mode (uo, in) is det
     MR_Word char_list_ptr;
     size_t size;
     MR_Char c;
 
-    /*
-    ** Loop to calculate list length + sizeof(MR_Word) in `size'
-    ** using list in `char_list_ptr'.
-    */
+    // Loop to calculate list length + sizeof(MR_Word) in `size'
+    // using list in `char_list_ptr'.
     size = 0;
     char_list_ptr = CharList;
     while (! MR_list_is_empty(char_list_ptr)) {
@@ -1596,23 +1594,17 @@ from_char_list(Chars::in, Str::uo) :-
         char_list_ptr = MR_list_tail(char_list_ptr);
     }
 
-    /*
-    ** Allocate heap space for string
-    */
+    // Allocate heap space for string.
     MR_allocate_aligned_string_msg(Str, size, MR_ALLOC_ID);
 
-    /*
-    ** Loop to copy the characters from the char_list to the string.
-    */
+    // Loop to copy the characters from the char_list to the string.
     SUCCESS_INDICATOR = MR_TRUE;
     size = 0;
     char_list_ptr = CharList;
     while (! MR_list_is_empty(char_list_ptr)) {
         c = (MR_Char) MR_list_head(char_list_ptr);
-        /*
-        ** It is an error to put a null character in a string
-        ** (see the comments at the top of this file).
-        */
+        // It is an error to put a null character in a string
+        // (see the comments at the top of this file).
         if (c == '\\0') {
             SUCCESS_INDICATOR = MR_FALSE;
             break;
@@ -1662,7 +1654,7 @@ from_char_list(Chars::in, Str::uo) :-
             SUCCESS_INDICATOR = false;
             break;
         } else if (c <= 0xffff) {
-            /* Fast path. */
+            // Fast path.
             sb.append((char) c);
         } else {
             sb.append(java.lang.Character.toChars(c));
@@ -1717,9 +1709,7 @@ from_rev_char_list(Chars, Str) :-
     MR_Word size;
     MR_Char c;
 
-    /*
-    ** Loop to calculate list length in `size' using list in `list_ptr'
-    */
+    // Loop to calculate list length in `size' using list in `list_ptr'.
     size = 0;
     list_ptr = Chars;
     while (!MR_list_is_empty(list_ptr)) {
@@ -1732,21 +1722,15 @@ from_rev_char_list(Chars, Str) :-
         list_ptr = MR_list_tail(list_ptr);
     }
 
-    /*
-    ** Allocate heap space for string
-    */
+    // Allocate heap space for string.
     MR_allocate_aligned_string_msg(Str, size, MR_ALLOC_ID);
 
-    /*
-    ** Set size to be the offset of the end of the string
-    ** (ie the \\0) and null terminate the string.
-    */
+    // Set size to be the offset of the end of the string
+    // (ie the \\0) and null terminate the string.
     Str[size] = '\\0';
 
-    /*
-    ** Loop to copy the characters from the list_ptr to the string
-    ** in reverse order.
-    */
+    // Loop to copy the characters from the list_ptr to the string
+    // in reverse order.
     list_ptr = Chars;
     SUCCESS_INDICATOR = MR_TRUE;
     while (!MR_list_is_empty(list_ptr)) {
@@ -1884,10 +1868,8 @@ encode_utf16(Char, CodeList0, CodeList) :-
     while (! MR_list_is_empty(list_ptr)) {
         int c;
         c = MR_list_head(list_ptr);
-        /*
-        ** It is an error to put a null character in a string
-        ** (see the comments at the top of this file).
-        */
+        // It is an error to put a null character in a string
+        // (see the comments at the top of this file).
         if (c == '\\0' || c > 0xff) {
             SUCCESS_INDICATOR = MR_FALSE;
             break;
@@ -1948,7 +1930,7 @@ encode_utf16(Char, CodeList0, CodeList) :-
     SUCCESS_INDICATOR = true;
 
     while (!list.is_empty(CodeList)) {
-        /* Both casts are required. */
+        // Both casts are required.
         char c = (char) (int) list.det_head(CodeList);
         if (prev_high) {
             if (!System.Char.IsLowSurrogate(c)) {
@@ -2153,7 +2135,7 @@ unsafe_index(Str, Index, Char) :-
             Ch = -1;
         }
     } else {
-        /* Common case. */
+        // Common case.
         Ch = c1;
     }
     SUCCESS_INDICATOR = (Ch >= 0);
@@ -2319,7 +2301,7 @@ prev_index(Str, Index, CharIndex, Char) :-
                 SUCCESS_INDICATOR = false;
             }
         } else {
-            /* Common case. */
+            // Common case.
             Ch = (int) c2;
             PrevIndex = Index - 1;
         }
@@ -2385,13 +2367,11 @@ do_unsafe_prev_index(Str, Index) ->
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "
-    /*
-    ** We do not test for negative values of Index because (a) MR_Unsigned
-    ** is unsigned and hence a negative argument will appear as a very large
-    ** positive one after the cast and (b) anybody dealing with the case
-    ** where strlen(Str) > MAXINT is clearly barking mad (and one may well get
-    ** an integer overflow error in this case).
-    */
+    // We do not test for negative values of Index because (a) MR_Unsigned
+    // is unsigned and hence a negative argument will appear as a very large
+    // positive one after the cast and (b) anybody dealing with the case
+    // where strlen(Str) > MAXINT is clearly barking mad (and one may well get
+    // an integer overflow error in this case).
     SUCCESS_INDICATOR = ((MR_Unsigned) Index < (MR_Unsigned) Length);
 ").
 :- pragma foreign_proc("C#",
@@ -2460,7 +2440,7 @@ set_char(Char, Index, !Str) :-
     if ((MR_Unsigned) Index >= len) {
         SUCCESS_INDICATOR = MR_FALSE;
     } else if (MR_is_ascii(Str0[Index]) && MR_is_ascii(Ch)) {
-        /* Fast path. */
+        // Fast path.
         SUCCESS_INDICATOR = MR_TRUE;
         MR_allocate_aligned_string_msg(Str, len, MR_ALLOC_ID);
         strcpy(Str, Str0);
@@ -2493,7 +2473,7 @@ set_char(Char, Index, !Str) :-
     } else {
         System.Text.StringBuilder sb = new System.Text.StringBuilder(Str0);
         if (!System.Char.IsHighSurrogate(Str0, Index) && Ch <= 0xffff) {
-            /* Fast path. */
+            // Fast path.
             sb[Index] = (char) Ch;
         } else {
             if (Str0.Length > Index + 1 &&
@@ -2582,7 +2562,7 @@ unsafe_set_char(Char, Index, !Str) :-
 "
     size_t len = strlen(Str0);
     if (MR_is_ascii(Str0[Index]) && MR_is_ascii(Ch)) {
-        /* Fast path. */
+        // Fast path.
         MR_allocate_aligned_string_msg(Str, len, MR_ALLOC_ID);
         strcpy(Str, Str0);
         Str[Index] = Ch;
@@ -3166,7 +3146,7 @@ all_match_loop(P, String, Cur) :-
     char    buf[5];
     size_t  len;
     if (MR_is_ascii(Ch)) {
-        /* Fast path. */
+        // Fast path.
         SUCCESS_INDICATOR = (strchr(Str, Ch) != NULL) && Ch != '\\0';
     } else {
         len = MR_utf8_encode(buf, Ch);
@@ -3453,9 +3433,7 @@ append_iii(X, Y, Z) :-
     } else {
         len_3 = strlen(S3);
         len_2 = len_3 - len_1;
-        /*
-        ** We need to make a copy to ensure that the pointer is word-aligned.
-        */
+        // We need to make a copy to ensure that the pointer is word-aligned.
         MR_allocate_aligned_string_msg(S2, len_2, MR_ALLOC_ID);
         strcpy(S2, S3 + len_1);
         SUCCESS_INDICATOR = MR_TRUE;
@@ -3613,17 +3591,17 @@ S1 ++ S2 = append(S1, S2).
     MR_Word list = Strs;
     size_t  len;
 
-    /* Determine the total length of all strings */
+    // Determine the total length of all strings.
     len = 0;
     while (!MR_list_is_empty(list)) {
         len += strlen((MR_String) MR_list_head(list));
         list = MR_list_tail(list);
     }
 
-    /* Allocate enough word aligned memory for the string */
+    // Allocate enough word aligned memory for the string.
     MR_allocate_aligned_string_msg(Str, len, MR_ALLOC_ID);
 
-    /* Copy the strings into the new memory */
+    // Copy the strings into the new memory.
     len = 0;
     list = Strs;
     while (!MR_list_is_empty(list)) {
@@ -3699,7 +3677,7 @@ append_list(Lists, append_list(Lists)).
     len = 0;
     sep_len = strlen(Sep);
 
-    /* Determine the total length of all strings */
+    // Determine the total length of all strings.
     len = 0;
     add_sep = MR_FALSE;
     while (!MR_list_is_empty(list)) {
@@ -3714,7 +3692,7 @@ append_list(Lists, append_list(Lists)).
 
     MR_allocate_aligned_string_msg(Str, len, MR_ALLOC_ID);
 
-    /* Copy the strings into the new memory */
+    // Copy the strings into the new memory.
     len = 0;
     list = Strs;
     add_sep = MR_FALSE;
@@ -3915,9 +3893,7 @@ join_list_loop(Sep, [H | T]) = Sep ++ H ++ join_list_loop(Sep, T).
         SUCCESS_INDICATOR = MR_FALSE;
     } else {
         Str += pos;
-        /*
-        ** We need to make a copy to ensure that the pointer is word-aligned.
-        */
+        // We need to make a copy to ensure that the pointer is word-aligned.
         MR_allocate_aligned_string_msg(Rest, strlen(Str), MR_ALLOC_ID);
         strcpy(Rest, Str);
         SUCCESS_INDICATOR = MR_TRUE;
@@ -3983,9 +3959,7 @@ join_list_loop(Sep, [H | T]) = Sep ++ H ++ join_list_loop(Sep, T).
         SUCCESS_INDICATOR = MR_FALSE;
     } else {
         Str += pos;
-        /*
-        ** We need to make a copy to ensure that the pointer is word-aligned.
-        */
+        // We need to make a copy to ensure that the pointer is word-aligned.
         MR_allocate_aligned_string_msg(Rest, strlen(Str), MR_ALLOC_ID);
         strcpy(Rest, Str);
         SUCCESS_INDICATOR = MR_TRUE;
@@ -4107,9 +4081,7 @@ join_list_loop(Sep, [H | T]) = Sep ++ H ++ join_list_loop(Sep, T).
         MR_allocate_aligned_string_msg(Left, Count, MR_ALLOC_ID);
         MR_memcpy(Left, Str, Count);
         Left[Count] = '\\0';
-        /*
-        ** We need to make a copy to ensure that the pointer is word-aligned.
-        */
+        // We need to make a copy to ensure that the pointer is word-aligned.
         MR_allocate_aligned_string_msg(Right, len - Count, MR_ALLOC_ID);
         strcpy(Right, Str + Count);
     }
@@ -5418,7 +5390,7 @@ max_str_length(Str, PrevMaxLen, MaxLen) :-
 % Converting strings to docs.
 %
 
-string_to_doc(S) = docs([str("\""), str(S), str("\"")]).
+string_to_doc(S) = docs([str(term_io.quoted_string(S))]).
 
 %---------------------------------------------------------------------------%
 %
@@ -5614,15 +5586,13 @@ accumulate_negative_int_underscore(Base, Char, N0, N) :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "{
-    /*
-    ** The %c checks for any erroneous characters appearing after the float;
-    ** if there are then sscanf() will return 2 rather than 1.
-    */
+    // The %c checks for any erroneous characters appearing after the float;
+    // if there are then sscanf() will return 2 rather than 1.
     char    tmpc;
     SUCCESS_INDICATOR =
         (!MR_isspace(FloatString[0])) &&
         (sscanf(FloatString, MR_FLT_FMT ""%c"", &FloatVal, &tmpc) == 1);
-        /* MR_TRUE if sscanf succeeds, MR_FALSE otherwise */
+        // MR_TRUE if sscanf succeeds, MR_FALSE otherwise.
 }").
 :- pragma foreign_proc("C#",
     to_float(FloatString::in, FloatVal::out),
@@ -6126,10 +6096,8 @@ float_to_string(Float) = S2 :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "{
-    /*
-    ** For efficiency reasons we duplicate the C implementation
-    ** of lowlevel_float_to_string.
-    */
+    // For efficiency reasons we duplicate the C implementation
+    // of lowlevel_float_to_string.
     MR_float_to_string(Flt, Str, MR_ALLOC_ID);
 }").
 :- pragma foreign_proc("C#",
@@ -6147,7 +6115,7 @@ float_to_string(Float) = S2 :-
 
         Str = Flt.ToString(""R"");
 
-        /* Append '.0' if there is no 'e' or '.' in the string. */
+        // Append '.0' if there is no 'e' or '.' in the string.
         bool contains = false;
         foreach (char c in Str) {
             if (c == 'e' || c == 'E' || c == '.') {
@@ -6227,7 +6195,7 @@ c_pointer_to_string(P) = S :-
     c_pointer_to_string(C_Pointer::in, Str::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    /* Within the spirit of the function, at least. */
+    // Within the spirit of the function, at least.
     if (C_Pointer == null) {
         Str = ""null"";
     } else {
@@ -6238,7 +6206,7 @@ c_pointer_to_string(P) = S :-
     c_pointer_to_string(C_Pointer::in, Str::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    /* Within the spirit of the function, at least. */
+    // Within the spirit of the function, at least.
     if (C_Pointer == null) {
         Str = ""null"";
     } else {

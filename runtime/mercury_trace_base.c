@@ -1,8 +1,8 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1997-2008, 2011 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014-2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 // mercury_trace_base.c implements the interface between the main part
 // of the runtime system (mainly mercury_wrapper.c) and the part of the
@@ -37,10 +37,6 @@ ENDINIT
 
 #ifdef MR_HAVE_SYS_WAIT_H
   #include <sys/wait.h>     // for the wait system call
-#endif
-
-#if defined(MR_HAVE__SNPRINTF) && ! defined(MR_HAVE_SNPRINTF)
-  #define snprintf  _snprintf
 #endif
 
 #define MR_TRACE_COUNT_SUMMARY_MAX_DEFAULT  20
@@ -297,7 +293,7 @@ MR_trace_record_label_exec_counts(void *dummy)
             fp = NULL;
             // Search for a suffix that doesn't exist yet.
             for (i = 1; i <= MR_trace_count_summary_max; i++) {
-                snprintf(name, name_len, "%s.%d",
+                MR_snprintf(name, name_len, "%s.%d",
                     MR_trace_count_summary_file, i);
                 if (! MR_FILE_EXISTS(name)) {
                     // File doesn't exist, commit to this one.
@@ -325,7 +321,7 @@ MR_trace_record_label_exec_counts(void *dummy)
         name_len = strlen(MERCURY_TRACE_COUNTS_PREFIX) + strlen(program_name)
             + 100;
         name = MR_malloc(name_len);
-        snprintf(name, name_len, ".%s.%s.%d", MERCURY_TRACE_COUNTS_PREFIX,
+        MR_snprintf(name, name_len, ".%s.%s.%d", MERCURY_TRACE_COUNTS_PREFIX,
             program_name, getpid());
 
         // Make sure name is an acceptable filename.
@@ -389,7 +385,8 @@ MR_trace_record_label_exec_counts(void *dummy)
         strcat(cmd, MR_trace_count_summary_file);
 
         for (i = 1; i <= MR_trace_count_summary_max; i++) {
-            snprintf(name, name_len, "%s.%d", MR_trace_count_summary_file, i);
+            MR_snprintf(name, name_len, "%s.%d",
+                MR_trace_count_summary_file, i);
             strcat(cmd, " ");
             strcat(cmd, name);
         }
@@ -416,7 +413,7 @@ MR_trace_record_label_exec_counts(void *dummy)
             if (mv_status == 0) {
                 // Delete all files whose data is now in the summary file.
                 for (i = 1; i <= MR_trace_count_summary_max; i++) {
-                    snprintf(name, name_len, "%s.%d",
+                    MR_snprintf(name, name_len, "%s.%d",
                         MR_trace_count_summary_file, i);
                     unlink_status = unlink(name);
                     if (unlink_status != 0) {
@@ -613,9 +610,12 @@ MR_trace_name_count_port_ensure_init()
     }
 }
 
-// The output of this is supposed to be equivalent to term_io__quote_atom
+// The output of this is supposed to be equivalent to term_io.quote_atom
 // except that it always uses quotes, even if not strictly necessary.
-
+//
+// XXX term_io does *not* escape codepoints >= 0x80 whereas this always
+// does - juliensf.
+//
 static void
 MR_trace_write_quoted_atom(FILE *fp, const char *atom)
 {
@@ -642,11 +642,23 @@ MR_trace_write_quoted_atom(FILE *fp, const char *atom)
             case '\b':
                 fputs("\\b", fp);
                 break;
+            case '\a':
+                fputs("\\a", fp);
+                break;
+            case '\r':
+                fputs("\\r", fp);
+                break;
+            case '\f':
+                fputs("\\f", fp);
+                break;
+            case '\v':
+                fputs("\\v", fp);
+                break;
             default:
-                // This assumes isalnum is the same as char__isalnum.
+                // This assumes isalnum is the same as char.isalnum.
                 // The line noise is the equivalent of
                 // is_mercury_punctuation_char in library/term_io.m
-                // and compiler/mercury_to_mercury.m; any changes here
+                // and compiler/parse_tree_out_pragma.m; any changes here
                 // may require similar changes there.
 
                 if (MR_isalnum(*c) ||
@@ -687,6 +699,18 @@ MR_trace_write_string(FILE *fp, const char *atom)
                 break;
             case '\b':
                 fputs("\\b", fp);
+                break;
+            case '\a':
+                fputs("\\a", fp);
+                break;
+            case '\r':
+                fputs("\\b", fp);
+                break;
+            case '\f':
+                fputs("\\f", fp);
+                break;
+            case '\v':
+                fputs("\\v", fp);
                 break;
             default:
                 fputc(*c, fp);

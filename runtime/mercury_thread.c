@@ -1,15 +1,15 @@
 // vim: ts=4 sw=4 expandtab ft=c
 
 // Copyright (C) 1997-2001, 2003, 2005-2007, 2009-2011 The University of Melbourne.
-// Copyright (C) 2014 The Mercury team.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2014, 2016, 2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 
 #include "mercury_imp.h"
 #include "mercury_regs.h"
 #include "mercury_engine.h"
 #include "mercury_memory.h"
 #include "mercury_context.h"    // for MR_do_runnext
+#include "mercury_runtime_util.h"
 #include "mercury_thread.h"
 #include "mercury_threadscope.h"
 
@@ -66,6 +66,7 @@ MR_create_worksteal_thread(void)
     MercuryThread   *thread;
     pthread_attr_t  attrs;
     int             err;
+    char            errbuf[MR_STRERROR_BUF_SIZE];
 
     assert(!MR_thread_equal(MR_primordial_thread, MR_null_thread()));
 
@@ -84,7 +85,8 @@ MR_create_worksteal_thread(void)
 #endif
 
     if (err != 0) {
-        MR_fatal_error("error creating thread");
+        MR_fatal_error("error creating thread: %s",
+            MR_strerror(err, errbuf, sizeof(errbuf)));
     }
 
     return thread;

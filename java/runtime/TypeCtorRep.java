@@ -1,7 +1,8 @@
+// vim: ts=4 sw=4 expandtab ft=java
 //
 // Copyright (C) 2001-2005 The University of Melbourne.
-// This file may only be copied under the terms of the GNU Library General
-// Public License - see the file COPYING.LIB in the Mercury distribution.
+// Copyright (C) 2016-2018 The Mercury team.
+// This file is distributed under the terms specified in COPYING.LIB.
 //
 
 package jmercury.runtime;
@@ -66,15 +67,11 @@ public class TypeCtorRep implements java.io.Serializable {
         public static final int MR_TYPECTOR_REP_UNKNOWN                 = 55;
         public static final int MR_TYPECTOR_REP_MAX                     = 56;
 
-        // Instance variable for TypeCtorRep objects.
-	
-	public int value;
+    // Instance variable for TypeCtorRep objects.
+    public int value;
 
-	// Constructor
-
-	public TypeCtorRep(int arg) {
-		this.value = arg;
-	}
+    // Constructor.
+    public TypeCtorRep(int arg) {
+        this.value = arg;
+    }
 }
-	
-// vim: set ts=8 sts=8 sw=8 noet:
