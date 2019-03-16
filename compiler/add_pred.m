@@ -85,7 +85,7 @@
 
 :- import_module hlds.hlds_args.
 :- import_module hlds.hlds_clauses.
-:- import_module hlds.hlds_data.
+:- import_module hlds.hlds_cons.
 :- import_module hlds.hlds_goal.
 :- import_module hlds.hlds_rtti.
 :- import_module hlds.make_hlds_error.
@@ -126,8 +126,8 @@ module_add_pred_or_func(Origin, Context, ItemNumber,
     then
         MaybeModes = no
     else if
-        % Assume that a function with no modes but with a determinism
-        % declared has the default modes.
+        % A function declaration that contains no argument modes but does
+        % specify a determinism is implicitly specifying the default mode.
         PredOrFunc = pf_function,
         MaybeModes0 = no,
         MaybeDet = yes(_)
@@ -223,13 +223,13 @@ add_new_pred(Origin, Context, ItemNumber, MaybeItemMercuryStatus, PredStatus0,
         PredStatus = PredStatus0
     ),
     module_info_get_name(!.ModuleInfo, ModuleName),
-    list.length(Types, Arity),
+    list.length(Types, PredArity),
     (
         PredName = unqualified(_PName),
+        % All predicate names passed into this predicate should have been
+        % qualified by the parser when they were first read.
         module_info_incr_errors(!ModuleInfo),
-        unqualified_pred_error(PredName, Arity, Context, !Specs)
-        % All predicate names passed into this predicate should have
-        % been qualified by the parser when they were first read.
+        unqualified_pred_error(PredName, PredArity, Context, !Specs)
     ;
         PredName = qualified(MNameOfPred, PName),
         ( if
@@ -250,29 +250,29 @@ add_new_pred(Origin, Context, ItemNumber, MaybeItemMercuryStatus, PredStatus0,
             CurUserDecl = no
         ),
         module_info_get_predicate_table(!.ModuleInfo, PredTable0),
-        clauses_info_init(PredOrFunc, Arity, init_clause_item_numbers_user,
+        clauses_info_init(PredOrFunc, PredArity, init_clause_item_numbers_user,
             ClausesInfo),
         map.init(Proofs),
         map.init(ConstraintMap),
         purity_to_markers(Purity, PurityMarkers),
         add_markers(PurityMarkers, Markers0, Markers),
         map.init(VarNameRemap),
-        pred_info_init(ModuleName, PredName, Arity, PredOrFunc, Context,
+        pred_info_init(ModuleName, PredName, PredArity, PredOrFunc, Context,
             Origin, PredStatus, CurUserDecl, goal_type_none,
             Markers, Types, TVarSet, ExistQVars, Constraints, Proofs,
             ConstraintMap, ClausesInfo, VarNameRemap, PredInfo0),
         predicate_table_lookup_pf_m_n_a(PredTable0, is_fully_qualified,
-            PredOrFunc, MNameOfPred, PName, Arity, PredIds),
+            PredOrFunc, MNameOfPred, PName, PredArity, PredIds),
         (
             PredIds = [OrigPred | _],
             module_info_pred_info(!.ModuleInfo, OrigPred, OrigPredInfo),
             pred_info_get_context(OrigPredInfo, OrigContext),
             DeclString = pred_or_func_to_str(PredOrFunc),
-            adjust_func_arity(PredOrFunc, OrigArity, Arity),
+            adjust_func_arity(PredOrFunc, PorFArity, PredArity),
             ( if PredStatus0 = pred_status(status_opt_imported) then
                 true
             else
-                report_multiple_def_error(PredName, OrigArity, DeclString,
+                report_multiple_def_error(PredName, PorFArity, DeclString,
                     Context, OrigContext, [], !Specs)
             )
         ;
@@ -458,11 +458,9 @@ add_builtin(PredId, HeadTypes0, CompilationTarget, !PredInfo) :-
     vartypes_from_corresponding_lists(HeadVars, HeadTypes, VarTypes),
     map.init(TVarNameMap),
     rtti_varmaps_init(RttiVarMaps),
-    HasForeignClauses = no,
-    HadSyntaxError = no,
     ClausesInfo = clauses_info(VarSet, TVarNameMap, VarTypes, VarTypes,
         ProcArgVector, ClausesRep, init_clause_item_numbers_comp_gen,
-        RttiVarMaps, HasForeignClauses, HadSyntaxError),
+        RttiVarMaps, no_foreign_lang_clauses, no_clause_syntax_errors),
     pred_info_set_clauses_info(ClausesInfo, !PredInfo),
 
     % It is pointless but harmless to inline these clauses. The main purpose
@@ -700,49 +698,43 @@ unqualified_pred_error(PredName, Arity, Context, !Specs) :-
 
 %-----------------------------------------------------------------------------%
 
-preds_add_implicit_report_error(!ModuleInfo, ModuleName, PredName, Arity,
+preds_add_implicit_report_error(!ModuleInfo, ModuleName, PredName, PredArity,
         PredOrFunc, Status, IsClassMethod, Context, Origin, DescPieces,
         PredId, !Specs) :-
-    module_info_get_predicate_table(!.ModuleInfo, PredicateTable0),
-    maybe_report_undefined_pred_error(!.ModuleInfo, PredName, Arity,
+    maybe_report_undefined_pred_error(!.ModuleInfo, PredName, PredArity,
         PredOrFunc, Status, IsClassMethod, Context, DescPieces, !Specs),
     (
         PredOrFunc = pf_function,
-        adjust_func_arity(pf_function, FuncArity, Arity),
+        adjust_func_arity(pf_function, FuncArity, PredArity),
         maybe_check_field_access_function(!.ModuleInfo, PredName, FuncArity,
             Status, Context, !Specs)
     ;
         PredOrFunc = pf_predicate
     ),
-    clauses_info_init(PredOrFunc, Arity, init_clause_item_numbers_user,
+    clauses_info_init(PredOrFunc, PredArity, init_clause_item_numbers_user,
         ClausesInfo),
-    preds_do_add_implicit(!.ModuleInfo, ModuleName, PredName, Arity,
-        PredOrFunc, Status, Context, Origin, ClausesInfo, PredId,
-        PredicateTable0, PredicateTable),
-    module_info_set_predicate_table(PredicateTable, !ModuleInfo).
+    preds_do_add_implicit(ModuleName, PredName, PredArity, PredOrFunc, Status,
+        Context, Origin, ClausesInfo, PredId, !ModuleInfo).
 
 preds_add_implicit_for_assertion(!ModuleInfo, ModuleName, PredName,
-        Arity, PredOrFunc, HeadVars, Status, Context, PredId) :-
+        PredArity, PredOrFunc, HeadVars, Status, Context, PredId) :-
     clauses_info_init_for_assertion(HeadVars, ClausesInfo),
     term.context_file(Context, FileName),
     term.context_line(Context, LineNum),
-    module_info_get_predicate_table(!.ModuleInfo, PredicateTable0),
-    preds_do_add_implicit(!.ModuleInfo, ModuleName, PredName, Arity,
-        PredOrFunc, Status, Context, origin_assertion(FileName, LineNum),
-        ClausesInfo, PredId, PredicateTable0, PredicateTable),
-    module_info_set_predicate_table(PredicateTable, !ModuleInfo).
+    Origin = origin_assertion(FileName, LineNum),
+    preds_do_add_implicit(ModuleName, PredName, PredArity, PredOrFunc, Status,
+        Context, Origin, ClausesInfo, PredId, !ModuleInfo).
 
-:- pred preds_do_add_implicit(module_info::in, module_name::in,
-    sym_name::in, arity::in, pred_or_func::in,
-    pred_status::in, prog_context::in, pred_origin::in, clauses_info::in,
-    pred_id::out, predicate_table::in, predicate_table::out) is det.
+:- pred preds_do_add_implicit(module_name::in, sym_name::in, arity::in,
+    pred_or_func::in, pred_status::in, prog_context::in, pred_origin::in,
+    clauses_info::in, pred_id::out, module_info::in, module_info::out) is det.
 
-preds_do_add_implicit(ModuleInfo, ModuleName, PredName, Arity, PredOrFunc,
-        PredStatus, Context, Origin, ClausesInfo, PredId, !PredicateTable) :-
+preds_do_add_implicit(ModuleName, PredName, PredArity, PredOrFunc,
+        PredStatus, Context, Origin, ClausesInfo, PredId, !ModuleInfo) :-
     CurUserDecl = maybe.no,
     init_markers(Markers0),
     varset.init(TVarSet0),
-    make_n_fresh_vars("T", Arity, TypeVars, TVarSet0, TVarSet),
+    make_n_fresh_vars("T", PredArity, TypeVars, TVarSet0, TVarSet),
     prog_type.var_list_to_type_list(map.init, TypeVars, Types),
     % We assume none of the arguments are existentially typed.
     % Existential types must be declared, they won't be inferred.
@@ -753,20 +745,22 @@ preds_do_add_implicit(ModuleInfo, ModuleName, PredName, Arity, PredOrFunc,
     map.init(Proofs),
     map.init(ConstraintMap),
     map.init(VarNameRemap),
-    pred_info_init(ModuleName, PredName, Arity, PredOrFunc, Context, Origin,
+    pred_info_init(ModuleName, PredName, PredArity, PredOrFunc, Context, Origin,
         PredStatus, CurUserDecl, goal_type_none, Markers0,
         Types, TVarSet, ExistQVars, Constraints, Proofs, ConstraintMap,
         ClausesInfo, VarNameRemap, PredInfo0),
     add_marker(marker_infer_type, Markers0, Markers1),
     add_marker(marker_no_pred_decl, Markers1, Markers),
     pred_info_set_markers(Markers, PredInfo0, PredInfo),
-    predicate_table_lookup_pf_sym_arity(!.PredicateTable,
-        is_fully_qualified, PredOrFunc, PredName, Arity, PredIds),
+    module_info_get_predicate_table(!.ModuleInfo, PredicateTable0),
+    predicate_table_lookup_pf_sym_arity(PredicateTable0,
+        is_fully_qualified, PredOrFunc, PredName, PredArity, PredIds),
     (
         PredIds = [],
-        module_info_get_partial_qualifier_info(ModuleInfo, MQInfo),
+        module_info_get_partial_qualifier_info(!.ModuleInfo, MQInfo),
         predicate_table_insert_qual(PredInfo, may_be_unqualified, MQInfo,
-            PredId, !PredicateTable)
+            PredId, PredicateTable0, PredicateTable),
+        module_info_set_predicate_table(PredicateTable, !ModuleInfo)
     ;
         PredIds = [_ | _],
         unexpected($pred, "search succeeded")

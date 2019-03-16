@@ -115,10 +115,18 @@ Changes that may break compatibility:
 
 * We have changed the semantics of int.abs/1 so that it throws an exception
   if its argument is equal to int.min_int.  The old behaviour of this function
-  is provided by the the new function int.unchecked_abs/1.
+  is provided by the new function int.unchecked_abs/1.
 
 * We have changed the semantics of array.map_corresponding_foldl/6 so that it
   throws an exception if the input arrays differ in size.
+
+* We have changed the semantics of array.shrink/3 and array.resize/4 so that
+  they throw an exception if their first argument is negative.
+
+* We have changed the semantics of array.fetch_times/4 so that it always
+  throws an exception if its second or third argument is out of bounds.
+  Previously, it would return an empty if list if its third argument was less
+  than the second even if one, or both, of these arguments was out of bounds.
 
 Changes to the Mercury language:
 
@@ -405,6 +413,8 @@ Changes to the Mercury standard library:
 
 * The following predicates and functions have been added to the list module:
 
+   - any_true/2
+   - any_false/2
    - reverse_prepend/2
    - reverse_prepend/3
    - take_while/4
@@ -459,15 +469,22 @@ Changes to the Mercury standard library:
    - semidet_greatest_index/1
    - foldl_corresponding/5
    - foldl2_corresponding/7
+   - fill/3
+   - fill_range/5
+   - swap/4
+   - unsafe_swap/4
 
    The following functions in the array module have been deprecated:
 
    - least_index/1
    - greatest_index/1
 
-* The following function has been added to the array2d module:
+* The following predicates and functions have been added to the array2d
+  module:
 
    - is_empty/1
+   - fill/3
+   - from_array/3
 
 * The following predicates have been added to the time module:
 
@@ -639,7 +656,7 @@ Changes to the Mercury compiler:
 
 * We have disabled the old --num-reserved-objects option.
 
-* We have upgraded the bundled Boehm GC to v7.6.6 and libatomic_ops to v7.6.2.
+* We have upgraded the bundled Boehm GC to v7.6.10 and libatomic_ops to v7.6.2.
 
 Change to the Mercury debugger:
 

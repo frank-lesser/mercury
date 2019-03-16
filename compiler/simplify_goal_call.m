@@ -1,7 +1,7 @@
 %---------------------------------------------------------------------------%
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
-% Copyright (C) 2014-2017 The Mercury team.
+% Copyright (C) 2014-2018 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %---------------------------------------------------------------------------%
@@ -130,6 +130,8 @@ simplify_goal_plain_call(GoalExpr0, GoalExpr, GoalInfo0, GoalInfo,
     maybe_generate_warning_for_infinite_loop_call(PredId, ProcId,
         Args, IsBuiltin, PredInfo, ProcInfo, GoalInfo0, NestedContext,
         Common0, !Info),
+    maybe_generate_warning_for_useless_comparison(PredInfo,
+        InstMap0, Args, GoalInfo0, !Info),
 
     % Try to evaluate the call at compile-time.
     ModuleSymName = pred_info_module(PredInfo),
@@ -349,15 +351,25 @@ maybe_generate_warning_for_implicit_stream_predicate(ModuleInfo,
         list.filter(unify(IOStateType), ArgTypes, IOStateArgTypes),
         IOStateArgTypes = [_, _],
 
-        % ... where the callee predicate has a twin that has
-        % one extra initial argument that is a stream.
+        % ... where the callee predicate has a twin that has one extra argument
+        % that is a stream, and that extra argument is after any typeinfo
+        % and/or typeclass_info args added by polymorphism, but before any
+        % of the user-visible arguments.
+
+        pred_info_get_orig_arity(PredInfo, OrigArity),
+        list.length(ArgTypes, FullArity),
+        NumExtraArgs = FullArity - OrigArity,
+        list.det_split_list(NumExtraArgs, ArgTypes,
+            ExtraArgTypes, UserArgTypes),
+
         module_info_get_predicate_table(ModuleInfo, PredTable),
         PredSymName = qualified(ModuleName, PredName),
-        list.length(ArgTypes, Arity),
         predicate_table_lookup_pf_sym_arity(PredTable, is_fully_qualified,
-            PredOrFunc, PredSymName, Arity + 1, PredIds),
-        list.filter(one_extra_stream_arg(ModuleInfo, ArgTypes), PredIds,
-            OneExtraStreamArgPredIds),
+            PredOrFunc, PredSymName, OrigArity + 1, PredIds),
+        list.filter(
+            one_extra_stream_arg(ModuleInfo, NumExtraArgs,
+                ExtraArgTypes, UserArgTypes),
+            PredIds, OneExtraStreamArgPredIds),
         OneExtraStreamArgPredIds = [_ | _]
     then
         GoalContext = goal_info_get_context(GoalInfo),
@@ -412,25 +424,35 @@ maybe_generate_warning_for_implicit_stream_predicate(ModuleInfo,
         MaybeSpec = no
     ).
 
-:- pred one_extra_stream_arg(module_info::in, list(mer_type)::in, pred_id::in)
-    is semidet.
+:- pred one_extra_stream_arg(module_info::in, int::in,
+    list(mer_type)::in, list(mer_type)::in, pred_id::in) is semidet.
 
-one_extra_stream_arg(ModuleInfo, OrigArgTypes, PredId) :-
+one_extra_stream_arg(ModuleInfo, NumExtraArgs,
+        BaseExtraArgTypes, BaseUserArgTypes, PredId) :-
+    % We are testing whether the relationship between the argument list
+    % of the base predicate (BaseArgTypes) and the argument list of this
+    % predicate (ArgTypes) looks like this:
+    %
+    % BaseArgTypes = BaseExtraArgTypes ++ BaseUserArgTypes
+    % ArgTypes = BaseExtraArgTypes ++ [StreamArgType] ++ BaseUserArgTypes
+    %
+    % where NumExtraArgs is the length of BaseExtraArgTypes.
+
     module_info_pred_info(ModuleInfo, PredId, PredInfo),
     pred_info_get_arg_types(PredInfo, ArgTypes),
-    ArgTypes = [HeadArgType | TailArgTypes],
+    list.split_list(NumExtraArgs, ArgTypes, ExtraArgTypes, UserArgTypes),
 
-    % Is the first argument a stream type? (We could list all the stream
+    ExtraArgTypes = BaseExtraArgTypes,
+    UserArgTypes = [HeadUserArgType | TailUserArgTypes],
+    TailUserArgTypes = BaseUserArgTypes,
+
+    % Is the added argument a stream type? (We could list all the stream
     % types defined in library/io.m here, but it is probably more robust
     % to assume that all types in io.m whose names end in "stream" qualify.
     % We don't think we will ever give any non-stream type such a name.)
-    HeadArgType = defined_type(HeadArgTypeSymName, [], kind_star),
-    HeadArgTypeSymName = qualified(mercury_io_module, HeadArgTypeName),
-    string.suffix(HeadArgTypeName, "stream"),
-
-    % Do the later arguments have the same types as the argument types
-    % in the original call?
-    TailArgTypes = OrigArgTypes.
+    HeadUserArgType = defined_type(HeadUserArgTypeSymName, [], kind_star),
+    HeadUserArgTypeSymName = qualified(mercury_io_module, HeadUserArgTypeName),
+    string.suffix(HeadUserArgTypeName, "stream").
 
 %---------------------%
 
@@ -549,27 +571,22 @@ maybe_generate_warning_for_infinite_loop_call(PredId, ProcId, Args, IsBuiltin,
         pred_info_get_purity(PredInfo, Purity),
         Purity \= purity_impure
     then
-        GoalContext = goal_info_get_context(GoalInfo),
-
-        % It would be better if we supplied more information than just
-        % the line number, e.g. we should print the name of the containing
-        % predicate.
-
-        MainPieces = [words("Warning: recursive call will lead to"),
-            words("infinite recursion."), nl],
+        PredNamePieces = describe_one_pred_info_name(should_not_module_qualify,
+            PredInfo),
+        MainPieces = [words("Warning: recursive call to") | PredNamePieces] ++
+            [words("will lead to infinite recursion."), nl],
         VerbosePieces =
             [words("If this recursive call is executed,"),
             words("the procedure will call itself"),
             words("with exactly the same input arguments,"),
             words("leading to infinite recursion."), nl],
-        Msg = simple_msg(GoalContext,
+        Msg = simple_msg(goal_info_get_context(GoalInfo),
             [option_is_set(warn_simple_code, yes,
                 [always(MainPieces),
                 verbose_only(verbose_once, VerbosePieces)])]),
         Severity = severity_conditional(warn_simple_code, yes,
             severity_warning, no),
-        Spec = error_spec(Severity,
-            phase_simplify(report_in_any_mode), [Msg]),
+        Spec = error_spec(Severity, phase_simplify(report_in_any_mode), [Msg]),
         simplify_info_add_message(Spec, !Info)
     else
         true
@@ -595,6 +612,107 @@ input_args_are_equiv([Arg | Args], [HeadVar | HeadVars], [Mode | Modes],
     ),
     input_args_are_equiv(Args, HeadVars, Modes, CommonInfo, ModuleInfo).
 
+%---------------------%
+
+    % Generate warnings for comparisons that are tautologies or contradictions.
+    % For example:
+    %
+    %      X : uint32 < 0u32        cannot succeed
+    %      X : uint >= 0u           always succeeds
+    %
+:- pred maybe_generate_warning_for_useless_comparison(pred_info::in,
+    instmap::in, list(prog_var)::in, hlds_goal_info::in,
+    simplify_info::in, simplify_info::out) is det.
+
+maybe_generate_warning_for_useless_comparison(PredInfo, InstMap, Args,
+        GoalInfo, !Info) :-
+    pred_info_is_pred_or_func(PredInfo) = PredOrFunc,
+    ModuleSymName = pred_info_module(PredInfo),
+    ( if
+        is_std_lib_module_name(ModuleSymName, ModuleName),
+        PredOrFunc = pf_predicate,
+        Args = [ArgA, ArgB],
+        simplify_do_warn_simple_code(!.Info)
+    then
+        pred_info_get_name(PredInfo, PredName),
+        instmap_lookup_var(InstMap, ArgA, InstA),
+        instmap_lookup_var(InstMap, ArgB, InstB),
+        ( if
+            is_useless_unsigned_comparison(ModuleName, PredName, InstA,
+                InstB, WarnPieces)
+        then
+            GoalContext = goal_info_get_context(GoalInfo),
+            PredPieces = describe_one_pred_info_name(should_module_qualify,
+                PredInfo),
+            Pieces = [words("Warning: call to")] ++ PredPieces ++ WarnPieces,
+            Msg = simple_msg(GoalContext,
+                [option_is_set(warn_simple_code, yes, [always(Pieces)])]),
+            Spec = error_spec(severity_warning,
+                phase_simplify(report_in_any_mode), [Msg]),
+            simplify_info_add_message(Spec, !Info)
+        else
+            true
+        )
+    else
+        true
+    ).
+
+:- pred is_useless_unsigned_comparison(string::in, string::in, mer_inst::in,
+    mer_inst::in, format_components::out) is semidet.
+
+is_useless_unsigned_comparison(ModuleName, PredName, ArgA, ArgB, Pieces) :-
+    (
+        PredName = ">=",
+        arg_is_unsigned_zero(ModuleName, ArgB, ZeroStr),
+        Pieces = [words("cannot fail."), nl,
+            words("All"), words(ModuleName), words("values are"),
+            words(">="), words(ZeroStr), suffix(".")]
+    ;
+        PredName = "=<",
+        arg_is_unsigned_zero(ModuleName, ArgA, ZeroStr),
+        Pieces = [words("cannot fail."), nl,
+            words(ZeroStr), words("=<"), words("all"),
+            words(ModuleName), words("values.")]
+    ;
+        PredName = "<",
+        arg_is_unsigned_zero(ModuleName, ArgB, ZeroStr),
+        Pieces = [words("cannot succeed."), nl,
+            words("There are no"), words(ModuleName),
+            words("values <"), words(ZeroStr), suffix(".")]
+    ;
+        PredName = ">",
+        arg_is_unsigned_zero(ModuleName, ArgA, ZeroStr),
+        Pieces = [words("cannot succeed."), nl,
+            words(ZeroStr), words("> no"), words(ModuleName),
+            words("values.")]
+    ).
+
+:- pred arg_is_unsigned_zero(string::in, mer_inst::in, string::out) is semidet.
+
+arg_is_unsigned_zero(ModuleName, Arg, ZeroStr) :-
+    (
+        ModuleName = "uint",
+        Arg = bound(_, _, [bound_functor(uint_const(0u), [])]),
+        ZeroStr = "0u"
+    ;
+        ModuleName = "uint8",
+        Arg = bound(_, _, [bound_functor(uint8_const(0u8), [])]),
+        ZeroStr = "0u8"
+    ;
+        ModuleName = "uint16",
+        Arg = bound(_, _, [bound_functor(uint16_const(0u16), [])]),
+        ZeroStr = "0u16"
+    ;
+        ModuleName = "uint32",
+        Arg = bound(_, _, [bound_functor(uint32_const(0u32), [])]),
+        ZeroStr = "0u32"
+    ;
+        ModuleName = "uint64",
+        Arg = bound(_, _, [bound_functor(uint64_const(0u64), [])]),
+        ZeroStr = "0u64"
+    ).
+
+%---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
 %
 % Predicates that improve the code, if they can.
@@ -626,6 +744,8 @@ simplify_look_for_duplicate_call(PredId, ProcId, Args, GoalExpr0, GoalInfo0,
         Common = Common0,
         MaybeAssignsGoalExpr = no
     ).
+
+%---------------------------------------------------------------------------%
 
     % simplify_improve_library_call(InstMap0, ModuleName, PredName,
     %   ModeNum, Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info):
@@ -668,51 +788,62 @@ simplify_improve_library_call(InstMap0, ModuleName, PredName, ModeNum, Args,
             % When generating code for target languages that have builtin
             % operations for comparing structured terms, we replace calls
             % to Mercury's compare with the target's builtin compare.
-            simplify_improve_builtin_compare(ModeNum, Args,
-                ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
+            Context = goal_info_get_context(GoalInfo0),
+            simplify_improve_builtin_compare(ModeNum, Args, Context,
+                ImprovedGoalExpr, ImprovedGoalInfo, !Info)
         )
     ;
-        ModuleName = "int",
-        simplify_improve_int_call(InstMap0, ModuleName, PredName, ModeNum,
-            Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
+        ModuleName = "private_builtin",
+        ( PredName = "builtin_compare_int",     TypeName = "int"
+        ; PredName = "builtin_compare_int8",    TypeName = "int8"
+        ; PredName = "builtin_compare_int16",   TypeName = "int16"
+        ; PredName = "builtin_compare_int32",   TypeName = "int32"
+        ; PredName = "builtin_compare_int64",   TypeName = "int64"
+        ; PredName = "builtin_compare_uint",    TypeName = "uint"
+        ; PredName = "builtin_compare_uint8",   TypeName = "uint8"
+        ; PredName = "builtin_compare_uint16",  TypeName = "uint16"
+        ; PredName = "builtin_compare_uint32",  TypeName = "uint32"
+        ; PredName = "builtin_compare_uint64",  TypeName = "uint64"
+        ),
+        Args = [R, X, Y],
+        ModeNum = 0,
+        Context = goal_info_get_context(GoalInfo0),
+        simplify_improve_builtin_compare_int_uint(!.Info, TypeName,
+            R, X, Y, Context, ImprovedGoalExpr, ImprovedGoalInfo)
     ;
-        ModuleName = "uint",
-        simplify_improve_uint_call(InstMap0, ModuleName, PredName, ModeNum,
-            Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
-    ;
-        ModuleName = "int8",
-        simplify_improve_int8_call(InstMap0, ModuleName, PredName, ModeNum,
-            Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
-    ;
-        ModuleName = "uint8",
-        simplify_improve_uint8_call(InstMap0, ModuleName, PredName, ModeNum,
-            Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
-    ;
-        ModuleName = "int16",
-        simplify_improve_int16_call(InstMap0, ModuleName, PredName, ModeNum,
-            Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
-    ;
-        ModuleName = "uint16",
-        simplify_improve_uint16_call(InstMap0, ModuleName, PredName, ModeNum,
-            Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
-    ;
-        ModuleName = "int32",
-        simplify_improve_int32_call(InstMap0, ModuleName, PredName, ModeNum,
-            Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
-    ;
-        ModuleName = "uint32",
-        simplify_improve_uint32_call(InstMap0, ModuleName, PredName, ModeNum,
-            Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
-    ;
-        ModuleName = "int64",
-        simplify_improve_int64_call(InstMap0, ModuleName, PredName, ModeNum,
-            Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
-    ;
-        ModuleName = "uint64",
-        simplify_improve_uint64_call(InstMap0, ModuleName, PredName, ModeNum,
-            Args, ImprovedGoalExpr, GoalInfo0, ImprovedGoalInfo, !Info)
+        ( ModuleName = "int",       IntType = int_type_int
+        ; ModuleName = "int8",      IntType = int_type_int8
+        ; ModuleName = "int16",     IntType = int_type_int16
+        ; ModuleName = "int32",     IntType = int_type_int32
+        ; ModuleName = "int64",     IntType = int_type_int64
+        ; ModuleName = "uint",      IntType = int_type_uint
+        ; ModuleName = "uint8",     IntType = int_type_uint8
+        ; ModuleName = "uint16",    IntType = int_type_uint16
+        ; ModuleName = "uint32",    IntType = int_type_uint32
+        ; ModuleName = "uint64",    IntType = int_type_uint64
+        ),
+        simplify_info_get_module_info(!.Info, ModuleInfo),
+        module_info_get_globals(ModuleInfo, Globals),
+        globals.lookup_bool_option(Globals, pregenerated_dist, Pregen),
+        (
+            Pregen = yes,
+            % Tautological comparisons generate warnings (which we treat
+            % as errors) from some compilers, so we avoid emitting them
+            % even in pregen grades.
+            replace_tautological_comparisons(PredName, Args, ImprovedGoalExpr),
+            ImprovedGoalInfo = GoalInfo0
+        ;
+            Pregen = no,
+            % This also optimizes away tautological comparisons, but does
+            % other optimizations as well.
+            simplify_improve_arith_shift_cmp_ops(IntType, InstMap0,
+                ModuleName, PredName, ModeNum, Args, ImprovedGoalExpr,
+                GoalInfo0, ImprovedGoalInfo, !Info)
+        )
     ),
     simplify_info_set_should_requantify(!Info).
+
+%---------------------%
 
 :- pred simplify_inline_builtin_inequality(prog_var::in,
     prog_var::in, prog_var::in, string::in, bool::in, hlds_goal_info::in,
@@ -748,10 +879,9 @@ simplify_inline_builtin_inequality(TI, X, Y, Inequality, Invert, GoalInfo,
     Unique = ground(unique, none_or_default_func),
     ArgInsts = [CmpRes - Unique],
     BuiltinModule = mercury_public_builtin_module,
-    goal_util.generate_simple_call(BuiltinModule, "compare", pf_predicate,
-        mode_no(ModeNo), detism_det, purity_pure, Args, [],
-        instmap_delta_from_assoc_list(ArgInsts), ModuleInfo, Context,
-        CmpGoal0),
+    goal_util.generate_simple_call(ModuleInfo, BuiltinModule, "compare",
+        pf_predicate, mode_no(ModeNo), detism_det, purity_pure, Args, [],
+        instmap_delta_from_assoc_list(ArgInsts), Context, CmpGoal0),
     CmpGoal0 = hlds_goal(CmpExpr, CmpInfo0),
     CmpNonLocals0 = goal_info_get_nonlocals(CmpInfo0),
     set_of_var.insert(CmpRes, CmpNonLocals0, CmpNonLocals),
@@ -785,12 +915,14 @@ simplify_inline_builtin_inequality(TI, X, Y, Inequality, Invert, GoalInfo,
             [CmpGoal, hlds_goal(negation(UnifyGoal), UnifyInfo)])
     ).
 
+%---------------------%
+
 :- pred simplify_improve_builtin_compare(int::in, list(prog_var)::in,
-    hlds_goal_expr::out, hlds_goal_info::in, hlds_goal_info::out,
+    prog_context::in, hlds_goal_expr::out, hlds_goal_info::out,
     simplify_info::in, simplify_info::out) is semidet.
 
-simplify_improve_builtin_compare(_ModeNum, Args, ImprovedGoalExpr, !GoalInfo,
-        !Info) :-
+simplify_improve_builtin_compare(_ModeNum, Args, Context,
+        GoalExpr, GoalInfo, !Info) :-
     % On the Erlang backend, it is faster for us to use builtin comparison
     % operators on high level data structures than to deconstruct the data
     % structure and compare the atomic constituents. We can only do this
@@ -800,115 +932,110 @@ simplify_improve_builtin_compare(_ModeNum, Args, ImprovedGoalExpr, !GoalInfo,
     simplify_info_get_module_info(!.Info, ModuleInfo),
     module_info_get_globals(ModuleInfo, Globals),
     globals.lookup_bool_option(Globals, can_compare_compound_values, yes),
-    list.reverse(Args, [Y, X, Res | _]),
+    list.reverse(Args, [Y, X, R | _]),
     simplify_info_get_var_types(!.Info, VarTypes),
     lookup_var_type(VarTypes, Y, Type),
     type_definitely_has_no_user_defined_equality_pred(ModuleInfo, Type),
 
     require_det (
-        Context = goal_info_get_context(!.GoalInfo),
-        goal_util.generate_simple_call(mercury_private_builtin_module,
-            "builtin_compound_eq", pf_predicate, only_mode, detism_semi,
-            purity_pure, [X, Y], [], instmap_delta_bind_no_var, ModuleInfo,
-            Context, CondEq),
-        goal_util.generate_simple_call(mercury_private_builtin_module,
-            "builtin_compound_lt", pf_predicate, only_mode, detism_semi,
-            purity_pure, [X, Y], [], instmap_delta_bind_no_var, ModuleInfo,
-            Context, CondLt),
+        % We cannot use simplify_build_compare_ite because there is
+        % no builtin_compound_gt predicate (yet).
+        % Using simplify_build_compare_ite would yield faster code,
+        % because the code we generate here start with an equality test,
+        % which is 99+% likely to fail. Starting with a less than or
+        % greater than test would be better. Since such a test can be expected
+        % to determine the final outcome in almost 50% of cases, it would
+        % let us avoid the cost of the second test *much* more frequently.
+
+        goal_util.generate_simple_call(ModuleInfo,
+            mercury_private_builtin_module, "builtin_compound_eq",
+            pf_predicate, only_mode, detism_semi, purity_pure, [X, Y], [],
+            instmap_delta_bind_no_var, Context, CmpEqGoal),
+        goal_util.generate_simple_call(ModuleInfo,
+            mercury_private_builtin_module, "builtin_compound_lt",
+            pf_predicate, only_mode, detism_semi, purity_pure, [X, Y], [],
+            instmap_delta_bind_no_var, Context, CmpLtGoal),
 
         Builtin = mercury_public_builtin_module,
-        TypeCtor = type_ctor(
-            qualified(mercury_public_builtin_module, "comparison_result"),
-            0),
-        make_const_construction(Context, Res,
-            cons(qualified(Builtin, "="), 0, TypeCtor), ReturnEq),
-        make_const_construction(Context, Res,
-            cons(qualified(Builtin, "<"), 0, TypeCtor), ReturnLt),
-        make_const_construction(Context, Res,
-            cons(qualified(Builtin, ">"), 0, TypeCtor), ReturnGt),
+        CmpRes = qualified(mercury_public_builtin_module, "comparison_result"),
+        CmpResTypeCtor = type_ctor(CmpRes, 0),
+        FunctorResultLt = cons(qualified(Builtin, "<"), 0, CmpResTypeCtor),
+        FunctorResultEq = cons(qualified(Builtin, "="), 0, CmpResTypeCtor),
+        FunctorResultGt = cons(qualified(Builtin, ">"), 0, CmpResTypeCtor),
+        make_const_construction(Context, R, FunctorResultLt, ReturnLtGoal),
+        make_const_construction(Context, R, FunctorResultEq, ReturnEqGoal),
+        make_const_construction(Context, R, FunctorResultGt, ReturnGtGoal),
 
-        NonLocals = set_of_var.list_to_set([Res, X, Y]),
-        goal_info_set_nonlocals(NonLocals, !GoalInfo),
+        NonLocals = set_of_var.list_to_set([R, X, Y]),
+        goal_info_init(NonLocals, instmap_delta_bind_var(R), detism_det,
+            purity_pure, Context, GoalInfo),
 
-        RestExpr = if_then_else([], CondLt, ReturnLt, ReturnGt),
-        Rest = hlds_goal(RestExpr, !.GoalInfo),
-        ImprovedGoalExpr = if_then_else([], CondEq, ReturnEq, Rest)
+        ReturnLtGtGoalExpr = if_then_else([], CmpLtGoal,
+            ReturnLtGoal, ReturnGtGoal),
+        ReturnLtGtGoal = hlds_goal(ReturnLtGtGoalExpr, GoalInfo),
+        GoalExpr = if_then_else([], CmpEqGoal, ReturnEqGoal, ReturnLtGtGoal)
     ).
 
-:- pred simplify_improve_int_call(instmap::in, string::in, string::in,
-    int::in, list(prog_var)::in, hlds_goal_expr::out,
-    hlds_goal_info::in, hlds_goal_info::out,
-    simplify_info::in, simplify_info::out) is semidet.
+%---------------------%
 
-simplify_improve_int_call(InstMap0, ModuleName, PredName, _ModeNum, Args,
-        ImprovedGoalExpr, !GoalInfo, !Info) :-
-    simplify_info_get_module_info(!.Info, ModuleInfo),
-    module_info_get_globals(ModuleInfo, Globals),
-    globals.lookup_bool_option(Globals, pregenerated_dist, no),
-    target_bits_per_int(Globals, bits_per_int(TargetBitsPerInt)),
-    (
-        PredName = "quot_bits_per_int",
-        Args = [X, Y],
-        % There is no point in checking whether bits_per_int is 0;
-        % it isn't.
-        Op = "unchecked_quotient",
-        simplify_make_int_ico_op(ModuleName, Op, X, TargetBitsPerInt, Y,
-            ImprovedGoalExpr, !.GoalInfo, !Info)
-    ;
-        PredName = "times_bits_per_int",
-        Args = [X, Y],
-        Op = "*",
-        simplify_make_int_ico_op(ModuleName, Op, X, TargetBitsPerInt, Y,
-            ImprovedGoalExpr, !.GoalInfo, !Info)
-    ;
-        PredName = "rem_bits_per_int",
-        Args = [X, Y],
-        % There is no point in checking whether bits_per_int is 0;
-        % it isn't.
-        Op = "unchecked_rem",
-        simplify_make_int_ico_op(ModuleName, Op, X, TargetBitsPerInt, Y,
-            ImprovedGoalExpr, !.GoalInfo, !Info)
-    ;
-        ( PredName = "/"
-        ; PredName = "//"
-        ),
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal \= 0,
-        Op = "unchecked_quotient",
-        simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-            inline_builtin, X, Y, Z, ImprovedGoalExpr)
-    ;
-        PredName = "rem",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal \= 0,
-        Op = "unchecked_rem",
-        simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-            inline_builtin, X, Y, Z, ImprovedGoalExpr)
-    ;
-        PredName = "<<",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < TargetBitsPerInt,
-        Op = "unchecked_left_shift",
-        simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-            inline_builtin, X, Y, Z, ImprovedGoalExpr)
-    ;
-        PredName = ">>",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < TargetBitsPerInt,
-        Op = "unchecked_right_shift",
-        simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-            inline_builtin, X, Y, Z, ImprovedGoalExpr)
+:- pred simplify_improve_builtin_compare_int_uint(simplify_info::in,
+    string::in, prog_var::in, prog_var::in, prog_var::in,
+    prog_context::in, hlds_goal_expr::out, hlds_goal_info::out) is det.
+
+simplify_improve_builtin_compare_int_uint(Info, TypeName,
+        R, X, Y, Context, GoalExpr, GoalInfo) :-
+    % Replace a call to builtin_compare_<inttype>(R, X, Y) with its body,
+    % effectively inlining it, and thus avoiding the cost of a cross-module
+    % call.
+    ModuleSymName = mercury_private_builtin_module,
+    PredNameLt = "builtin_" ++ TypeName ++ "_lt",
+    PredNameGt = "builtin_" ++ TypeName ++ "_gt",
+    simplify_make_cmp_goal_expr(Info, ModuleSymName, PredNameLt,
+        inline_builtin, X, Y, Context, CmpLtGoal),
+    simplify_make_cmp_goal_expr(Info, ModuleSymName, PredNameGt,
+        inline_builtin, X, Y, Context, CmpGtGoal),
+    simplify_build_compare_ite(CmpLtGoal, CmpGtGoal, R, X, Y, Context,
+        GoalExpr, GoalInfo).
+
+:- pred simplify_build_compare_ite(hlds_goal::in, hlds_goal::in,
+    prog_var::in, prog_var::in, prog_var::in, prog_context::in,
+    hlds_goal_expr::out, hlds_goal_info::out) is det.
+
+simplify_build_compare_ite(CmpLtGoal, CmpGtGoal, R, X, Y, Context,
+        GoalExpr, GoalInfo) :-
+    Builtin = mercury_public_builtin_module,
+    CmpRes = qualified(mercury_public_builtin_module, "comparison_result"),
+    CmpResTypeCtor = type_ctor(CmpRes, 0),
+    FunctorResultLt = cons(qualified(Builtin, "<"), 0, CmpResTypeCtor),
+    FunctorResultEq = cons(qualified(Builtin, "="), 0, CmpResTypeCtor),
+    FunctorResultGt = cons(qualified(Builtin, ">"), 0, CmpResTypeCtor),
+    make_const_construction(Context, R, FunctorResultLt, ReturnLtGoal),
+    make_const_construction(Context, R, FunctorResultEq, ReturnEqGoal),
+    make_const_construction(Context, R, FunctorResultGt, ReturnGtGoal),
+
+    ( if X = Y then
+        ReturnEqGoal = hlds_goal(GoalExpr, GoalInfo)
+    else
+        % This assumes that CmpLtGoal and CmpGtGoal take only X and Y
+        % as inputs. This assumption will be *wrong* if the shared type
+        % of X and Y is polymorphic, because in that case, the typeinfos
+        % describing the actual types bound to the type variables in the
+        % polymorphic type will *also* be nonlocals.
+        %
+        % If we ever want to use this predicate in such cases, we will
+        % have to get our caller to pass us the extra nonlocals.
+        NonLocals = set_of_var.list_to_set([R, X, Y]),
+        goal_info_init(NonLocals, instmap_delta_bind_var(R), detism_det,
+            purity_pure, Context, GoalInfo),
+
+        ReturnGtEqGoalExpr =
+            if_then_else([], CmpGtGoal, ReturnGtGoal, ReturnEqGoal),
+        ReturnGtEqGoal = hlds_goal(ReturnGtEqGoalExpr, GoalInfo),
+        GoalExpr =
+            if_then_else([], CmpLtGoal, ReturnLtGoal, ReturnGtEqGoal)
     ).
+
+%---------------------%
 
     % simplify_make_int_ico_op(ModuleName, Op, X, IntConst, Y, GoalExpr,
     %   OrigGoalInfo, !Info):
@@ -956,6 +1083,32 @@ simplify_make_binary_op_goal_expr(Info, ModuleName, Op, IsBuiltin, X, Y, Z,
     GoalExpr = plain_call(OpPredId, OpProcId, OpArgs, IsBuiltin,
         MaybeUnifyContext, OpSymName).
 
+:- pred simplify_make_cmp_goal_expr(simplify_info::in,
+    module_name::in, string::in, builtin_state::in,
+    prog_var::in, prog_var::in, prog_context::in, hlds_goal::out) is det.
+
+simplify_make_cmp_goal_expr(Info, ModuleSymName, Op, IsBuiltin, X, Y,
+        Context, Goal) :-
+    OpSymName = qualified(ModuleSymName, Op),
+    simplify_info_get_module_info(Info, ModuleInfo),
+    module_info_get_predicate_table(ModuleInfo, PredTable),
+    predicate_table_lookup_pred_sym_arity(PredTable, is_fully_qualified,
+        OpSymName, 2, OpPredIds),
+    ( if OpPredIds = [OpPredIdPrime] then
+        OpPredId = OpPredIdPrime
+    else
+        unexpected($pred, "cannot find " ++ Op)
+    ),
+    OpProcIdInt = 0,
+    proc_id_to_int(OpProcId, OpProcIdInt),
+    OpArgs = [X, Y],
+    MaybeUnifyContext = no,
+    GoalExpr = plain_call(OpPredId, OpProcId, OpArgs, IsBuiltin,
+        MaybeUnifyContext, OpSymName),
+    goal_info_init(set_of_var.list_to_set([X, Y]), instmap_delta_bind_no_var,
+        detism_semi, purity_pure, Context, GoalInfo),
+    Goal = hlds_goal(GoalExpr, GoalInfo).
+
 :- pred simplify_make_int_const(int::in, prog_var::out, hlds_goal::out,
     simplify_info::in, simplify_info::out) is det.
 
@@ -983,396 +1136,168 @@ simplify_make_int_const(IntConst, ConstVar, Goal, !Info) :-
     goal_info_init(NonLocals, InstMapDelta, detism_det, purity_pure, GoalInfo),
     Goal = hlds_goal(GoalExpr, GoalInfo).
 
-:- pred simplify_improve_uint_call(instmap::in, string::in, string::in,
-    int::in, list(prog_var)::in, hlds_goal_expr::out,
+%---------------------%
+
+:- pred simplify_improve_arith_shift_cmp_ops(int_type::in, instmap::in,
+    string::in, string::in, int::in, list(prog_var)::in, hlds_goal_expr::out,
     hlds_goal_info::in, hlds_goal_info::out,
     simplify_info::in, simplify_info::out) is semidet.
 
-simplify_improve_uint_call(InstMap0, ModuleName, PredName, _ModeNum, Args,
-        ImprovedGoalExpr, !GoalInfo, !Info) :-
+simplify_improve_arith_shift_cmp_ops(IntType, InstMap0, ModuleName, PredName,
+        _ModeNum, Args, ImprovedGoalExpr, !GoalInfo, !Info) :-
     simplify_info_get_module_info(!.Info, ModuleInfo),
     module_info_get_globals(ModuleInfo, Globals),
-    globals.lookup_bool_option(Globals, pregenerated_dist, no),
-    target_bits_per_int(Globals, bits_per_int(TargetBitsPerInt)),
     (
-        ( PredName = "/"
-        ; PredName = "//"
+        ( PredName = "quot_bits_per_int", Op = "unchecked_quotient"
+        ; PredName = "rem_bits_per_int", Op = "unchecked_rem"
+        ),
+        % There is no point in checking whether bits_per_int is 0;
+        % it isn't.
+        IntType = int_type_int,
+        Args = [X, Y],
+        target_bits_per_int(Globals, bits_per_int(TargetBitsPerInt)),
+        simplify_make_int_ico_op(ModuleName, Op, X, TargetBitsPerInt, Y,
+            ImprovedGoalExpr, !.GoalInfo, !Info)
+    ;
+        PredName = "times_bits_per_int",
+        IntType = int_type_int,
+        Args = [X, Y],
+        Op = "*",
+        target_bits_per_int(Globals, bits_per_int(TargetBitsPerInt)),
+        simplify_make_int_ico_op(ModuleName, Op, X, TargetBitsPerInt, Y,
+            ImprovedGoalExpr, !.GoalInfo, !Info)
+    ;
+        ( PredName = "/",   Op = "unchecked_quotient"
+        ; PredName = "//",  Op = "unchecked_quotient"
+        ; PredName = "rem", Op = "unchecked_rem"
         ),
         Args = [X, Y, Z],
         instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(uint_const(YVal), [])]),
-        YVal \= 0u,
-        Op = "unchecked_quotient"
+        InstY = bound(_, _, [bound_functor(ConsY, [])]),
+        is_non_zero_const(IntType, ConsY),
+        simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
+            inline_builtin, X, Y, Z, ImprovedGoalExpr)
     ;
-        PredName = "rem",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(uint_const(YVal), [])]),
-        YVal \= 0u,
-        Op = "unchecked_rem"
-    ;
-        PredName = "<<",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < TargetBitsPerInt,
-        Op = "unchecked_left_shift"
-    ;
-        PredName = ">>",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < TargetBitsPerInt,
-        Op = "unchecked_right_shift"
-    ),
-    simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-        inline_builtin, X, Y, Z, ImprovedGoalExpr).
-
-:- pred simplify_improve_int8_call(instmap::in, string::in, string::in,
-    int::in, list(prog_var)::in, hlds_goal_expr::out,
-    hlds_goal_info::in, hlds_goal_info::out,
-    simplify_info::in, simplify_info::out) is semidet.
-
-simplify_improve_int8_call(InstMap0, ModuleName, PredName, _ModeNum, Args,
-        ImprovedGoalExpr, !GoalInfo, !Info) :-
-    (
-        ( PredName = "/"
-        ; PredName = "//"
+        ( PredName = "<<", Op = "unchecked_left_shift"
+        ; PredName = ">>", Op = "unchecked_right_shift"
         ),
         Args = [X, Y, Z],
         instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int8_const(YVal), [])]),
-        YVal \= 0i8,
-        Op = "unchecked_quotient"
-    ;
-        PredName = "rem",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int8_const(YVal), [])]),
-        YVal \= 0i8,
-        Op = "unchecked_rem"
-    ;
-        PredName = "<<",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
         InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
         YVal >= 0,
-        YVal < 8,
-        Op = "unchecked_left_shift"
+        YVal < int_type_target_bits(Globals, IntType),
+        simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
+            inline_builtin, X, Y, Z, ImprovedGoalExpr)
     ;
-        PredName = ">>",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 8,
-        Op = "unchecked_right_shift"
-    ),
-    simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-        inline_builtin, X, Y, Z, ImprovedGoalExpr).
-
-:- pred simplify_improve_uint8_call(instmap::in, string::in, string::in,
-    int::in, list(prog_var)::in, hlds_goal_expr::out,
-    hlds_goal_info::in, hlds_goal_info::out,
-    simplify_info::in, simplify_info::out) is semidet.
-
-simplify_improve_uint8_call(InstMap0, ModuleName, PredName, _ModeNum, Args,
-        ImprovedGoalExpr, !GoalInfo, !Info) :-
-    (
-        ( PredName = "/"
-        ; PredName = "//"
+        ( PredName = "<"
+        ; PredName = ">"
+        ; PredName = "=<"
+        ; PredName = ">="
         ),
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(uint8_const(YVal), [])]),
-        YVal \= 0u8,
-        Op = "unchecked_quotient"
-    ;
-        PredName = "rem",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(uint8_const(YVal), [])]),
-        YVal \= 0u8,
-        Op = "unchecked_rem"
-    ;
-        PredName = "<<",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 8,
-        Op = "unchecked_left_shift"
-    ;
-        PredName = ">>",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 8,
-        Op = "unchecked_right_shift"
-    ),
-    simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-        inline_builtin, X, Y, Z, ImprovedGoalExpr).
+        replace_tautological_comparisons(PredName, Args, ImprovedGoalExpr)
+    ).
 
-:- pred simplify_improve_int16_call(instmap::in, string::in ,string::in,
-    int::in, list(prog_var)::in, hlds_goal_expr::out,
-    hlds_goal_info::in, hlds_goal_info::out,
-    simplify_info::in, simplify_info::out) is semidet.
+:- pred replace_tautological_comparisons(string::in, list(prog_var)::in,
+    hlds_goal_expr::out) is semidet.
 
-simplify_improve_int16_call(InstMap0, ModuleName, PredName, _ModeNum, Args,
-        ImprovedGoalExpr, !GoalInfo, !Info) :-
+replace_tautological_comparisons(PredName, Args, ImprovedGoalExpr) :-
+    % Our callers should invoke us whenever the code here may succeed.
     (
-        ( PredName = "/"
-        ; PredName = "//"
+        ( PredName = "<"
+        ; PredName = ">"
         ),
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int16_const(YVal), [])]),
-        YVal \= 0i16,
-        Op = "unchecked_quotient"
+        Args = [X, X],
+        ImprovedGoalExpr = fail_goal_expr
     ;
-        PredName = "rem",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int16_const(YVal), [])]),
-        YVal \= 0i16,
-        Op = "unchecked_rem"
-    ;
-        PredName = "<<",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 16,
-        Op = "unchecked_left_shift"
-    ;
-        PredName = ">>",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 16,
-        Op = "unchecked_right_shift"
-    ),
-    simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-        inline_builtin, X, Y, Z, ImprovedGoalExpr).
+        ( PredName = "=<"
+        ; PredName = ">="
+        ),
+        Args = [X, X],
+        ImprovedGoalExpr = true_goal_expr
+    ).
 
-:- pred simplify_improve_uint16_call(instmap::in, string::in, string::in,
-    int::in, list(prog_var)::in, hlds_goal_expr::out,
-    hlds_goal_info::in, hlds_goal_info::out,
-    simplify_info::in, simplify_info::out) is semidet.
+%---------------------------------------------------------------------------%
+%
+% Utility predicates that may be of interest to more than one
+% of the predicates above.
+%
 
-simplify_improve_uint16_call(InstMap0, ModuleName, PredName, _ModeNum, Args,
-        ImprovedGoalExpr, !GoalInfo, !Info) :-
+:- pred is_non_zero_const(int_type::in, cons_id::in) is semidet.
+
+is_non_zero_const(IntType, ConsId) :-
+    require_complete_switch[ IntType]
     (
-        ( PredName = "/"
-        ; PredName = "//"
-        ),
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(uint16_const(YVal), [])]),
-        YVal \= 0u16,
-        Op = "unchecked_quotient"
+        IntType = int_type_int,
+        ConsId = int_const(Val),
+        Val \= 0
     ;
-        PredName = "rem",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(uint16_const(YVal), [])]),
-        YVal \= 0u16,
-        Op = "unchecked_rem"
+        IntType = int_type_uint,
+        ConsId = uint_const(Val),
+        Val \= 0u
     ;
-        PredName = "<<",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 16,
-        Op = "unchecked_left_shift"
+        IntType = int_type_int8,
+        ConsId = int8_const(Val),
+        Val \= 0i8
     ;
-        PredName = ">>",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 16,
-        Op = "unchecked_right_shift"
-    ),
-    simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-        inline_builtin, X, Y, Z, ImprovedGoalExpr).
+        IntType = int_type_uint8,
+        ConsId = uint8_const(Val),
+        Val \= 0u8
+    ;
+        IntType = int_type_int16,
+        ConsId = int16_const(Val),
+        Val \= 0i16
+    ;
+        IntType = int_type_uint16,
+        ConsId = uint16_const(Val),
+        Val \= 0u16
+    ;
+        IntType = int_type_int32,
+        ConsId = int32_const(Val),
+        Val \= 0i32
+    ;
+        IntType = int_type_uint32,
+        ConsId = uint32_const(Val),
+        Val \= 0u32
+    ;
+        IntType = int_type_int64,
+        ConsId = int64_const(Val),
+        Val \= 0i64
+    ;
+        IntType = int_type_uint64,
+        ConsId = uint64_const(Val),
+        Val \= 0u64
+    ).
 
-:- pred simplify_improve_int32_call(instmap::in, string::in, string::in,
-    int::in, list(prog_var)::in, hlds_goal_expr::out,
-    hlds_goal_info::in, hlds_goal_info::out,
-    simplify_info::in, simplify_info::out) is semidet.
+:- func int_type_target_bits(globals, int_type) = int.
 
-simplify_improve_int32_call(InstMap0, ModuleName, PredName, _ModeNum, Args,
-        ImprovedGoalExpr, !GoalInfo, !Info) :-
+int_type_target_bits(Globals, IntType) = IntTypeBits :-
     (
-        ( PredName = "/"
-        ; PredName = "//"
+        ( IntType = int_type_int
+        ; IntType = int_type_uint
         ),
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int32_const(YVal), [])]),
-        YVal \= 0i32,
-        Op = "unchecked_quotient"
+        target_bits_per_int(Globals, bits_per_int(TargetBitsPerInt)),
+        IntTypeBits = TargetBitsPerInt
     ;
-        PredName = "rem",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int32_const(YVal), [])]),
-        YVal \= 0i32,
-        Op = "unchecked_rem"
-    ;
-        PredName = "<<",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 32,
-        Op = "unchecked_left_shift"
-    ;
-        PredName = ">>",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 32,
-        Op = "unchecked_right_shift"
-    ),
-    simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-        inline_builtin, X, Y, Z, ImprovedGoalExpr).
-
-:- pred simplify_improve_uint32_call(instmap::in, string::in, string::in,
-    int::in, list(prog_var)::in, hlds_goal_expr::out,
-    hlds_goal_info::in, hlds_goal_info::out,
-    simplify_info::in, simplify_info::out) is semidet.
-
-simplify_improve_uint32_call(InstMap0, ModuleName, PredName, _ModeNum, Args,
-        ImprovedGoalExpr, !GoalInfo, !Info) :-
-    (
-        ( PredName = "/"
-        ; PredName = "//"
+        ( IntType = int_type_int8
+        ; IntType = int_type_uint8
         ),
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(uint32_const(YVal), [])]),
-        YVal \= 0u32,
-        Op = "unchecked_quotient"
+        IntTypeBits = 8
     ;
-        PredName = "rem",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(uint32_const(YVal), [])]),
-        YVal \= 0u32,
-        Op = "unchecked_rem"
-    ;
-        PredName = "<<",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 32,
-        Op = "unchecked_left_shift"
-    ;
-        PredName = ">>",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 32,
-        Op = "unchecked_right_shift"
-    ),
-    simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-        inline_builtin, X, Y, Z, ImprovedGoalExpr).
-
-:- pred simplify_improve_int64_call(instmap::in, string::in, string::in,
-    int::in, list(prog_var)::in, hlds_goal_expr::out,
-    hlds_goal_info::in, hlds_goal_info::out,
-    simplify_info::in, simplify_info::out) is semidet.
-
-simplify_improve_int64_call(InstMap0, ModuleName, PredName, _ModeNum, Args,
-        ImprovedGoalExpr, !GoalInfo, !Info) :-
-    (
-        ( PredName = "/"
-        ; PredName = "//"
+        ( IntType = int_type_int16
+        ; IntType = int_type_uint16
         ),
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int64_const(YVal), [])]),
-        YVal \= 0i64,
-        Op = "unchecked_quotient"
+        IntTypeBits = 16
     ;
-        PredName = "rem",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int64_const(YVal), [])]),
-        YVal \= 0i64,
-        Op = "unchecked_rem"
-    ;
-        PredName = "<<",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 64,
-        Op = "unchecked_left_shift"
-    ;
-        PredName = ">>",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 64,
-        Op = "unchecked_right_shift"
-    ),
-    simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-        inline_builtin, X, Y, Z, ImprovedGoalExpr).
-
-:- pred simplify_improve_uint64_call(instmap::in, string::in, string::in,
-    int::in, list(prog_var)::in, hlds_goal_expr::out,
-    hlds_goal_info::in, hlds_goal_info::out,
-    simplify_info::in, simplify_info::out) is semidet.
-
-simplify_improve_uint64_call(InstMap0, ModuleName, PredName, _ModeNum, Args,
-        ImprovedGoalExpr, !GoalInfo, !Info) :-
-    (
-        ( PredName = "/"
-        ; PredName = "//"
+        ( IntType = int_type_int32
+        ; IntType = int_type_uint32
         ),
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(uint64_const(YVal), [])]),
-        YVal \= 0u64,
-        Op = "unchecked_quotient"
+        IntTypeBits = 32
     ;
-        PredName = "rem",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(uint64_const(YVal), [])]),
-        YVal \= 0u64,
-        Op = "unchecked_rem"
-    ;
-        PredName = "<<",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 64,
-        Op = "unchecked_left_shift"
-    ;
-        PredName = ">>",
-        Args = [X, Y, Z],
-        instmap_lookup_var(InstMap0, Y, InstY),
-        InstY = bound(_, _, [bound_functor(int_const(YVal), [])]),
-        YVal >= 0,
-        YVal < 64,
-        Op = "unchecked_right_shift"
-    ),
-    simplify_make_binary_op_goal_expr(!.Info, ModuleName, Op,
-        inline_builtin, X, Y, Z, ImprovedGoalExpr).
+        ( IntType = int_type_int64
+        ; IntType = int_type_uint64
+        ),
+        IntTypeBits = 64
+    ).
 
 %---------------------------------------------------------------------------%
 :- end_module check_hlds.simplify.simplify_goal_call.

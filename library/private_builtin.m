@@ -23,9 +23,9 @@
 % should never explicitly import this module. The interface for this module
 % does not get included in the Mercury library reference manual.
 %
-% Many of the predicates defined in this module are builtin - they do not have
-% definitions because the compiler generates code for them inline. Some
-% others are implemented in the runtime. A third group are implemented
+% Many of the predicates defined in this module are builtin: they do not
+% have definitions, because the compiler generates code for them inline.
+% Some others are implemented in the runtime. A third group are implemented
 % normally in this module.
 %
 %---------------------------------------------------------------------------%
@@ -123,15 +123,29 @@
     %
 :- pred compare_error is erroneous.
 
-    % The builtin < operator on ints, used in the code generated
-    % for compare/3 preds.
+    % The builtin < and > operators on integers of all sizes and both
+    % signednesses, used in the code generated for compare/3 preds.
     %
 :- pred builtin_int_lt(int::in, int::in) is semidet.
-
-    % The builtin > operator on ints, used in the code generated
-    % for compare/3 preds.
-    %
 :- pred builtin_int_gt(int::in, int::in) is semidet.
+:- pred builtin_int8_lt(int8::in, int8::in) is semidet.
+:- pred builtin_int8_gt(int8::in, int8::in) is semidet.
+:- pred builtin_int16_lt(int16::in, int16::in) is semidet.
+:- pred builtin_int16_gt(int16::in, int16::in) is semidet.
+:- pred builtin_int32_lt(int32::in, int32::in) is semidet.
+:- pred builtin_int32_gt(int32::in, int32::in) is semidet.
+:- pred builtin_int64_lt(int64::in, int64::in) is semidet.
+:- pred builtin_int64_gt(int64::in, int64::in) is semidet.
+:- pred builtin_uint_lt(int::in, int::in) is semidet.
+:- pred builtin_uint_gt(int::in, int::in) is semidet.
+:- pred builtin_uint8_lt(uint8::in, uint8::in) is semidet.
+:- pred builtin_uint8_gt(uint8::in, uint8::in) is semidet.
+:- pred builtin_uint16_lt(uint16::in, uint16::in) is semidet.
+:- pred builtin_uint16_gt(uint16::in, uint16::in) is semidet.
+:- pred builtin_uint32_lt(uint32::in, uint32::in) is semidet.
+:- pred builtin_uint32_gt(uint32::in, uint32::in) is semidet.
+:- pred builtin_uint64_lt(uint64::in, uint64::in) is semidet.
+:- pred builtin_uint64_gt(uint64::in, uint64::in) is semidet.
 
     % These should never be called -- the compiler replaces calls to these
     % predicates with inline code. These predicates are declared not to take
@@ -841,6 +855,8 @@ __Compare____base_typeclass_info_1_0(
     throw(""compare for base_typeclass_info"").
 ").
 
+%---------------------%
+
 :- pragma foreign_proc("C",
     type_info_from_typeclass_info(TypeClassInfo::in, Index::in,
         TypeInfo::out),
@@ -849,36 +865,6 @@ __Compare____base_typeclass_info_1_0(
 "
     TypeInfo = MR_typeclass_info_param_type_info(TypeClassInfo, Index);
 ").
-
-:- pragma foreign_proc("C",
-    unconstrained_type_info_from_typeclass_info(TypeClassInfo::in,
-        Index::in, TypeInfo::out),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness],
-"
-    TypeInfo = MR_typeclass_info_instance_tvar_type_info(TypeClassInfo, Index);
-").
-
-:- pragma foreign_proc("C",
-    superclass_from_typeclass_info(TypeClassInfo0::in, Index::in,
-        TypeClassInfo::out),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness],
-"
-    TypeClassInfo =
-        MR_typeclass_info_superclass_info(TypeClassInfo0, Index);
-").
-
-:- pragma foreign_proc("C",
-    instance_constraint_from_typeclass_info(TypeClassInfo0::in,
-        Index::in, TypeClassInfo::out),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness],
-"
-    TypeClassInfo =
-        MR_typeclass_info_arg_typeclass_info(TypeClassInfo0, Index);
-").
-
 :- pragma foreign_proc("C#",
     type_info_from_typeclass_info(TypeClassInfo::in, Index::in,
         TypeInfo::out),
@@ -887,34 +873,6 @@ __Compare____base_typeclass_info_1_0(
     TypeInfo = private_builtin.MR_typeclass_info_param_type_info(
         TypeClassInfo, Index);
 ").
-
-:- pragma foreign_proc("C#",
-    unconstrained_type_info_from_typeclass_info(TypeClassInfo::in,
-        Index::in, TypeInfo::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    TypeInfo = private_builtin.MR_typeclass_info_instance_tvar_type_info(
-        TypeClassInfo, Index);
-").
-
-:- pragma foreign_proc("C#",
-    superclass_from_typeclass_info(TypeClassInfo0::in, Index::in,
-        TypeClassInfo::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    TypeClassInfo = private_builtin.MR_typeclass_info_superclass_info(
-        TypeClassInfo0, Index);
-").
-
-:- pragma foreign_proc("C#",
-    instance_constraint_from_typeclass_info(TypeClassInfo0::in,
-        Index::in, TypeClassInfo::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    TypeClassInfo = private_builtin.MR_typeclass_info_arg_typeclass_info(
-        TypeClassInfo0, Index);
-").
-
 :- pragma foreign_proc("Java",
     type_info_from_typeclass_info(TypeClassInfo::in, Index::in,
         TypeInfo::out),
@@ -923,34 +881,6 @@ __Compare____base_typeclass_info_1_0(
     TypeInfo = jmercury.private_builtin.
         MR_typeclass_info_param_type_info(TypeClassInfo, Index);
 ").
-
-:- pragma foreign_proc("Java",
-    unconstrained_type_info_from_typeclass_info(TypeClassInfo::in,
-        Index::in, TypeInfo::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    TypeInfo = jmercury.private_builtin.
-        MR_typeclass_info_instance_tvar_type_info(TypeClassInfo, Index);
-").
-
-:- pragma foreign_proc("Java",
-    superclass_from_typeclass_info(TypeClassInfo0::in, Index::in,
-        TypeClassInfo::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    TypeClassInfo = jmercury.private_builtin.
-        MR_typeclass_info_superclass_info(TypeClassInfo0, Index);
-").
-
-:- pragma foreign_proc("Java",
-    instance_constraint_from_typeclass_info(TypeClassInfo0::in,
-        Index::in, TypeClassInfo::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    TypeClassInfo = jmercury.private_builtin.
-        MR_typeclass_info_arg_typeclass_info(TypeClassInfo0, Index);
-").
-
 :- pragma foreign_proc("Erlang",
     type_info_from_typeclass_info(TypeClassInfo::in, Index::in,
         TypeInfo::out),
@@ -963,6 +893,32 @@ __Compare____base_typeclass_info_1_0(
     TypeInfo = element(ExtraArgs + Index + 1, TypeClassInfo)
 ").
 
+%---------------------%
+
+:- pragma foreign_proc("C",
+    unconstrained_type_info_from_typeclass_info(TypeClassInfo::in,
+        Index::in, TypeInfo::out),
+    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
+        does_not_affect_liveness],
+"
+    TypeInfo = MR_typeclass_info_instance_tvar_type_info(TypeClassInfo, Index);
+").
+:- pragma foreign_proc("C#",
+    unconstrained_type_info_from_typeclass_info(TypeClassInfo::in,
+        Index::in, TypeInfo::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    TypeInfo = private_builtin.MR_typeclass_info_instance_tvar_type_info(
+        TypeClassInfo, Index);
+").
+:- pragma foreign_proc("Java",
+    unconstrained_type_info_from_typeclass_info(TypeClassInfo::in,
+        Index::in, TypeInfo::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    TypeInfo = jmercury.private_builtin.
+        MR_typeclass_info_instance_tvar_type_info(TypeClassInfo, Index);
+").
 :- pragma foreign_proc("Erlang",
     unconstrained_type_info_from_typeclass_info(TypeClassInfo::in,
         Index::in, TypeInfo::out),
@@ -973,6 +929,33 @@ __Compare____base_typeclass_info_1_0(
     TypeInfo = element(Index + 1, TypeClassInfo)
 ").
 
+%---------------------%
+
+:- pragma foreign_proc("C",
+    superclass_from_typeclass_info(TypeClassInfo0::in, Index::in,
+        TypeClassInfo::out),
+    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
+        does_not_affect_liveness],
+"
+    TypeClassInfo =
+        MR_typeclass_info_superclass_info(TypeClassInfo0, Index);
+").
+:- pragma foreign_proc("C#",
+    superclass_from_typeclass_info(TypeClassInfo0::in, Index::in,
+        TypeClassInfo::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    TypeClassInfo = private_builtin.MR_typeclass_info_superclass_info(
+        TypeClassInfo0, Index);
+").
+:- pragma foreign_proc("Java",
+    superclass_from_typeclass_info(TypeClassInfo0::in, Index::in,
+        TypeClassInfo::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    TypeClassInfo = jmercury.private_builtin.
+        MR_typeclass_info_superclass_info(TypeClassInfo0, Index);
+").
 :- pragma foreign_proc("Erlang",
     superclass_from_typeclass_info(TypeClassInfo0::in, Index::in,
         TypeClassInfo::out),
@@ -985,6 +968,33 @@ __Compare____base_typeclass_info_1_0(
     TypeClassInfo = element(ExtraArgs + Index + 1, TypeClassInfo0)
 ").
 
+%---------------------%
+
+:- pragma foreign_proc("C",
+    instance_constraint_from_typeclass_info(TypeClassInfo0::in,
+        Index::in, TypeClassInfo::out),
+    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
+        does_not_affect_liveness],
+"
+    TypeClassInfo =
+        MR_typeclass_info_arg_typeclass_info(TypeClassInfo0, Index);
+").
+:- pragma foreign_proc("C#",
+    instance_constraint_from_typeclass_info(TypeClassInfo0::in,
+        Index::in, TypeClassInfo::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    TypeClassInfo = private_builtin.MR_typeclass_info_arg_typeclass_info(
+        TypeClassInfo0, Index);
+").
+:- pragma foreign_proc("Java",
+    instance_constraint_from_typeclass_info(TypeClassInfo0::in,
+        Index::in, TypeClassInfo::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    TypeClassInfo = jmercury.private_builtin.
+        MR_typeclass_info_arg_typeclass_info(TypeClassInfo0, Index);
+").
 :- pragma foreign_proc("Erlang",
     instance_constraint_from_typeclass_info(TypeClassInfo0::in,
         Index::in, TypeClassInfo::out),
@@ -1036,6 +1046,8 @@ __Compare____base_typeclass_info_1_0(
 
 :- implementation.
 
+%---------------------------------------------------------------------------%
+
 :- pragma foreign_proc("C",
     store_ticket(Ticket::out),
     [will_not_call_mercury, thread_safe],
@@ -1046,72 +1058,6 @@ __Compare____base_typeclass_info_1_0(
     Ticket = 0;
 #endif
 ").
-
-:- pragma foreign_proc("C",
-    reset_ticket_undo(Ticket::in),
-    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
-"
-#ifdef MR_USE_TRAIL
-    MR_reset_ticket(Ticket, MR_undo);
-#endif
-").
-
-:- pragma foreign_proc("C",
-    reset_ticket_commit(Ticket::in),
-    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
-"
-#ifdef MR_USE_TRAIL
-    MR_reset_ticket(Ticket, MR_commit);
-#endif
-").
-
-:- pragma foreign_proc("C",
-    reset_ticket_solve(Ticket::in),
-    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
-"
-#ifdef MR_USE_TRAIL
-    MR_reset_ticket(Ticket, MR_solve);
-#endif
-").
-
-:- pragma foreign_proc("C",
-    discard_ticket,
-    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
-"
-#ifdef MR_USE_TRAIL
-    MR_discard_ticket();
-#endif
-").
-
-:- pragma foreign_proc("C",
-    prune_ticket,
-    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
-"
-#ifdef MR_USE_TRAIL
-    MR_prune_ticket();
-#endif
-").
-
-:- pragma foreign_proc("C",
-    mark_ticket_stack(TicketCounter::out),
-    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
-"
-#ifdef MR_USE_TRAIL
-    MR_mark_ticket_stack(TicketCounter);
-#else
-    TicketCounter = 0;
-#endif
-").
-
-:- pragma foreign_proc("C",
-    prune_tickets_to(TicketCounter::in),
-    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
-"
-#ifdef MR_USE_TRAIL
-    MR_prune_tickets_to(TicketCounter);
-#endif
-").
-
 :- pragma foreign_proc("C#",
     store_ticket(Ticket::out),
     [will_not_call_mercury, thread_safe],
@@ -1123,7 +1069,31 @@ __Compare____base_typeclass_info_1_0(
     Ticket = null;
 #endif
 ").
+:- pragma foreign_proc("Java",
+    store_ticket(Ticket::out),
+    [will_not_call_mercury, thread_safe],
+"
+    // XXX No trailing for the Java back-end, so take no action.
+    Ticket = null;
+").
+:- pragma foreign_proc("Erlang",
+    store_ticket(Ticket::out),
+    [will_not_call_mercury, thread_safe],
+"
+    % XXX No trailing for the Erlang back-end, so take no action.
+    Ticket = null
+").
 
+%---------------------%
+
+:- pragma foreign_proc("C",
+    reset_ticket_undo(Ticket::in),
+    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
+"
+#ifdef MR_USE_TRAIL
+    MR_reset_ticket(Ticket, MR_undo);
+#endif
+").
 :- pragma foreign_proc("C#",
     reset_ticket_undo(Ticket::in),
     [will_not_call_mercury, thread_safe],
@@ -1133,7 +1103,30 @@ __Compare____base_typeclass_info_1_0(
     // MR_reset_ticket(Ticket, MR_undo);
 #endif
 ").
+:- pragma foreign_proc("Java",
+    reset_ticket_undo(_Ticket::in),
+    [will_not_call_mercury, thread_safe],
+"
+    // XXX No trailing for the Java back-end, so take no action.
+").
+:- pragma foreign_proc("Erlang",
+    reset_ticket_undo(_Ticket::in),
+    [will_not_call_mercury, thread_safe],
+"
+    % XXX No trailing for the Erlang back-end, so take no action.
+    void
+").
 
+%---------------------%
+
+:- pragma foreign_proc("C",
+    reset_ticket_commit(Ticket::in),
+    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
+"
+#ifdef MR_USE_TRAIL
+    MR_reset_ticket(Ticket, MR_commit);
+#endif
+").
 :- pragma foreign_proc("C#",
     reset_ticket_commit(Ticket::in),
     [will_not_call_mercury, thread_safe],
@@ -1143,7 +1136,30 @@ __Compare____base_typeclass_info_1_0(
     // MR_reset_ticket(Ticket, MR_commit);
 #endif
 ").
+:- pragma foreign_proc("Java",
+    reset_ticket_commit(_Ticket::in),
+    [will_not_call_mercury, thread_safe],
+"
+    // XXX No trailing for the Java back-end, so take no action.
+").
+:- pragma foreign_proc("Erlang",
+    reset_ticket_commit(_Ticket::in),
+    [will_not_call_mercury, thread_safe],
+"
+    % XXX No trailing for the Erlang back-end, so take no action.
+    void
+").
 
+%---------------------%
+
+:- pragma foreign_proc("C",
+    reset_ticket_solve(Ticket::in),
+    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
+"
+#ifdef MR_USE_TRAIL
+    MR_reset_ticket(Ticket, MR_solve);
+#endif
+").
 :- pragma foreign_proc("C#",
     reset_ticket_solve(Ticket::in),
     [will_not_call_mercury, thread_safe],
@@ -1153,7 +1169,30 @@ __Compare____base_typeclass_info_1_0(
     // MR_reset_ticket(Ticket, MR_solve);
 #endif
 ").
+:- pragma foreign_proc("Java",
+    reset_ticket_solve(_Ticket::in),
+    [will_not_call_mercury, thread_safe],
+"
+    // XXX No trailing for the Java back-end, so take no action.
+").
+:- pragma foreign_proc("Erlang",
+    reset_ticket_solve(_Ticket::in),
+    [will_not_call_mercury, thread_safe],
+"
+    % XXX No trailing for the Erlang back-end, so take no action.
+    void
+").
 
+%---------------------%
+
+:- pragma foreign_proc("C",
+    discard_ticket,
+    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
+"
+#ifdef MR_USE_TRAIL
+    MR_discard_ticket();
+#endif
+").
 :- pragma foreign_proc("C#",
     discard_ticket,
     [will_not_call_mercury, thread_safe],
@@ -1163,7 +1202,30 @@ __Compare____base_typeclass_info_1_0(
     // MR_discard_ticket();
 #endif
 ").
+:- pragma foreign_proc("Java",
+    discard_ticket,
+    [will_not_call_mercury, thread_safe],
+"
+    // XXX No trailing for the Java back-end, so take no action.
+").
+:- pragma foreign_proc("Erlang",
+    discard_ticket,
+    [will_not_call_mercury, thread_safe],
+"
+    % XXX No trailing for the Erlang back-end, so take no action.
+    void
+").
 
+%---------------------%
+
+:- pragma foreign_proc("C",
+    prune_ticket,
+    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
+"
+#ifdef MR_USE_TRAIL
+    MR_prune_ticket();
+#endif
+").
 :- pragma foreign_proc("C#",
     prune_ticket,
     [will_not_call_mercury, thread_safe],
@@ -1173,7 +1235,32 @@ __Compare____base_typeclass_info_1_0(
     // MR_prune_ticket();
 #endif
 ").
+:- pragma foreign_proc("Java",
+    prune_ticket,
+    [will_not_call_mercury, thread_safe],
+"
+    // XXX No trailing for the Java back-end, so take no action.
+").
+:- pragma foreign_proc("Erlang",
+    prune_ticket,
+    [will_not_call_mercury, thread_safe],
+"
+    % XXX No trailing for the Erlang back-end, so take no action.
+    void
+").
 
+%---------------------%
+
+:- pragma foreign_proc("C",
+    mark_ticket_stack(TicketCounter::out),
+    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
+"
+#ifdef MR_USE_TRAIL
+    MR_mark_ticket_stack(TicketCounter);
+#else
+    TicketCounter = 0;
+#endif
+").
 :- pragma foreign_proc("C#",
     mark_ticket_stack(TicketCounter::out),
     [will_not_call_mercury, thread_safe],
@@ -1185,7 +1272,31 @@ __Compare____base_typeclass_info_1_0(
     TicketCounter = null;
 #endif
 ").
+:- pragma foreign_proc("Java",
+    mark_ticket_stack(TicketCounter::out),
+    [will_not_call_mercury, thread_safe],
+"
+    // XXX No trailing for the Java back-end, so take no action.
+    TicketCounter = null;
+").
+:- pragma foreign_proc("Erlang",
+    mark_ticket_stack(TicketCounter::out),
+    [will_not_call_mercury, thread_safe],
+"
+    % XXX No trailing for the Erlang back-end, so take no action.
+    TicketCounter = null
+").
 
+%---------------------%
+
+:- pragma foreign_proc("C",
+    prune_tickets_to(TicketCounter::in),
+    [will_not_call_mercury, thread_safe, does_not_affect_liveness],
+"
+#ifdef MR_USE_TRAIL
+    MR_prune_tickets_to(TicketCounter);
+#endif
+").
 :- pragma foreign_proc("C#",
     prune_tickets_to(TicketCounter::in),
     [will_not_call_mercury, thread_safe],
@@ -1195,119 +1306,11 @@ __Compare____base_typeclass_info_1_0(
     // MR_prune_tickets_to(TicketCounter);
 #endif
 ").
-
-:- pragma foreign_proc("Java",
-    store_ticket(Ticket::out),
-    [will_not_call_mercury, thread_safe],
-"
-    // XXX No trailing for the Java back-end, so take no action.
-    Ticket = null;
-").
-
-:- pragma foreign_proc("Java",
-    reset_ticket_undo(_Ticket::in),
-    [will_not_call_mercury, thread_safe],
-"
-    // XXX No trailing for the Java back-end, so take no action.
-").
-
-:- pragma foreign_proc("Java",
-    reset_ticket_commit(_Ticket::in),
-    [will_not_call_mercury, thread_safe],
-"
-    // XXX No trailing for the Java back-end, so take no action.
-").
-
-:- pragma foreign_proc("Java",
-    reset_ticket_solve(_Ticket::in),
-    [will_not_call_mercury, thread_safe],
-"
-    // XXX No trailing for the Java back-end, so take no action.
-").
-
-:- pragma foreign_proc("Java",
-    discard_ticket,
-    [will_not_call_mercury, thread_safe],
-"
-    // XXX No trailing for the Java back-end, so take no action.
-").
-
-:- pragma foreign_proc("Java",
-    prune_ticket,
-    [will_not_call_mercury, thread_safe],
-"
-    // XXX No trailing for the Java back-end, so take no action.
-").
-
-:- pragma foreign_proc("Java",
-    mark_ticket_stack(TicketCounter::out),
-    [will_not_call_mercury, thread_safe],
-"
-    // XXX No trailing for the Java back-end, so take no action.
-    TicketCounter = null;
-").
-
 :- pragma foreign_proc("Java",
     prune_tickets_to(_TicketCounter::in),
     [will_not_call_mercury, thread_safe],
 "
     // XXX No trailing for the Java back-end, so take no action.
-").
-
-:- pragma foreign_proc("Erlang",
-    store_ticket(Ticket::out),
-    [will_not_call_mercury, thread_safe],
-"
-    % XXX No trailing for the Erlang back-end, so take no action.
-    Ticket = null
-").
-
-:- pragma foreign_proc("Erlang",
-    reset_ticket_undo(_Ticket::in),
-    [will_not_call_mercury, thread_safe],
-"
-    % XXX No trailing for the Erlang back-end, so take no action.
-    void
-").
-
-:- pragma foreign_proc("Erlang",
-    reset_ticket_commit(_Ticket::in),
-    [will_not_call_mercury, thread_safe],
-"
-    % XXX No trailing for the Erlang back-end, so take no action.
-    void
-").
-
-:- pragma foreign_proc("Erlang",
-    reset_ticket_solve(_Ticket::in),
-    [will_not_call_mercury, thread_safe],
-"
-    % XXX No trailing for the Erlang back-end, so take no action.
-    void
-").
-
-:- pragma foreign_proc("Erlang",
-    discard_ticket,
-    [will_not_call_mercury, thread_safe],
-"
-    % XXX No trailing for the Erlang back-end, so take no action.
-    void
-").
-
-:- pragma foreign_proc("Erlang",
-    prune_ticket,
-    [will_not_call_mercury, thread_safe],
-"
-    % XXX No trailing for the Erlang back-end, so take no action.
-    void
-").
-
-:- pragma foreign_proc("Erlang",
-    mark_ticket_stack(TicketCounter::out),
-    [will_not_call_mercury, thread_safe],
-"
-    % XXX No trailing for the Erlang back-end, so take no action.
-    TicketCounter = null
 ").
 
 :- pragma foreign_proc("Erlang",
@@ -1387,6 +1390,8 @@ __Compare____base_typeclass_info_1_0(
     #include ""mercury_heap.h"" // for MR_free_heap()
 ").
 
+%---------------------%
+
 :- pragma foreign_proc("C",
     gc_trace(Pointer::in),
     [will_not_call_mercury, thread_safe, will_not_modify_trail],
@@ -1401,6 +1406,23 @@ __Compare____base_typeclass_info_1_0(
         ""called when accurate GC not enabled"");
 #endif
 ").
+:- pragma foreign_proc("Java",
+    gc_trace(_Pointer::in),
+    [will_not_call_mercury, thread_safe],
+"
+    // For the Java back-end, we use the Java garbage collector,
+    // so we take no action here.
+").
+:- pragma foreign_proc("Erlang",
+    gc_trace(_Pointer::in),
+    [will_not_call_mercury, thread_safe],
+"
+    % For the Erlang back-end, we use the Erlang garbage collector, so we
+    % take no action here.
+    void
+").
+
+%---------------------%
 
 :- pragma foreign_proc("C",
     free_heap(Val::di),
@@ -1408,6 +1430,23 @@ __Compare____base_typeclass_info_1_0(
 "
     MR_free_heap((void *) Val);
 ").
+:- pragma foreign_proc("Java",
+    free_heap(_Val::di),
+    [will_not_call_mercury, thread_safe],
+"
+    // For the Java back-end, we don't define our own heaps.
+    // So take no action here.
+").
+:- pragma foreign_proc("Erlang",
+    free_heap(_Val::di),
+    [will_not_call_mercury, thread_safe],
+"
+    % For the Erlang back-end, as for the .NET back-end, we don't define
+    % our own heaps. So take no action here.
+    void
+").
+
+%---------------------%
 
 :- pragma foreign_proc("C",
     mark_hp(SavedHeapPointer::out),
@@ -1421,6 +1460,29 @@ __Compare____base_typeclass_info_1_0(
     SavedHeapPointer = 0;
 #endif
 ").
+:- pragma foreign_proc("C#",
+    mark_hp(SavedHeapPointer::out),
+    [will_not_call_mercury, thread_safe],
+"
+    // We can't do heap reclamation on failure in the .NET back-end.
+    SavedHeapPointer = null;
+").
+:- pragma foreign_proc("Java",
+    mark_hp(SavedHeapPointer::out),
+    [will_not_call_mercury, thread_safe],
+"
+    // We can't do heap reclamation on failure in the Java back-end.
+    SavedHeapPointer = null;
+").
+:- pragma foreign_proc("Erlang",
+    mark_hp(SavedHeapPointer::out),
+    [will_not_call_mercury, thread_safe],
+"
+    % We can't do heap reclamation on failure in the Erlang back-end.
+    SavedHeapPointer = null
+").
+
+%---------------------%
 
 :- pragma foreign_proc("C",
     restore_hp(SavedHeapPointer::in),
@@ -1431,77 +1493,17 @@ __Compare____base_typeclass_info_1_0(
     MR_restore_hp(SavedHeapPointer);
 #endif
 ").
-
-:- pragma foreign_proc("C#",
-    mark_hp(SavedHeapPointer::out),
-    [will_not_call_mercury, thread_safe],
-"
-    // We can't do heap reclamation on failure in the .NET back-end.
-    SavedHeapPointer = null;
-").
-
 :- pragma foreign_proc("C#",
     restore_hp(_SavedHeapPointer::in),
     [will_not_call_mercury, thread_safe],
 "
     // We can't do heap reclamation on failure in the .NET back-end.
 ").
-
-:- pragma foreign_proc("Java",
-    gc_trace(_Pointer::in),
-    [will_not_call_mercury, thread_safe],
-"
-    // For the Java back-end, we use the Java garbage collector,
-    // so we take no action here.
-").
-
-:- pragma foreign_proc("Java",
-    free_heap(_Val::di),
-    [will_not_call_mercury, thread_safe],
-"
-    // For the Java back-end, we don't define our own heaps.
-    // So take no action here.
-").
-
-:- pragma foreign_proc("Java",
-    mark_hp(SavedHeapPointer::out),
-    [will_not_call_mercury, thread_safe],
-"
-    // We can't do heap reclamation on failure in the Java back-end.
-    SavedHeapPointer = null;
-").
-
 :- pragma foreign_proc("Java",
     restore_hp(_SavedHeapPointer::in),
     [will_not_call_mercury, thread_safe],
 "
     // We can't do heap reclamation on failure in the Java back-end.
-").
-
-:- pragma foreign_proc("Erlang",
-    gc_trace(_Pointer::in),
-    [will_not_call_mercury, thread_safe],
-"
-    % For the Erlang back-end, we use the Erlang garbage collector, so we
-    % take no action here.
-    void
-").
-
-:- pragma foreign_proc("Erlang",
-    free_heap(_Val::di),
-    [will_not_call_mercury, thread_safe],
-"
-    % For the Erlang back-end, as for the .NET back-end, we don't define
-    % our own heaps. So take no action here.
-    void
-").
-
-:- pragma foreign_proc("Erlang",
-    mark_hp(SavedHeapPointer::out),
-    [will_not_call_mercury, thread_safe],
-"
-    % We can't do heap reclamation on failure in the Erlang back-end.
-    SavedHeapPointer = null
 ").
 
 :- pragma foreign_proc("Erlang",
@@ -1589,6 +1591,88 @@ __Compare__private_builtin__ref_1_0(
 
 :- semipure pred trace_evaluate_runtime_condition is semidet.
 
+    % unify_remote_arg_words(TermVarX, TermVarY, Ptag, CellOffsetVar):
+    %
+    % Succeed iff the argument words at the given offset are the same
+    % in TermVarX and TermVarY.
+    %
+:- pred unify_remote_arg_words(T::in, T::in, int::in, int::in) is semidet.
+
+    % compare_remote_uint_words(TermVarX, TermVarY,
+    %   Ptag, CellOffsetVar, ResultVar):
+    %
+    % Set ResultVar to the result of the unsigned comparison between
+    % two bitfields in the memory cells of TermVarX and TermVarY.
+    % The bitfields occupy the entirety of the words at offset
+    % CellOffsetVar.
+    %
+:- pred compare_remote_uint_words(T::in, T::in, int::in, int::in,
+    comparison_result::uo) is det.
+
+    % compare_remote_uint_bitfields(TermVarX, TermVarY,
+    %   Ptag, CellOffsetVar, ShiftVar, NumBitsVar, ResultVar):
+    %
+    % Set ResultVar to the result of the unsigned comparison between
+    % two bitfields in the memory cells of TermVarX and TermVarY.
+    % The bitfields are in the word at offset CellOffsetVar, with the
+    % LSBs of the bitfields being ShiftVar bits from the LSB of the word.
+    % Their size is NumBitsVar bits.
+    %
+:- pred compare_remote_uint_bitfields(T::in, T::in, int::in, int::in,
+    int::in, int::in, comparison_result::uo) is det.
+
+    % compare_remote_int{8,16,32}_bitfields(TermVarX, TermVarY,
+    %   Ptag, CellOffsetVar, ShiftVar, ResultVar):
+    %
+    % Set ResultVar to the result of the signed comparison between two
+    % {8,16,32} bit bitfields in the memory cells of TermVarX and TermVarY.
+    % The bitfields are in the word at offset CellOffsetVar, with the
+    % LSBs of the bitfields being ShiftVar bits from the LSB of the word.
+    %
+:- pred compare_remote_int8_bitfields(T::in, T::in, int::in, int::in, int::in,
+    comparison_result::uo) is det.
+:- pred compare_remote_int16_bitfields(T::in, T::in, int::in, int::in, int::in,
+    comparison_result::uo) is det.
+:- pred compare_remote_int32_bitfields(T::in, T::in, int::in, int::in, int::in,
+    comparison_result::uo) is det.
+
+    % compare_local_uint_words(TermVarX, TermVarY, ResultVar):
+    %
+    % Set ResultVar to the result of the unsigned comparison between
+    % two bitfields in TermVarX and TermVarY.
+    % The bitfields occupy the entirety of the words containing
+    % the terms themselves.
+    %
+:- pred compare_local_uint_words(T::in, T::in,
+    comparison_result::uo) is det.
+
+    % compare_local_uint_bitfields(TermVarX, TermVarY,
+    %   ShiftVar, NumBitsVar, ResultVar):
+    %
+    % Set ResultVar to the result of the unsigned comparison between
+    % two bitfields in TermVarX and TermVarY.
+    % The bitfields are in the term words themselves, with the LSBs
+    % of the bitfields being ShiftVar bits from the LSB of the word.
+    % Their size is NumBitsVar bits.
+    %
+:- pred compare_local_uint_bitfields(T::in, T::in, int::in, int::in,
+    comparison_result::uo) is det.
+
+    % compare_local_int{8,16,32}_bitfields(TermVarX, TermVarY,
+    %   ShiftVar, ResultVar):
+    %
+    % Set ResultVar to the result of the signed comparison between two
+    % {8,16,32} bit bitfields in TermVarX and TermVarY.
+    % The bitfields are in the term words themselves, with the LSBs
+    % of the bitfields being ShiftVar bits from the LSB of the word.
+    %
+:- pred compare_local_int8_bitfields(T::in, T::in, int::in,
+    comparison_result::uo) is det.
+:- pred compare_local_int16_bitfields(T::in, T::in, int::in,
+    comparison_result::uo) is det.
+:- pred compare_local_int32_bitfields(T::in, T::in, int::in,
+    comparison_result::uo) is det.
+
 :- implementation.
 
 unused :-
@@ -1650,6 +1734,359 @@ nyi_foreign_type_compare(Result, _, _) :-
             ""trace_evaluate_runtime_condition called"");
     }
 ").
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    unify_remote_arg_words(TermVarX::in, TermVarY::in,
+        Ptag::in, CellOffsetVar::in),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned *cell_x;
+    MR_Unsigned *cell_y;
+    cell_x = (MR_Unsigned *) (((MR_Unsigned) TermVarX) - (MR_Unsigned) Ptag);
+    cell_y = (MR_Unsigned *) (((MR_Unsigned) TermVarY) - (MR_Unsigned) Ptag);
+    MR_Unsigned word_x = cell_x[CellOffsetVar];
+    MR_Unsigned word_y = cell_y[CellOffsetVar];
+    SUCCESS_INDICATOR = (word_x == word_y);
+").
+
+unify_remote_arg_words(_, _, _, _) :-
+    semidet_fail.
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    compare_remote_uint_words(TermVarX::in, TermVarY::in,
+        Ptag::in, CellOffsetVar::in, ResultVar::uo),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned *cell_x;
+    MR_Unsigned *cell_y;
+    cell_x = (MR_Unsigned *) (((MR_Unsigned) TermVarX) - (MR_Unsigned) Ptag);
+    cell_y = (MR_Unsigned *) (((MR_Unsigned) TermVarY) - (MR_Unsigned) Ptag);
+    MR_Unsigned word_x = cell_x[CellOffsetVar];
+    MR_Unsigned word_y = cell_y[CellOffsetVar];
+    if (word_x < word_y) {
+        ResultVar = MR_COMPARE_LESS;
+    } else if (word_x > word_y) {
+        ResultVar = MR_COMPARE_GREATER;
+    } else {
+        ResultVar = MR_COMPARE_EQUAL;
+    }
+").
+
+compare_remote_uint_words(_, _, _, _, Result) :-
+    ( if semidet_fail then
+        Result = (=)
+    else
+        error("compare_remote_int32_words called")
+    ).
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    compare_remote_uint_bitfields(TermVarX::in, TermVarY::in,
+        Ptag::in, CellOffsetVar::in, ShiftVar::in, NumBitsVar::in,
+        ResultVar::uo),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned *cell_x;
+    MR_Unsigned *cell_y;
+    cell_x = (MR_Unsigned *) (((MR_Unsigned) TermVarX) - (MR_Unsigned) Ptag);
+    cell_y = (MR_Unsigned *) (((MR_Unsigned) TermVarY) - (MR_Unsigned) Ptag);
+    MR_Unsigned word_x = cell_x[CellOffsetVar];
+    MR_Unsigned word_y = cell_y[CellOffsetVar];
+    MR_Unsigned value_x = ((word_x >> ShiftVar) & ((1 << NumBitsVar) - 1));
+    MR_Unsigned value_y = ((word_y >> ShiftVar) & ((1 << NumBitsVar) - 1));
+    if (value_x < value_y) {
+        ResultVar = MR_COMPARE_LESS;
+    } else if (value_x > value_y) {
+        ResultVar = MR_COMPARE_GREATER;
+    } else {
+        ResultVar = MR_COMPARE_EQUAL;
+    }
+").
+
+compare_remote_uint_bitfields(_, _, _, _, _, _, Result) :-
+    ( if semidet_fail then
+        Result = (=)
+    else
+        error("compare_remote_int32_bitfields called")
+    ).
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    compare_remote_int8_bitfields(TermVarX::in, TermVarY::in,
+        Ptag::in, CellOffsetVar::in, ShiftVar::in, ResultVar::uo),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned *cell_x;
+    MR_Unsigned *cell_y;
+    cell_x = (MR_Unsigned *) (((MR_Unsigned) TermVarX) - (MR_Unsigned) Ptag);
+    cell_y = (MR_Unsigned *) (((MR_Unsigned) TermVarY) - (MR_Unsigned) Ptag);
+    MR_Unsigned word_x = cell_x[CellOffsetVar];
+    MR_Unsigned word_y = cell_y[CellOffsetVar];
+    int8_t value_x = (int8_t) ((word_x >> ShiftVar) & ((1 << 8) - 1));
+    int8_t value_y = (int8_t) ((word_y >> ShiftVar) & ((1 << 8) - 1));
+    if (value_x < value_y) {
+        ResultVar = MR_COMPARE_LESS;
+    } else if (value_x > value_y) {
+        ResultVar = MR_COMPARE_GREATER;
+    } else {
+        ResultVar = MR_COMPARE_EQUAL;
+    }
+").
+
+compare_remote_int8_bitfields(_, _, _, _, _, Result) :-
+    ( if semidet_fail then
+        Result = (=)
+    else
+        error("compare_remote_int8_bitfields called")
+    ).
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    compare_remote_int16_bitfields(TermVarX::in, TermVarY::in,
+        Ptag::in, CellOffsetVar::in, ShiftVar::in, ResultVar::uo),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned *cell_x;
+    MR_Unsigned *cell_y;
+    cell_x = (MR_Unsigned *) (((MR_Unsigned) TermVarX) - (MR_Unsigned) Ptag);
+    cell_y = (MR_Unsigned *) (((MR_Unsigned) TermVarY) - (MR_Unsigned) Ptag);
+    MR_Unsigned word_x = cell_x[CellOffsetVar];
+    MR_Unsigned word_y = cell_y[CellOffsetVar];
+    int16_t value_x = (int16_t) ((word_x >> ShiftVar) & ((1 << 16) - 1));
+    int16_t value_y = (int16_t) ((word_y >> ShiftVar) & ((1 << 16) - 1));
+    if (value_x < value_y) {
+        ResultVar = MR_COMPARE_LESS;
+    } else if (value_x > value_y) {
+        ResultVar = MR_COMPARE_GREATER;
+    } else {
+        ResultVar = MR_COMPARE_EQUAL;
+    }
+").
+
+compare_remote_int16_bitfields(_, _, _, _, _, Result) :-
+    ( if semidet_fail then
+        Result = (=)
+    else
+        error("compare_remote_int16_bitfields called")
+    ).
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    compare_remote_int32_bitfields(TermVarX::in, TermVarY::in,
+        Ptag::in, CellOffsetVar::in, ShiftVar::in, ResultVar::uo),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+#ifdef MR_MERCURY_IS_64_BITS
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned *cell_x;
+    MR_Unsigned *cell_y;
+    cell_x = (MR_Unsigned *) (((MR_Unsigned) TermVarX) - (MR_Unsigned) Ptag);
+    cell_y = (MR_Unsigned *) (((MR_Unsigned) TermVarY) - (MR_Unsigned) Ptag);
+    MR_Unsigned word_x = cell_x[CellOffsetVar];
+    MR_Unsigned word_y = cell_y[CellOffsetVar];
+    int32_t value_x =
+        (int32_t) ((word_x >> ShiftVar) & ((INT64_C(1) << 32) - 1));
+    int32_t value_y =
+        (int32_t) ((word_y >> ShiftVar) & ((INT64_C(1) << 32) - 1));
+    if (value_x < value_y) {
+        ResultVar = MR_COMPARE_LESS;
+    } else if (value_x > value_y) {
+        ResultVar = MR_COMPARE_GREATER;
+    } else {
+        ResultVar = MR_COMPARE_EQUAL;
+    }
+#else
+    MR_fatal_error(""compare_remote_int32_bitfields called on ""
+        ""non-64-bit system"");
+#endif
+").
+
+compare_remote_int32_bitfields(_, _, _, _, _, Result) :-
+    ( if semidet_fail then
+        Result = (=)
+    else
+        error("compare_remote_int32_bitfields called")
+    ).
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    compare_local_uint_words(TermVarX::in, TermVarY::in,
+        ResultVar::uo),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned value_x = (MR_Unsigned) TermVarX;
+    MR_Unsigned value_y = (MR_Unsigned) TermVarY;
+    if (value_x < value_y) {
+        ResultVar = MR_COMPARE_LESS;
+    } else if (value_x > value_y) {
+        ResultVar = MR_COMPARE_GREATER;
+    } else {
+        ResultVar = MR_COMPARE_EQUAL;
+    }
+").
+
+compare_local_uint_words(_, _, Result) :-
+    ( if semidet_fail then
+        Result = (=)
+    else
+        error("compare_local_uint_words called")
+    ).
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    compare_local_uint_bitfields(TermVarX::in, TermVarY::in,
+        ShiftVar::in, NumBitsVar::in, ResultVar::uo),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned word_x = (MR_Unsigned) TermVarX;
+    MR_Unsigned word_y = (MR_Unsigned) TermVarY;
+    MR_Unsigned value_x = ((word_x >> ShiftVar) & ((1 << NumBitsVar) - 1));
+    MR_Unsigned value_y = ((word_y >> ShiftVar) & ((1 << NumBitsVar) - 1));
+    if (value_x < value_y) {
+        ResultVar = MR_COMPARE_LESS;
+    } else if (value_x > value_y) {
+        ResultVar = MR_COMPARE_GREATER;
+    } else {
+        ResultVar = MR_COMPARE_EQUAL;
+    }
+").
+
+compare_local_uint_bitfields(_, _, _, _, Result) :-
+    ( if semidet_fail then
+        Result = (=)
+    else
+        error("compare_local_uint_bitfields called")
+    ).
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    compare_local_int8_bitfields(TermVarX::in, TermVarY::in,
+        ShiftVar::in, ResultVar::uo),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned word_x = (MR_Unsigned) TermVarX;
+    MR_Unsigned word_y = (MR_Unsigned) TermVarY;
+    int8_t value_x = (int8_t) ((word_x >> ShiftVar) & ((1 << 8) - 1));
+    int8_t value_y = (int8_t) ((word_y >> ShiftVar) & ((1 << 8) - 1));
+    if (value_x < value_y) {
+        ResultVar = MR_COMPARE_LESS;
+    } else if (value_x > value_y) {
+        ResultVar = MR_COMPARE_GREATER;
+    } else {
+        ResultVar = MR_COMPARE_EQUAL;
+    }
+").
+
+compare_local_int8_bitfields(_, _, _, Result) :-
+    ( if semidet_fail then
+        Result = (=)
+    else
+        error("compare_local_int8_bitfields called")
+    ).
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    compare_local_int16_bitfields(TermVarX::in, TermVarY::in,
+        ShiftVar::in, ResultVar::uo),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned word_x = (MR_Unsigned) TermVarX;
+    MR_Unsigned word_y = (MR_Unsigned) TermVarY;
+    int16_t value_x = (int16_t) ((word_x >> ShiftVar) & ((1 << 16) - 1));
+    int16_t value_y = (int16_t) ((word_y >> ShiftVar) & ((1 << 16) - 1));
+    if (value_x < value_y) {
+        ResultVar = MR_COMPARE_LESS;
+    } else if (value_x > value_y) {
+        ResultVar = MR_COMPARE_GREATER;
+    } else {
+        ResultVar = MR_COMPARE_EQUAL;
+    }
+").
+
+compare_local_int16_bitfields(_, _, _, Result) :-
+    ( if semidet_fail then
+        Result = (=)
+    else
+        error("compare_local_int16_bitfields called")
+    ).
+
+%---------------------%
+
+:- pragma foreign_proc("C",
+    compare_local_int32_bitfields(TermVarX::in, TermVarY::in,
+        ShiftVar::in, ResultVar::uo),
+    [will_not_call_mercury, thread_safe, promise_pure,
+        does_not_affect_liveness, may_not_duplicate],
+"
+#ifdef MR_MERCURY_IS_64_BITS
+    // All uses of this predicate should override the body,
+    // but just in case they don't ...
+    MR_Unsigned word_x = (MR_Unsigned) TermVarX;
+    MR_Unsigned word_y = (MR_Unsigned) TermVarY;
+    int32_t value_x =
+        (int32_t) ((word_x >> ShiftVar) & ((INT64_C(1) << 32) - 1));
+    int32_t value_y =
+        (int32_t) ((word_y >> ShiftVar) & ((INT64_C(1) << 32) - 1));
+    if (value_x < value_y) {
+        ResultVar = MR_COMPARE_LESS;
+    } else if (value_x > value_y) {
+        ResultVar = MR_COMPARE_GREATER;
+    } else {
+        ResultVar = MR_COMPARE_EQUAL;
+    }
+#else
+    MR_fatal_error(""compare_local_int32_bitfields called on ""
+        ""non-64-bit system"");
+#endif
+").
+
+compare_local_int32_bitfields(_, _, _, Result) :-
+    ( if semidet_fail then
+        Result = (=)
+    else
+        error("compare_local_int32_bitfields called")
+    ).
 
 %---------------------------------------------------------------------------%
 %
@@ -1804,7 +2241,6 @@ const MR_FA_TypeInfo_Struct1 ML_type_info_for_list_of_type_info = {
     &MR_TYPE_CTOR_INFO_NAME(list, list, 1),
     { (MR_TypeInfo) &ML_type_info_for_type_info }
 };
-
 
 const MR_FA_TypeInfo_Struct1 ML_type_info_for_list_of_pseudo_type_info = {
     &MR_TYPE_CTOR_INFO_NAME(list, list, 1),

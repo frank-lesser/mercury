@@ -89,8 +89,10 @@
 :- import_module check_hlds.mode_constraints.
 :- import_module check_hlds.modes.
 :- import_module check_hlds.oisu_check.
+:- import_module check_hlds.old_type_constraints.
 :- import_module check_hlds.polymorphism.
 :- import_module check_hlds.post_typecheck.
+:- import_module check_hlds.pre_typecheck.
 :- import_module check_hlds.purity.
 :- import_module check_hlds.simplify.
 :- import_module check_hlds.simplify.simplify_proc.
@@ -244,12 +246,18 @@ frontend_pass_after_typeclass_check(OpModeAugment, FoundUndefModeError,
     maybe_write_string(Verbose, "% Type-checking clauses...\n", !IO),
     (
         TypeCheckConstraints = yes,
-        typecheck_constraints(!HLDS, TypeCheckSpecs),
+        globals.lookup_string_option(Globals, experiment, Experiment),
+        ( if Experiment = "old_type_constraints" then
+            old_typecheck_constraints(!HLDS, TypeCheckSpecs)
+        else
+            typecheck_constraints(!HLDS, TypeCheckSpecs)
+        ),
         % XXX We should teach typecheck_constraints to report syntax errors.
         FoundSyntaxError = no,
         ExceededTypeCheckIterationLimit = no
     ;
         TypeCheckConstraints = no,
+        prepare_for_typecheck_module(!HLDS),
         typecheck_module(!HLDS, TypeCheckSpecs, FoundSyntaxError,
             ExceededTypeCheckIterationLimit)
     ),
@@ -612,7 +620,7 @@ decide_type_repns_pass(Verbose, Stats, !HLDS, !Specs, !IO) :-
     maybe_write_out_errors(Verbose, Globals, !HLDS, !Specs, !IO),
     maybe_write_string(Verbose,
         "% Deciding type representations...\n", !IO),
-    decide_type_repns(!HLDS, !Specs),
+    decide_type_repns(!HLDS, !Specs, !IO),
     maybe_write_string(Verbose, "% done.\n", !IO),
     maybe_report_stats(Stats, !IO).
 
@@ -1157,7 +1165,7 @@ simplify_pred(SimplifyTasks0, PredId, !ModuleInfo, !PredInfo, !Specs) :-
     ),
     ProcIds = pred_info_non_imported_procids(!.PredInfo),
     % Don't warn for compiler-generated procedures.
-    ( if is_unify_or_compare_pred(!.PredInfo) then
+    ( if is_unify_index_or_compare_pred(!.PredInfo) then
         SimplifyTasks = SimplifyTasks0 ^ do_warn_simple_code := no
     else
         SimplifyTasks = SimplifyTasks0

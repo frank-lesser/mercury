@@ -2174,7 +2174,7 @@ represent_live_value_type_and_var_num(VarNumMap, LiveValueType, TypeRval,
 :- pred represent_special_live_value_type(string::in, rval::out) is det.
 
 represent_special_live_value_type(SpecialTypeName, Rval) :-
-    RttiTypeCtor = rtti_type_ctor(unqualified(""), SpecialTypeName, 0),
+    RttiTypeCtor = rtti_type_ctor(unqualified(""), SpecialTypeName, 0u16),
     DataId =
         rtti_data_id(ctor_rtti_id(RttiTypeCtor, type_ctor_type_ctor_info)),
     Rval = const(llconst_data_addr(DataId, no)).
@@ -2507,7 +2507,7 @@ init_label_layouts_info = Info :-
     % and variable locations in separate structures (not arrays), our use
     % of common structures for them ensured that any identical copies of
     % such structures would be optimized away. This optimization is even
-    % more effective, since it it allows the sequence we need for one label
+    % more effective, since it allows the sequence we need for one label
     % to be found as (a) a subsequence of the longer sequence for another
     % label, and (b) straddling the sequences of two (or possibly even more)
     % other labels.

@@ -64,7 +64,7 @@
 :- implementation.
 
 :- import_module hlds.
-:- import_module hlds.hlds_data.    % for type field_access_type
+:- import_module hlds.hlds_cons.    % for type field_access_type
 :- import_module hlds.hlds_pred.    % for field_access_function_name,
                                     % type pred_id.
 :- import_module libs.options.
@@ -994,6 +994,7 @@ check_item_for_ambiguities(NeedQualifier, OldTimestamp, VersionNumbers, Item,
         ; Item = item_initialise(_)
         ; Item = item_finalise(_)
         ; Item = item_mutable(_)
+        ; Item = item_foreign_import_module(_)
         ; Item = item_type_repn(_)
         ; Item = item_nothing(_)
         )

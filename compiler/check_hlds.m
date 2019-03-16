@@ -19,7 +19,9 @@
     :- include_module check_typeclass.
     :- include_module check_for_missing_type_defns.
     :- include_module check_promise.
+    :- include_module old_type_constraints.
     :- include_module post_typecheck.
+    :- include_module pre_typecheck.
     :- include_module purity.
     :- include_module resolve_unify_functor.
     :- include_module type_constraints.

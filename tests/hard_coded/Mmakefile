@@ -14,6 +14,7 @@ ORDINARY_PROGS = \
 	address_of_builtins \
 	agg \
 	array_all_tf \
+	array_copy \
 	array_gen \
 	array_sort \
 	array_test \
@@ -93,6 +94,7 @@ ORDINARY_PROGS = \
 	direct_arg_partial_inst \
 	direct_arg_partial_inst2 \
 	direct_arg_tags \
+	direct_arg_tags_2 \
 	disjs_in_switch \
 	division_test \
 	dos \
@@ -102,6 +104,7 @@ ORDINARY_PROGS = \
 	dup_vars_in_trace_scopes_only \
 	dupcall_impurity \
 	dupcall_types_bug \
+	edit_seq_test \
 	ee_dummy \
 	ee_valid_test \
 	elim_local_var_char \
@@ -125,6 +128,7 @@ ORDINARY_PROGS = \
 	field_syntax \
 	finalise_decl \
 	finalize_to_bitmap \
+	float_conv \
 	float_field \
 	float_ground_term \
 	float_map \
@@ -287,6 +291,8 @@ ORDINARY_PROGS = \
 	promise_eqv_solns_typeclasses \
 	psqueue_test \
 	pure_mutable \
+	putback_binary_int8 \
+	putback_binary_uint8 \
 	puzzle_detism_bug \
 	qual_adv_test \
 	qual_basic_test \
@@ -297,6 +303,12 @@ ORDINARY_PROGS = \
 	random_permutation \
 	random_simple \
 	rational_test \
+	read_binary_int16 \
+	read_binary_int32 \
+	read_binary_int64 \
+	read_binary_uint16 \
+	read_binary_uint32 \
+	read_binary_uint64 \
 	read_min_int \
 	recursive_main \
 	redoip_clobber \
@@ -362,6 +374,7 @@ ORDINARY_PROGS = \
 	system_sort \
 	tag_switch_dup_label \
 	tail_rec_scc \
+	tautological_compare \
 	term_io_test \
 	term_to_univ_test \
 	test234_sorted_insert \
@@ -549,8 +562,18 @@ ifeq "$(filter java%,$(GRADE))" ""
 	JAVA_PROGS =
 else
 	JAVA_PROGS = \
+		java_print_foreign  \
 		java_test \
 		test_java_foreign_primitive
+endif
+
+# Tests of the C# foreign language interface only work in the C# grades.
+
+ifeq "$(filter csharp%,$(GRADE))" ""
+	CSHARP_PROGS =
+else
+	CSHARP_PROGS = \
+		csharp_print_foreign
 endif
 
 # Fact tables currently work only in the C grades.
@@ -666,6 +689,12 @@ ifeq "$(findstring profdeep,$(GRADE))" ""
 	endif
 	NON_PROFDEEP_PROGS = \
 		$(NON_PROFDEEP_PROGS_2) \
+		array_fetch_items \
+		array_fill \
+		array_resize \
+		array_shrink \
+		array_swap \
+		array2d_from_array \
 		allow_stubs \
 		arith_int16 \
 		arith_int32 \
@@ -818,6 +847,7 @@ PROGS = \
 	$(STATIC_LINK_PROGS) \
 	$(C_ONLY_PROGS) \
 	$(JAVA_PROGS) \
+	$(CSHARP_PROGS) \
 	$(SOLVER_PROGS) \
 	$(FOREIGN_ENUM_PROGS) \
 	$(TRAILED_PROGS) \

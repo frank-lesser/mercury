@@ -57,7 +57,7 @@
 :- import_module erl_backend.erl_unify_gen.
 :- import_module hlds.code_model.
 :- import_module hlds.goal_util.
-:- import_module hlds.hlds_data.
+:- import_module hlds.hlds_cons.
 :- import_module hlds.hlds_goal.
 :- import_module hlds.hlds_pred.
 :- import_module hlds.instmap.
@@ -162,7 +162,7 @@ erl_gen_preds_2(ModuleInfo, PredIds0, PredTable, !Defns, !IO) :-
                 % XXX comment was from ml_code_gen.m, don't know if it applies.
                 % We generate incorrect and unnecessary code for the external
                 % special preds which are pseudo_imported, so just ignore them.
-                is_unify_or_compare_pred(PredInfo),
+                is_unify_index_or_compare_pred(PredInfo),
                 PredStatus =
                     pred_status(status_external(status_pseudo_imported))
             )

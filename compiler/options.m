@@ -326,6 +326,9 @@
     ;       max_error_line_width
     ;       show_definitions
     ;       show_definition_line_counts
+    ;       show_local_type_repns
+    ;       show_all_type_repns
+    ;       show_developer_type_repns
     ;       show_dependency_graph
     ;       imports_graph
     ;       dump_trace_counts
@@ -495,6 +498,7 @@
     ;       allow_packing_local_sectags     % XXX bootstrapping option
     ;       allow_packing_remote_sectags    % XXX bootstrapping option
     ;       allow_packing_mini_types        % XXX bootstrapping option
+    ;       allow_packed_unify_compare      % XXX bootstrapping option
     ;       sync_term_size % in words
 
     % LLDS back-end compilation model options
@@ -569,11 +573,10 @@
             % Should be set to yes if the target back end supports comparison
             % of non-atomic values with builtin operators.
 
-    ;       lexically_order_constructors
-            % Should be set to yes if we need to order functors
-            % lexically when generating comparison predicates,
-            % e.g. to match the natural order that functors will be compared
-            % on the backend.
+    ;       order_constructors_for_erlang
+            % Should be set to yes if we need to order functors the way Erlang
+            % expects them to be ordered, i.e. first by arity, then by
+            % lexicographic order on function symbol name.
 
     ;       delay_partial_instantiations
 
@@ -1325,6 +1328,9 @@ option_defaults_2(aux_output_option, [
     max_error_line_width                -   maybe_int(yes(79)),
     show_definitions                    -   bool(no),
     show_definition_line_counts         -   bool(no),
+    show_local_type_repns               -   bool(no),
+    show_all_type_repns                 -   bool(no),
+    show_developer_type_repns           -   bool(no),
     show_dependency_graph               -   bool(no),
     imports_graph                       -   bool(no),
     dump_trace_counts                   -   accumulating([]),
@@ -1464,6 +1470,7 @@ option_defaults_2(compilation_model_option, [
     allow_packing_local_sectags         -   bool(no),
     allow_packing_remote_sectags        -   bool(no),
     allow_packing_mini_types            -   bool(no),
+    allow_packed_unify_compare          -   bool(no),
     sync_term_size                      -   int(8),
                                         % 8 is the size on linux (at the time
                                         % of writing) - will usually be
@@ -1498,7 +1505,7 @@ option_defaults_2(internal_use_option, [
     can_compare_constants_as_ints       -   bool(no),
     pretest_equality_cast_pointers      -   bool(no),
     can_compare_compound_values         -   bool(no),
-    lexically_order_constructors        -   bool(no),
+    order_constructors_for_erlang       -   bool(no),
     delay_partial_instantiations        -   bool(no),
     allow_defn_of_builtins              -   bool(no),
     type_ctor_info                      -   bool(yes),
@@ -2271,6 +2278,12 @@ long_option("frameopt-comments",        frameopt_comments).
 long_option("max-error-line-width",     max_error_line_width).
 long_option("show-definitions",         show_definitions).
 long_option("show-definition-line-counts",  show_definition_line_counts).
+long_option("show-all-type-repns",              show_all_type_repns).
+long_option("show-all-type-representations",    show_all_type_repns).
+long_option("show-local-type-repns",            show_local_type_repns).
+long_option("show-local-type-representations",  show_local_type_repns).
+long_option("show-developer-type-repns",            show_developer_type_repns).
+long_option("show-developer-type-representations",  show_developer_type_repns).
 long_option("show-dependency-graph",    show_dependency_graph).
 long_option("imports-graph",            imports_graph).
 long_option("dump-trace-counts",        dump_trace_counts).
@@ -2423,6 +2436,7 @@ long_option("allow-packing-chars",  allow_packing_chars).
 long_option("allow-packing-local-sectags",  allow_packing_local_sectags).
 long_option("allow-packing-remote-sectags", allow_packing_remote_sectags).
 long_option("allow-packing-mini-types",     allow_packing_mini_types).
+long_option("allow-packed-unify-compare",   allow_packed_unify_compare).
 long_option("sync-term-size",       sync_term_size).
 long_option("highlevel-data",       highlevel_data).
 long_option("high-level-data",      highlevel_data).
@@ -2453,8 +2467,8 @@ long_option("body-typeinfo-liveness",   body_typeinfo_liveness).
 long_option("can-compare-constants-as-ints",    can_compare_constants_as_ints).
 long_option("pretest-equality-cast-pointers",   pretest_equality_cast_pointers).
 long_option("can-compare-compound-values",      can_compare_compound_values).
-long_option("lexically-order-constructors",
-                                    lexically_order_constructors).
+long_option("order-constructors-for-erlang",
+                                    order_constructors_for_erlang).
 long_option("delay-partial-instantiations", delay_partial_instantiations).
 long_option("allow-defn-of-builtins",           allow_defn_of_builtins).
 long_option("type-ctor-info",       type_ctor_info).
@@ -3048,6 +3062,10 @@ long_option("strip-executable-2014-05-05",
 long_option("trace-goal-only-locals-2017-07-05",
                                     compiler_sufficiently_recent).
 long_option("no-reserved-addrs",
+                                    compiler_sufficiently_recent).
+long_option("builtin-lt-gt-2018-10-08",
+                                    compiler_sufficiently_recent).
+long_option("fixed-contiguity-2018-10-19",
                                     compiler_sufficiently_recent).
 long_option("experiment",           experiment).
 long_option("ignore-par-conjunctions",
@@ -4356,6 +4374,15 @@ options_help_aux_output -->
         "\tWrite out a list of the predicates and functions defined in",
         "\tthe module, together with the names of the files containing them",
         "\tand their approximate line counts, to `<module>.defn_line_counts'.",
+        "--show-local-type-representations",
+        "\tWrite out information about the representations of all types",
+        "\tdefined in the module being compiled to `<module>.type_repns'.",
+        "--show-all-type-representations",
+        "\tWrite out information about the representations of all types",
+        "\tvisible in the module being compiled to `<module>.type_repns'.",
+%       "--show-developer-type-representations",
+%       "\tWhen writing out information about the representations of types,",
+%       "\tinclude information that is of interest to mmc developers only.",
         "--show-dependency-graph",
         "\tWrite out the dependency graph to `<module>.dependency_graph'.",
         "--imports-graph",

@@ -89,6 +89,7 @@
 :- import_module require.
 :- import_module string.
 :- import_module term.
+:- import_module uint16.
 
 %---------------------------------------------------------------------------%
 
@@ -150,7 +151,8 @@ generate_construction_unification(LHSVar, ConsId, RHSVars, ArgModes,
             TypedRval = typed_rval(ConstRval, _Type)
         ;
             ConsTag = type_ctor_info_tag(ModuleName, TypeName, TypeArity),
-            RttiTypeCtor = rtti_type_ctor(ModuleName, TypeName, TypeArity),
+            RttiTypeCtor = rtti_type_ctor(ModuleName, TypeName,
+                uint16.det_from_int(TypeArity)),
             DataId = rtti_data_id(ctor_rtti_id(RttiTypeCtor,
                 type_ctor_type_ctor_info)),
             ConstRval = const(llconst_data_addr(DataId, no))
@@ -275,7 +277,6 @@ generate_construction_unification(LHSVar, ConsId, RHSVars, ArgModes,
         ConsTag = closure_tag(PredId, ProcId, EvalMethod),
         expect(unify(TakeAddr, []), $pred, "closure_tag has take_addr"),
         expect(unify(MaybeSize, no), $pred, "closure_tag has size"),
-        % XXX TYPE_REPN
         construct_closure(PredId, ProcId, EvalMethod, LHSVar, RHSVars,
             GoalInfo, Code, !CI, !CLD)
     ).
@@ -691,7 +692,8 @@ generate_field_take_address_assigns([FieldAddr | FieldAddrs],
     unify_mode::in, mer_type::in, llds_code::out,
     code_info::in, code_loc_dep::in, code_loc_dep::out) is det.
 
-generate_direct_arg_construct(Var, Arg, Ptag, ArgMode, Type, Code, CI, !CLD) :-
+generate_direct_arg_construct(Var, ArgVar, Ptag, ArgMode, Type, Code,
+        CI, !CLD) :-
     get_module_info(CI, ModuleInfo),
     compute_assign_direction(ModuleInfo, ArgMode, Type, Dir),
     (
@@ -699,7 +701,12 @@ generate_direct_arg_construct(Var, Arg, Ptag, ArgMode, Type, Code, CI, !CLD) :-
         unexpected($pred, "assign right in construction")
     ;
         Dir = assign_left,
-        assign_expr_to_var(Var, mkword(Ptag, var(Arg)), Code, !CLD)
+        ( if Ptag = ptag(0u8) then
+            assign_var_to_var(Var, ArgVar, !CLD),
+            Code = empty
+        else
+            assign_expr_to_var(Var, mkword(Ptag, var(ArgVar)), Code, !CLD)
+        )
     ;
         Dir = assign_unused,
         % Construct a tagged pointer to a pointer value
@@ -994,7 +1001,11 @@ generate_ground_term_conjunct(ModuleInfo, ExprnOpts, Goal,
         ConsTag = direct_arg_tag(Ptag),
         get_notag_or_direct_arg_arg(RHSVars, RHSVar),
         map.det_remove(RHSVar, typed_rval(RHSRval, _RvalType), !ActiveMap),
-        LHSRval = mkword(Ptag, RHSRval),
+        ( if Ptag = ptag(0u8) then
+            LHSRval = RHSRval
+        else
+            LHSRval = mkword(Ptag, RHSRval)
+        ),
         ActiveGroundTerm = typed_rval(LHSRval, lt_data_ptr),
         map.det_insert(LHSVar, ActiveGroundTerm, !ActiveMap)
     ;
@@ -1221,7 +1232,11 @@ generate_const_struct_rval(ModuleInfo, UnboxedFloats, UnboxedInt64s,
         generate_const_struct_arg(ModuleInfo, UnboxedFloats, UnboxedInt64s,
             ConstStructMap, ConstArgPosWidth, ArgTypedRval),
         ArgTypedRval = typed_rval(ArgRval, _RvalType),
-        Rval = mkword(Ptag, ArgRval),
+        ( if Ptag = ptag(0u8) then
+            Rval = ArgRval
+        else
+            Rval = mkword(Ptag, ArgRval)
+        ),
         TypedRval = typed_rval(Rval, lt_data_ptr)
     ;
         ( ConsTag = int_tag(_)
@@ -1388,7 +1403,8 @@ generate_const_struct_arg_tag(UnboxedFloats, UnboxedInt64s,
         TypedRval = typed_rval(Rval, lt_data_ptr)
     ;
         ConsTag = type_ctor_info_tag(ModuleName, TypeName, TypeArity),
-        RttiTypeCtor = rtti_type_ctor(ModuleName, TypeName, TypeArity),
+        RttiTypeCtor = rtti_type_ctor(ModuleName, TypeName,
+            uint16.det_from_int(TypeArity)),
         DataId = rtti_data_id(ctor_rtti_id(RttiTypeCtor,
             type_ctor_type_ctor_info)),
         Rval = const(llconst_data_addr(DataId, no)),
@@ -1415,7 +1431,7 @@ generate_const_struct_arg_tag(UnboxedFloats, UnboxedInt64s,
         ; ConsTag = table_io_entry_tag(_, _)
 
         % These tags have arguments, and thus should be handled in
-        % generate_const_struct_rval. 
+        % generate_const_struct_rval.
         ; ConsTag = remote_args_tag(_)
         ; ConsTag = local_args_tag(_)
         ; ConsTag = no_tag
@@ -1573,32 +1589,6 @@ take_tagword_args_widths_modes(
         TagwordArgModes = [],
         NonTagwordArgsWidths = [ArgWidth | ArgsWidths],
         NonTagwordArgModes = [ArgMode | ArgModes]
-    ).
-
-
-:- pred take_tagword_args_widths(list(arg_and_width(ArgType))::in,
-    list(arg_and_width(ArgType))::out,
-    list(arg_and_width(ArgType))::out) is det.
-
-take_tagword_args_widths([], [], []).
-take_tagword_args_widths([ArgWidth | ArgsWidths],
-        TagwordArgsWidths, NonTagwordArgsWidths) :-
-    ArgWidth = arg_and_width(_Arg, ArgPosWidth),
-    (
-        ( ArgPosWidth = apw_partial_shifted(_, _, _, _, _, _)
-        ; ArgPosWidth = apw_none_shifted(_, _)
-        ),
-        take_tagword_args_widths(ArgsWidths,
-            TailTagwordArgsWidths, NonTagwordArgsWidths),
-        TagwordArgsWidths = [ArgWidth | TailTagwordArgsWidths]
-    ;
-        ( ArgPosWidth = apw_full(_, _)
-        ; ArgPosWidth = apw_double(_, _, _)
-        ; ArgPosWidth = apw_partial_first(_, _, _, _, _, _)
-        ; ArgPosWidth = apw_none_nowhere
-        ),
-        TagwordArgsWidths = [],
-        NonTagwordArgsWidths = [ArgWidth | ArgsWidths]
     ).
 
 %---------------------------------------------------------------------------%

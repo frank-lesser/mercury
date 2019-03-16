@@ -43,6 +43,7 @@
 :- import_module list.
 :- import_module maybe.
 :- import_module multi_map.
+:- import_module pair.
 :- import_module set.
 :- import_module term.
 
@@ -238,6 +239,11 @@
             % which originally came from an implementation section of a module
             % that contains submodules; such items need to be exported
             % to the submodules.
+            %
+            % A raw item block whose section is ms_implementation is marked
+            % as sms_impl_but_exported_to_submodules by the predicate
+            % get_src_item_blocks_public_children, which is called indirectly
+            % by grab_imported_modules.
 
 :- type imported_or_used
     --->    iou_imported
@@ -386,6 +392,7 @@
     ;       item_initialise(item_initialise_info)
     ;       item_finalise(item_finalise_info)
     ;       item_mutable(item_mutable_info)
+    ;       item_foreign_import_module(item_foreign_import_module_info)
     ;       item_type_repn(item_type_repn_info)
     ;       item_nothing(item_nothing_info).
 
@@ -483,10 +490,10 @@
 
 :- type item_pragma_info
     --->    item_pragma_info(
-                pragma_type                     :: pragma_type,
-                pragma_maybe_attrs              :: item_maybe_attrs,
-                pragma_context                  :: prog_context,
-                pragma_seq_num                  :: int
+                prag_type                       :: pragma_type,
+                prag_maybe_attrs                :: item_maybe_attrs,
+                prag_context                    :: prog_context,
+                prag_seq_num                    :: int
             ).
 
 :- type item_promise_info
@@ -565,6 +572,33 @@
                 mut_seq_num                     :: int
             ).
 
+:- type item_foreign_import_module_info
+    --->    item_foreign_import_module_info(
+                % Equivalent to
+                % `:- pragma foreign_decl(Lang, "#include <module>.h").'
+                % except that the name of the header file is not hard-coded,
+                % and mmake can use the dependency information.
+                % The language and the module name is in the one argument.
+                %
+                % XXX ITEM_LIST We should consider replacing these kinds
+                % of items with a new slot in parse trees  containing
+                % a map from foreign languages to a set of the names
+                % of the foreign-imported modules. However, that would
+                % require figuring out exactly *which* kinds of entities'
+                % parse trees may meaningfully contain such information.
+
+                fim_lang                        :: foreign_language,
+                fim_module_name                 :: module_name,
+
+                % These items can appear only in interface files,
+                % not in source code. We therefore should not need to know
+                % their context or their sequence number. However, having
+                % them here avoids having to special-case their handling
+                % (while they are an item, anyway).
+                fim_context                     :: prog_context,
+                fim_seq_num                     :: int
+            ).
+
 :- type item_type_repn_info
     --->    item_type_repn_info(
                 % `:- type_representation ...':
@@ -640,8 +674,8 @@
     %
 :- func import_or_use_decl_name(import_or_use) = string.
 
-    % The representation of an `:- import_module' or an `:- % use_module'
-    % declaration is a list of one or more item_import_uses, each of which
+    % The representation of an `:- import_module' or an `:- use_module'
+    % declaration is a list of one or more item_avails, each of which
     % makes available to the current module the entities in the interface
     % of the module named in the declaration.
     %
@@ -816,8 +850,204 @@
                 % XXX TYPE_REPN maybe notag
                 mer_type
             )
-    ;       tcrepn_fits_in_n_bits(int)
-    ;       tcrepn_has_direct_arg_functors(list(sym_name_and_arity)).
+    ;       tcrepn_fits_in_n_bits(int, fill_kind)
+    ;       tcrepn_is_word_aligned_ptr(wap_kind)
+    ;       tcrepn_has_direct_arg_functors(list(sym_name_and_arity))
+    ;       tcrepn_du(du_repn)
+    ;       tcrepn_maybe_foreign(
+                % If the foreign language of the current backend
+                % is the key of an entry in the list, then
+                % the representation of this type_ctor is given
+                % by the associated foreign_type_repn.
+                %
+                % The list may mention a language at most once.
+                % If it mentions *every* foreign language once,
+                % then the maybe may be "no", since in that case
+                % any Mercury definition of the type would never be used.
+                %
+                % If the foreign language of the current backend
+                % is not the key of any entry in the assoc_list, then
+                % the maybe must be a "yes" whose argument gives the
+                % representation of the Mercury version of the type.
+                one_or_more(pair(foreign_language, foreign_type_repn)),
+                maybe(du_repn)
+            ).
+
+:- type wap_kind
+    --->    wap_foreign_type_assertion
+    ;       wap_mercury_type(sym_name_and_arity).
+
+:- type foreign_type_repn
+    --->    foreign_type_repn(
+                % The name of the foreign type that represents values
+                % of this Mercury type.
+                frd_foreign_type        :: string
+
+                % ZZZ assertions?
+            ).
+
+    % There should be exactly one applicable du_repn for any given type_ctor.
+    % That means that a non-foreign-enum
+    % du_repn for a type_ctor may coexist with one or
+    % more foreign enum du_repn for that same type_ctor,
+    % *provided* that the foreign enum du_repn are
+    % all for different types.
+:- type du_repn
+    --->    dur_notag(notag_repn)
+    ;       dur_direct_dummy(direct_dummy_repn)
+    ;       dur_enum(enum_repn)
+    ;       dur_gen(gen_du_repn).
+
+:- type notag_repn
+    --->    notag_repn(
+                % The name of the one functor in the type, which must be
+                % arity 1. Its representation will be no_tag.
+                % The representation of the argument be *recorded*
+                % as a full word at offset 0, but this should never be
+                % looked up, since the argument will actually be stored
+                % wherever the whole term is stored.
+                notag_functor_name      :: string
+            ).
+
+:- type direct_dummy_repn
+    --->    direct_dummy_repn(
+                % The name of the one functor in the type, which must be
+                % arity 0. Its representation will be dummy_tag.
+                dummy_functor_name      :: string
+            ).
+
+:- type enum_repn
+    --->    enum_repn(
+                % The list of the functor names (all arity 0).
+                enum_functors           :: one_or_more(string),
+
+                % The representation of functor #N in Mercury will be
+                % int_tag(int_tag_int(N)), with counting starting at 0.
+                % However, if the enum_foreign field has an element
+                % whose key is the current backend's language, the
+                % representation of functor #N will be the Nth string
+                % in the associated value.
+                %
+                % We do not care about the 32 vs 64 bit distinction here,
+                % because the definition of an enum type with more than 2^32
+                % function symbols will cause a compiler to run out of memory
+                % for a *very* long time to come.
+                %
+                % The set of foreign languages mentioned here must be
+                % disjoint from the set of foreign languages mentioned
+                % in any tcrepn_conditional wrapped around this du_repn.
+                enum_foreign            :: assoc_list(foreign_language,
+                                                one_or_more(string))
+            ).
+
+:- type gen_du_repn
+    --->    gen_du_repn_only_functor(
+                % The name of the data constructor. The arity is implicit
+                % in the length of the argument list, which must be the same
+                % in the 64 and 32 bit versions.
+                gduofd_functor          :: string,
+                gduofd_args_64          :: gen_du_only_functor_args,
+                gduofd_args_32          :: gen_du_only_functor_args
+            )
+    ;       gen_du_repn_more_functors(
+                gdumfd_functors         :: one_or_more(gen_du_functor)
+            ).
+
+:- type gen_du_only_functor_args
+    --->    gen_du_only_functor_local_args(
+                % The cons_tag is local_args_tag(local_args_only_functor).
+                % The ptag is 0. The local sectag is 0 bits.
+                % For all args, ArgOnlyOffset and CellOffset are both -2.
+                gduofl_args             :: one_or_more(local_pos_size)
+            )
+    ;       gen_du_only_functor_remote_args(
+                % The cons_tag is remote_args_tag(remote_args_only_functor).
+                % The ptag is 0. The remote sectag size is 0 bits.
+                gduofr_args             :: one_or_more(arg_pos_size)
+            ).
+
+:- type gen_du_functor
+    --->    gen_du_constant_functor(
+                % The name of the data constructor. The arity is 0.
+                % The ptag is 0. The local sectag is 0. The *size*
+                % of the local sectag may depend on the word size.
+                gducf_functor           :: string,
+                gducf_sectag_size_64    :: sectag_size,
+                gducf_sectag_size_32    :: sectag_size
+            )
+    ;       gen_du_nonconstant_functor(
+                % The name of the data constructor. The arity is implicit
+                % in the length of the argument list, which must be the same
+                % in the 64 and 32 bit versions.
+                gduncf_functor          :: string,
+                gduncf_tags_64          :: ptag_sectag,
+                gduncf_tags_32          :: ptag_sectag,
+                gduncf_args_64          :: one_or_more(maybe_direct_arg),
+                gduncf_args_32          :: one_or_more(maybe_direct_arg)
+            ).
+
+:- type ptag_sectag
+    --->    ptag_sectag(
+                gdu_ptag                :: uint,
+                gdu_maybe_sectag        :: maybe_sectag
+            ).
+
+:- type maybe_sectag
+    --->    no_sectag
+    ;       local_sectag(uint, sectag_size)
+    ;       remote_sectag(uint, sectag_size).
+
+:- type sectag_size
+    --->    sectag_rest_of_word
+    ;       sectag_bits(uint).
+
+:- type maybe_direct_arg
+    --->    nondirect_arg(arg_pos_size)
+    ;       direct_arg(uint).   % The ptag.
+
+:- type local_pos_size
+    --->    local_pos_size(
+                lps_shift               :: uint,
+                lps_fill                :: fill_kind_size
+            ).
+
+:- type arg_pos_size
+    --->    pos_full(
+                pf_arg_only_offset      :: arg_only_offset,
+                pf_cell_offset          :: cell_offset
+            )
+    ;       pos_double(
+                pd_arg_only_offset      :: arg_only_offset,
+                pd_cell_offset          :: cell_offset,
+                pd_kind                 :: double_word_kind
+            )
+    ;       pos_partial_first(
+                ppf_arg_only_offset     :: arg_only_offset,
+                ppf_cell_offset         :: cell_offset,
+                ppf_shift               :: uint,
+                ppf_fill                :: fill_kind_size
+            )
+    ;       pos_partial_shifted(
+                pps_arg_only_offset     :: arg_only_offset,
+                pps_cell_offset         :: cell_offset,
+                pps_shift               :: uint,
+                pps_fill                :: fill_kind_size
+            )
+    ;       pos_none_shifted(
+                pns_arg_only_offset     :: arg_only_offset,
+                pns_cell_offset         :: cell_offset
+            )
+    ;       pos_none_nowhere.
+
+:- type fill_kind_size
+    --->    fk_enum(uint)
+    ;       fk_int8
+    ;       fk_int16
+    ;       fk_int32
+    ;       fk_uint8
+    ;       fk_uint16
+    ;       fk_uint32
+    ;       fk_char21.
 
 %-----------------------------------------------------------------------------%
 %
@@ -828,7 +1058,6 @@
     --->    pragma_foreign_decl(pragma_info_foreign_decl)
     ;       pragma_foreign_code(pragma_info_foreign_code)
     ;       pragma_foreign_proc(pragma_info_foreign_proc)
-    ;       pragma_foreign_import_module(pragma_info_foreign_import_module)
     ;       pragma_foreign_proc_export(pragma_info_foreign_proc_export)
     ;       pragma_foreign_export_enum(pragma_info_foreign_export_enum)
     ;       pragma_foreign_enum(pragma_info_foreign_enum)
@@ -898,16 +1127,6 @@
                 proc_varset             :: prog_varset,
                 proc_instvarset         :: inst_varset,
                 proc_impl               :: pragma_foreign_proc_impl
-            ).
-
-:- type pragma_info_foreign_import_module
-    --->    pragma_info_foreign_import_module(
-                % Equivalent to
-                % `:- pragma foreign_decl(Lang, "#include <module>.h").'
-                % except that the name of the header file is not hard-coded,
-                % and mmake can use the dependency information.
-                % The language and the module name is in the one argument.
-                imp_info                :: foreign_import_module_info
             ).
 
 :- type pragma_info_foreign_proc_export
@@ -1454,7 +1673,7 @@ get_item_context(Item) = Context :-
         Context = ItemModeDecl ^ pfm_context
     ;
         Item = item_pragma(ItemPragma),
-        Context = ItemPragma ^ pragma_context
+        Context = ItemPragma ^ prag_context
     ;
         Item = item_promise(ItemPromise),
         Context = ItemPromise ^ prom_context
@@ -1473,6 +1692,9 @@ get_item_context(Item) = Context :-
     ;
         Item = item_mutable(ItemMutable),
         Context = ItemMutable ^ mut_context
+    ;
+        Item = item_foreign_import_module(ItemFIM),
+        Context = ItemFIM ^ fim_context
     ;
         Item = item_type_repn(ItemTypeRepn),
         Context = ItemTypeRepn ^ tr_context
@@ -1632,7 +1854,6 @@ pragma_allowed_in_interface(Pragma) = Allowed :-
         % the corresponding type definition is in the interface.
         % This is checked in make_hlds.
         ( Pragma = pragma_foreign_enum(_)
-        ; Pragma = pragma_foreign_import_module(_)
         ; Pragma = pragma_obsolete(_)
         ; Pragma = pragma_type_spec(_)
         ; Pragma = pragma_termination_info(_)
@@ -1747,10 +1968,6 @@ pragma_context_pieces(Pragma) = ContextPieces :-
         Pragma = pragma_foreign_enum(_),
         ContextPieces = [pragma_decl("foreign_enum"), words("declaration")]
     ;
-        Pragma = pragma_foreign_import_module(_),
-        ContextPieces = [pragma_decl("foreign_import_module"),
-            words("declaration")]
-    ;
         Pragma = pragma_obsolete(_),
         ContextPieces = [pragma_decl("obsolete"), words("declaration")]
     ;
@@ -1859,12 +2076,24 @@ get_foreign_code_indicators_from_item(Globals, Item, !Info) :-
         ItemPragma = item_pragma_info(Pragma, _, _, _),
         get_pragma_foreign_code(Globals, Pragma, !Info)
     ;
+        Item = item_foreign_import_module(FIMInfo),
+        FIMInfo = item_foreign_import_module_info(Lang, ImportedModule, _, _),
+        globals.get_backend_foreign_languages(Globals, BackendLangs),
+        ( if list.member(Lang, BackendLangs) then
+            ForeignImportModules0 = !.Info ^ all_foreign_import_modules,
+            add_foreign_import_module(Lang, ImportedModule,
+                ForeignImportModules0, ForeignImportModules),
+            !Info ^ all_foreign_import_modules := ForeignImportModules
+        else
+            true
+        )
+    ;
         Item = item_mutable(_),
         % Mutables introduce foreign_procs, but mutable declarations
         % won't have been expanded by the time we get here, so we need
         % to handle them separately.
         % XXX mutables are currently only implemented for the C backends
-        % but we should handle the Java/IL backends here as well.
+        % but we should handle the Java/C# backends here as well.
         % (See do_get_item_foreign_code for details/5).
         UsedForeignLanguages0 = !.Info ^ used_foreign_languages,
         set.insert(lang_c, UsedForeignLanguages0, UsedForeignLanguages),
@@ -1954,18 +2183,6 @@ get_pragma_foreign_code(Globals, Pragma, !Info) :-
                 set.insert(!.Info ^ used_foreign_languages, Lang),
             !Info ^ module_has_foreign_export :=
                 contains_foreign_export
-        else
-            true
-        )
-    ;
-        Pragma = pragma_foreign_import_module(FIMInfo),
-        FIMInfo = pragma_info_foreign_import_module(FIM),
-        FIM = foreign_import_module_info(Lang, ImportedModule),
-        ( if list.member(Lang, BackendLangs) then
-            ForeignImportModules0 = !.Info ^ all_foreign_import_modules,
-            add_foreign_import_module(Lang, ImportedModule,
-                ForeignImportModules0, ForeignImportModules),
-            !Info ^ all_foreign_import_modules := ForeignImportModules
         else
             true
         )

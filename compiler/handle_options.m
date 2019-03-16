@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1994-2012 The University of Melbourne.
-% Copyright (C) 2013-2018 The Mercury Team.
+% Copyright (C) 2013-2019 The Mercury Team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %---------------------------------------------------------------------------%
@@ -926,7 +926,7 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
             !Globals),
         globals.set_option(can_compare_compound_values, bool(yes),
             !Globals),
-        globals.set_option(lexically_order_constructors, bool(yes),
+        globals.set_option(order_constructors_for_erlang, bool(yes),
             !Globals),
         globals.set_option(libgrade_install_check, bool(no), !Globals),
         globals.set_option(optimize_tailcalls, bool(no), !Globals),
@@ -1123,9 +1123,7 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
     % since including line numbers in those would cause unnecessary
     % recompilation.
     ( if
-        ( OpMode = opm_top_args(opma_make_private_interface)
-        ; OpMode = opm_top_args(opma_make_short_interface)
-        ; OpMode = opm_top_args(opma_make_interface)
+        ( OpMode = opm_top_args(opma_make_interface(_))
         ; OpMode = opm_top_args(opma_augment(opmau_make_opt_int))
         ; OpMode = opm_top_args(opma_augment(opmau_make_trans_opt_int))
         )
@@ -1137,7 +1135,7 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
 
     % We never use version number information in `.int3',
     % `.opt' or `.trans_opt' files.
-    ( if OpMode = opm_top_args(opma_make_short_interface) then
+    ( if OpMode = opm_top_args(opma_make_interface(omif_int3)) then
         globals.set_option(generate_item_version_numbers, bool(no), !Globals)
     else
         true
@@ -2463,7 +2461,7 @@ display_compiler_version(!IO) :-
     io.write_strings([
         "Mercury Compiler, version ", Version, ", on ", Fullarch, "\n",
         "Copyright (C) 1993-2012 The University of Melbourne\n",
-        "Copyright (C) 2013-2018 The Mercury team\n"
+        "Copyright (C) 2013-2019 The Mercury team\n"
     ], !IO).
 
 :- mutable(already_printed_usage, bool, no, ground,
@@ -2494,7 +2492,7 @@ long_usage(!IO) :-
         Version, ", on ", Fullarch, "\n"], !IO),
     io.write_string("Copyright: Copyright (C) 1993-2012 " ++
         "The University of Melbourne\n", !IO),
-    io.write_string("           Copyright (C) 2013-2018 " ++
+    io.write_string("           Copyright (C) 2013-2019 " ++
         "The Mercury team\n", !IO),
     io.write_string("Usage: mmc [<options>] <arguments>\n", !IO),
     io.write_string("Arguments:\n", !IO),

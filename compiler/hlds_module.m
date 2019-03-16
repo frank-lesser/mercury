@@ -28,6 +28,7 @@
 :- import_module check_hlds.proc_requests.
 :- import_module hlds.const_struct.
 :- import_module hlds.hlds_class.
+:- import_module hlds.hlds_cons.
 :- import_module hlds.hlds_data.
 :- import_module hlds.hlds_dependency_graph.
 :- import_module hlds.hlds_inst_mode.
@@ -521,7 +522,7 @@
 :- pred module_add_foreign_body_code(foreign_body_code::in,
     module_info::in, module_info::out) is det.
 
-:- pred module_add_foreign_import_module(foreign_import_module_info::in,
+:- pred module_add_foreign_import_module(item_foreign_import_module_info::in,
     module_info::in, module_info::out) is det.
 
 :- pred module_add_fact_table_file(string::in,
@@ -928,6 +929,9 @@ module_info_init(AugCompUnit, DumpBaseFileName, Globals, QualifierInfo,
     map.init(LambdasPerContext),
     map.init(AtomicsPerContext),
 
+    % XXX ITEM_LIST Given that we start with an aug_compilation_unit,
+    % shouldn't the work of finding implicit dependencies have already
+    % been done?
     % XXX ITEM_LIST Should a tabled predicate declared in a .int* or .*opt
     % file generate an implicit dependency?
     get_implicit_dependencies_in_item_blocks(Globals, SrcItemBlocks,
@@ -1539,9 +1543,10 @@ module_add_foreign_body_code(ForeignBodyCode, !Module) :-
     ForeignBodyCodes = cord.snoc(ForeignBodyCodes0, ForeignBodyCode),
     module_info_set_foreign_body_codes(ForeignBodyCodes, !Module).
 
-module_add_foreign_import_module(ForeignImportModule, !Module) :-
+module_add_foreign_import_module(ItemFIM, !Module) :-
     module_info_get_foreign_import_modules(!.Module, ForeignImportModules0),
-    ForeignImportModule = foreign_import_module_info(Lang, ModuleName),
+    ItemFIM = item_foreign_import_module_info(Lang, ModuleName,
+        _Context, _SeqNum),
     add_foreign_import_module(Lang, ModuleName,
         ForeignImportModules0, ForeignImportModules),
     module_info_set_foreign_import_modules(ForeignImportModules, !Module).

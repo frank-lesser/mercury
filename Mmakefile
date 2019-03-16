@@ -493,6 +493,7 @@ tar: 	$(GENERATED_DOCS)
 	cd doc && mmake distclean
 	-rm -f errs errs2 update.log
 	-rm -f config.status config.cache config.log configure.log a.out
+	-rm -f scripts/config.log
 	-rm -f runtime/mercury_conf.h boehm_gc/mercury_boehm_gc_conf.h
 	-rm -f Mmake.common
 	-rm -f extras/Mmake.params
@@ -514,6 +515,11 @@ tar: 	$(GENERATED_DOCS)
 			--dereference -cf - 				\
 			mercury-srcdist-$(VERSION) | 			\
 			gzip -9 > mercury-srcdist-$(VERSION).tar.gz;	\
+		test -z $(XZ) || $(TAR) --exclude ".git"                \
+			--exclude ".gitignore"				\
+			--dereference -cf - 				\
+			mercury-srcdist-$(VERSION) | 			\
+			$(XZ) > mercury-srcdist-$(VERSION).tar.xz;	\
 		mv mercury-srcdist-$(VERSION)	$$ROOTNAME;		\
 		mv stuff-to-exclude/quickcheck  $$ROOTNAME/extras/quickcheck; \
 		mv stuff-to-exclude/*		$$ROOTNAME;		\

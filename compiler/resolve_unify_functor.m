@@ -53,6 +53,7 @@
 
 :- import_module check_hlds.type_util.
 :- import_module hlds.hlds_class.
+:- import_module hlds.hlds_cons.
 :- import_module hlds.hlds_data.
 :- import_module hlds.make_goal.
 :- import_module hlds.pred_table.
@@ -127,7 +128,7 @@ resolve_unify_functor(ModuleInfo, X0, ConsId0, ArgVars0, Mode0,
         % whose type is exactly the same as the type of a constructor.
         % (Normally that would cause a type ambiguity error, but
         % compiler-generated predicates are not type-checked.)
-        not is_unify_or_compare_pred(!.PredInfo),
+        not is_unify_index_or_compare_pred(!.PredInfo),
 
         % We don't do this for the clause introduced by the compiler for a
         % field access function -- that needs to be expanded into
@@ -230,7 +231,7 @@ resolve_unify_functor(ModuleInfo, X0, ConsId0, ArgVars0, Mode0,
 
         % We don't do this for compiler-generated predicates --
         % they will never contain calls to field access functions.
-        not is_unify_or_compare_pred(!.PredInfo),
+        not is_unify_index_or_compare_pred(!.PredInfo),
 
         % If there is a constructor for which the argument types match,
         % this unification couldn't be a call to a field access function,

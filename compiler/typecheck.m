@@ -103,12 +103,10 @@
 :- import_module check_hlds.typecheck_errors.
 :- import_module check_hlds.typecheck_info.
 :- import_module check_hlds.typeclasses.
-:- import_module hlds.goal_path.
 :- import_module hlds.goal_util.
-:- import_module hlds.headvar_names.
-:- import_module hlds.hlds_args.
 :- import_module hlds.hlds_class.
 :- import_module hlds.hlds_clauses.
+:- import_module hlds.hlds_cons.
 :- import_module hlds.hlds_data.
 :- import_module hlds.hlds_error_util.
 :- import_module hlds.hlds_goal.
@@ -139,7 +137,6 @@
 :- import_module parse_tree.prog_type.
 :- import_module parse_tree.prog_type_subst.
 :- import_module parse_tree.prog_util.
-:- import_module parse_tree.set_of_var.
 
 :- import_module assoc_list.
 :- import_module int.
@@ -164,26 +161,6 @@ typecheck_module(!ModuleInfo, Specs, FoundSyntaxError,
     module_info_get_valid_pred_id_set(!.ModuleInfo, OrigValidPredIdSet),
     OrigValidPredIds = set_tree234.to_sorted_list(OrigValidPredIdSet),
 
-    module_info_get_preds(!.ModuleInfo, PredMap0),
-    map.to_assoc_list(PredMap0, PredIdsInfos0),
-
-    % We seem to need this prepass. Without it, the typechecker throws
-    % an exception for two test cases involving field access functions.
-    % The reason is almost certainly that some part of the typechecker
-    % inspects the definitions of callees (even though it shouldn't),
-    % and thus gets things wrong if field access functions haven't yet had
-    % their defining clauses added to their pred_infos. We cannot add the
-    % defining clauses to the pred_infos of field access functions when those
-    % pred_infos are created, since those clauses are only defaults; any
-    % clauses given by the user override them. This pass is the first chance
-    % to decide that there won't be any user-given clauses coming, and that
-    % therefore the default clauses should be the actual clauses.
-    prepare_for_typecheck(!.ModuleInfo, OrigValidPredIdSet,
-        PredIdsInfos0, PredIdsInfos),
-
-    map.from_sorted_assoc_list(PredIdsInfos, PredMap),
-    module_info_set_preds(PredMap, !ModuleInfo),
-
     typecheck_to_fixpoint(1, MaxIterations, !ModuleInfo,
         OrigValidPredIds, OrigValidPredIdSet, FinalValidPredIdSet,
         CheckSpecs, FoundSyntaxError, ExceededIterationLimit),
@@ -191,34 +168,6 @@ typecheck_module(!ModuleInfo, Specs, FoundSyntaxError,
     construct_type_inference_messages(!.ModuleInfo, FinalValidPredIdSet,
         OrigValidPredIds, [], InferSpecs),
     Specs = InferSpecs ++ CheckSpecs.
-
-:- pred prepare_for_typecheck(module_info::in, set_tree234(pred_id)::in,
-    assoc_list(pred_id, pred_info)::in, assoc_list(pred_id, pred_info)::out)
-    is det.
-
-prepare_for_typecheck(_, _, [], []).
-prepare_for_typecheck(ModuleInfo, ValidPredIdSet,
-        [PredIdInfo0 | PredIdsInfos0], [PredIdInfo | PredIdsInfos]) :-
-    some [!PredInfo] (
-        PredIdInfo0 = PredId - !:PredInfo,
-        ( if set_tree234.contains(ValidPredIdSet, PredId) then
-            % Goal ids are used to identify typeclass constraints.
-            pred_info_get_clauses_info(!.PredInfo, GoalIdClausesInfo0),
-            fill_goal_id_slots_in_clauses(ModuleInfo, _ContainingGoalMap,
-                GoalIdClausesInfo0, GoalIdClausesInfo),
-            pred_info_set_clauses_info(GoalIdClausesInfo, !PredInfo),
-
-            maybe_add_field_access_function_clause(ModuleInfo, !PredInfo),
-
-            module_info_get_globals(ModuleInfo, Globals),
-            maybe_improve_headvar_names(Globals, !PredInfo),
-            PredIdInfo = PredId - !.PredInfo
-        else
-            PredIdInfo = PredIdInfo0
-        )
-    ),
-    prepare_for_typecheck(ModuleInfo, ValidPredIdSet,
-        PredIdsInfos0, PredIdsInfos).
 
     % Repeatedly typecheck the code for a group of predicates
     % until a fixpoint is reached, or until some errors are detected.
@@ -293,7 +242,7 @@ construct_type_inference_messages(ModuleInfo, ValidPredIdSet,
         set_tree234.contains(ValidPredIdSet, PredId),
         not pred_info_is_promise(PredInfo, _)
     then
-        Spec = construct_type_inference_message(PredInfo),
+        Spec = construct_type_inference_message(ModuleInfo, PredId, PredInfo),
         !:Specs = [Spec | !.Specs]
     else
         true
@@ -304,12 +253,13 @@ construct_type_inference_messages(ModuleInfo, ValidPredIdSet,
     % Construct a message containing the inferred `pred' or `func' declaration
     % for a single predicate.
     %
-:- func construct_type_inference_message(pred_info) = error_spec.
+:- func construct_type_inference_message(module_info, pred_id, pred_info)
+    = error_spec.
 
-construct_type_inference_message(PredInfo) = Spec :-
+construct_type_inference_message(ModuleInfo, PredId, PredInfo) = Spec :-
     PredName = pred_info_name(PredInfo),
     PredOrFunc = pred_info_is_pred_or_func(PredInfo),
-    Name = unqualified(PredName),
+    UnqualPredSymName = unqualified(PredName),
     pred_info_get_context(PredInfo, Context),
     pred_info_get_arg_types(PredInfo, VarSet, ExistQVars, Types0),
     strip_builtin_qualifiers_from_type_list(Types0, Types),
@@ -319,20 +269,54 @@ construct_type_inference_message(PredInfo) = Spec :-
     VarNamePrint = print_name_only,
     (
         PredOrFunc = pf_predicate,
+        ArgTypes = Types,
+        MaybeReturnType = no,
         TypeStr = mercury_pred_type_to_string(VarSet, VarNamePrint, ExistQVars,
-            Name, Types, MaybeDet, Purity, ClassContext)
+            UnqualPredSymName, Types, MaybeDet, Purity, ClassContext)
     ;
         PredOrFunc = pf_function,
-        pred_args_to_func_args(Types, ArgTypes, RetType),
+        pred_args_to_func_args(Types, ArgTypes, ReturnType),
+        MaybeReturnType = yes(ReturnType),
         TypeStr = mercury_func_type_to_string(VarSet, VarNamePrint, ExistQVars,
-            Name, ArgTypes, RetType, MaybeDet, Purity, ClassContext)
+            UnqualPredSymName, ArgTypes, ReturnType, MaybeDet, Purity,
+            ClassContext)
     ),
-    Pieces = [words("Inferred"), words(TypeStr), nl],
-    Msg = simple_msg(Context,
-        [option_is_set(inform_inferred_types, yes, [always(Pieces)])]),
-    Severity = severity_conditional(inform_inferred_types, yes,
-        severity_informational, no),
+    InferredPieces = [invis_order_default_start(2),
+        words("Inferred"), words(TypeStr), nl],
+
+    module_info_get_predicate_table(ModuleInfo, PredicateTable),
+    ModuleName = pred_info_module(PredInfo),
+    QualPredSymName = qualified(ModuleName, PredName),
+    predicate_table_lookup_pf_sym(PredicateTable, is_fully_qualified,
+        PredOrFunc, QualPredSymName, AllPredIds),
+    list.delete_all(AllPredIds, PredId, AllOtherPredIds),
+    PredIsDeclared =
+        ( pred(OtherPredId::in) is semidet :-
+            module_info_pred_info(ModuleInfo, OtherPredId, OtherPredInfo),
+            pred_info_get_markers(OtherPredInfo, OtherPredMarkers),
+            not check_marker(OtherPredMarkers, marker_infer_type)
+        ),
+    list.filter(PredIsDeclared, AllOtherPredIds, AllOtherDeclaredPredIds),
+    (
+        AllOtherDeclaredPredIds = [],
+        Msg = simple_msg(Context,
+            [option_is_set(inform_inferred_types, yes,
+                [always(InferredPieces)])]),
+        Severity = severity_conditional(inform_inferred_types, yes,
+            severity_informational, no)
+    ;
+        AllOtherDeclaredPredIds = [_ | _],
+        list.map(
+            construct_pred_decl_diff(ModuleInfo, ArgTypes, MaybeReturnType),
+            AllOtherDeclaredPredIds, DiffPieceLists),
+        Pieces = [invis_order_default_start(2)] ++ InferredPieces ++
+            list.condense(DiffPieceLists),
+        Msg = simple_msg(Context, [always(Pieces)]),
+        Severity = severity_informational
+    ),
     Spec = error_spec(Severity, phase_type_check, [Msg]).
+
+%---------------------------------------------------------------------------%
 
 :- func typecheck_report_max_iterations_exceeded(int) = error_spec.
 
@@ -418,21 +402,49 @@ typecheck_module_one_iteration(ModuleInfo, ValidPredIdSet,
     pred_info::in, pred_info::out, list(error_spec)::out,
     bool::out, bool::out, bool::out) is det.
 
-typecheck_pred_if_needed(ModuleInfo, PredId, !PredInfo, Specs,
+typecheck_pred_if_needed(ModuleInfo, PredId, !PredInfo, !:Specs,
         FoundSyntaxError, ContainsErrors, Changed) :-
-    ( if
-        % Compiler-generated predicates are created already type-correct,
-        % so there is no need to typecheck them. The same is true for builtins,
-        % except for builtins marked with marker_builtin_stub which need to
-        % have their stub clauses generated.
-        % But, compiler-generated unify predicates are not guaranteed to be
-        % type-correct if they call a user-defined equality or comparison
-        % predicate or if it is a special pred for an existentially typed
-        % data type.
+    ( if is_pred_created_type_correct(ModuleInfo, !PredInfo) then
+        !:Specs = [],
+        FoundSyntaxError = no,
+        ContainsErrors = no,
+        Changed = no
+    else
+        pred_info_get_clauses_info(!.PredInfo, ClausesInfo0),
+        clauses_info_get_had_syntax_errors(ClausesInfo0, FoundSyntaxError0),
+        ( FoundSyntaxError0 = no_clause_syntax_errors, FoundSyntaxError = no
+        ; FoundSyntaxError0 = some_clause_syntax_errors, FoundSyntaxError = yes
+        ),
+        typecheck_predicate_if_stub(ModuleInfo, PredId, !PredInfo,
+            FoundSyntaxError, !:Specs, MaybeNeedTypecheck),
         (
-            is_unify_or_compare_pred(!.PredInfo),
+            MaybeNeedTypecheck = do_not_need_typecheck(ContainsErrors, Changed)
+        ;
+            MaybeNeedTypecheck = do_need_typecheck,
+            do_typecheck_pred(ModuleInfo, PredId, !PredInfo, !Specs, Changed),
+            module_info_get_globals(ModuleInfo, Globals),
+            ContainsErrors = contains_errors(Globals, !.Specs)
+        )
+    ).
+
+:- pred is_pred_created_type_correct(module_info::in,
+    pred_info::in, pred_info::out) is semidet.
+
+is_pred_created_type_correct(ModuleInfo, !PredInfo) :-
+    ( if
+        (
+            % Most compiler-generated unify and compare predicates are created
+            % already type-correct, so there is no need to typecheck them.
+            % The exceptions are predicates that call a user-defined equality
+            % or comparison predicate, and unify and compare predicates for
+            % existentially typed data types.
+            is_unify_index_or_compare_pred(!.PredInfo),
             not special_pred_needs_typecheck(!.PredInfo, ModuleInfo)
         ;
+            % Most predicates for builtins are also created already
+            % type-correct. The exceptions still need to have their stub
+            % clauses generated; these are marked with marker_builtin_stub.
+            % XXX Why the delay?
             pred_info_is_builtin(!.PredInfo),
             pred_info_get_markers(!.PredInfo, Markers),
             not check_marker(Markers, marker_builtin_stub)
@@ -446,22 +458,24 @@ typecheck_pred_if_needed(ModuleInfo, PredId, !PredInfo, Specs,
             pred_info_mark_as_external(!PredInfo)
         ;
             IsEmpty = no
-        ),
-        Specs = [],
-        FoundSyntaxError = no,
-        ContainsErrors = no,
-        Changed = no
+        )
     else
-        typecheck_pred(ModuleInfo, PredId, !PredInfo, Specs,
-            FoundSyntaxError, ContainsErrors, Changed)
+        fail
     ).
 
-:- pred typecheck_pred(module_info::in, pred_id::in,
-    pred_info::in, pred_info::out, list(error_spec)::out,
-    bool::out, bool::out, bool::out) is det.
+:- type maybe_need_typecheck
+    --->    do_not_need_typecheck(
+                notc_contains_errors    :: bool,
+                notc_changed            :: bool
+            )
+    ;       do_need_typecheck.
 
-typecheck_pred(ModuleInfo, PredId, !PredInfo, Specs,
-        FoundSyntaxError, ContainsErrors, Changed) :-
+:- pred typecheck_predicate_if_stub(module_info::in, pred_id::in,
+    pred_info::in, pred_info::out, bool::in,
+    list(error_spec)::out, maybe_need_typecheck::out) is det.
+
+typecheck_predicate_if_stub(ModuleInfo, PredId, !PredInfo, FoundSyntaxError,
+        !:Specs, MaybeNeedTypecheck) :-
     % Handle the --allow-stubs and --warn-stubs options.
     % If --allow-stubs is set, and there are no clauses, then
     % - issue a warning (if --warn-stubs is set), and then
@@ -469,36 +483,38 @@ typecheck_pred(ModuleInfo, PredId, !PredInfo, Specs,
     % The real work is done by do_typecheck_pred.
 
     module_info_get_globals(ModuleInfo, Globals),
-    pred_info_get_arg_types(!.PredInfo, _ArgTypeVarSet, _ExistQVars0,
-        ArgTypes0),
+    pred_info_get_markers(!.PredInfo, Markers0),
+
     pred_info_get_clauses_info(!.PredInfo, ClausesInfo0),
     clauses_info_get_clauses_rep(ClausesInfo0, ClausesRep0, ItemNumbers0),
-    pred_info_get_markers(!.PredInfo, Markers0),
     clause_list_is_empty(ClausesRep0) = ClausesRep0IsEmpty,
     (
         ClausesRep0IsEmpty = yes,
+        % There are no clauses, so there can be no clause non-contiguity
+        % errors.
         ( if
             globals.lookup_bool_option(Globals, allow_stubs, yes),
             not check_marker(Markers0, marker_class_method)
         then
             Spec = report_no_clauses_stub(ModuleInfo, PredId, !.PredInfo),
-            StartingSpecs = [Spec],
-            generate_stub_clause(PredId, !PredInfo, ModuleInfo)
+            !:Specs = [Spec],
+            generate_stub_clause(ModuleInfo, PredId, !PredInfo)
         else if
             check_marker(Markers0, marker_builtin_stub)
         then
-            StartingSpecs = [],
-            generate_stub_clause(PredId, !PredInfo, ModuleInfo)
+            !:Specs = [],
+            generate_stub_clause(ModuleInfo, PredId, !PredInfo)
         else
-            StartingSpecs = []
+            !:Specs = []
         )
     ;
         ClausesRep0IsEmpty = no,
+        % There are clauses, so there can be no need to add stub clauses.
         globals.lookup_bool_option(Globals, warn_non_contiguous_foreign_procs,
             WarnNonContiguousForeignProcs),
         (
             WarnNonContiguousForeignProcs = yes,
-            StartingSpecs = report_any_non_contiguous_clauses(ModuleInfo,
+            !:Specs = report_any_non_contiguous_clauses(ModuleInfo,
                 PredId, !.PredInfo, ItemNumbers0, clauses_and_foreign_procs)
         ;
             WarnNonContiguousForeignProcs = no,
@@ -506,74 +522,94 @@ typecheck_pred(ModuleInfo, PredId, !PredInfo, Specs,
                 WarnNonContiguousClauses),
             (
                 WarnNonContiguousClauses = yes,
-                StartingSpecs = report_any_non_contiguous_clauses(ModuleInfo,
+                !:Specs = report_any_non_contiguous_clauses(ModuleInfo,
                     PredId, !.PredInfo, ItemNumbers0, only_clauses)
             ;
                 WarnNonContiguousClauses = no,
-                StartingSpecs = []
+                !:Specs = []
             )
         )
     ),
 
-    some [!ClausesInfo] (
-        pred_info_get_clauses_info(!.PredInfo, !:ClausesInfo),
-        clauses_info_get_headvar_list(!.ClausesInfo, HeadVars),
-        clauses_info_get_had_syntax_errors(!.ClausesInfo, FoundSyntaxError),
-        clauses_info_get_clauses_rep(!.ClausesInfo, ClausesRep1, _ItemNumbers),
-        clause_list_is_empty(ClausesRep1) = ClausesRep1IsEmpty,
-        (
-            ClausesRep1IsEmpty = yes,
-            expect(unify(StartingSpecs, []), $pred,
-                "StartingSpecs not empty"),
+    % The above code may add stub clauses to the predicate, which would
+    % invalidate ClausesInfo0.
+    pred_info_get_clauses_info(!.PredInfo, ClausesInfo1),
+    clauses_info_get_clauses_rep(ClausesInfo1, ClausesRep1, _ItemNumbers),
+    clause_list_is_empty(ClausesRep1) = ClausesRep1IsEmpty,
+    (
+        ClausesRep1IsEmpty = yes,
+        expect(unify(!.Specs, []), $pred, "starting Specs not empty"),
 
-            % There are no clauses for class methods. The clauses are generated
-            % later on, in polymorphism.expand_class_method_bodies.
-            ( if check_marker(Markers0, marker_class_method) then
-                % For the moment, we just insert the types of the head vars
-                % into the clauses_info.
-                vartypes_from_corresponding_lists(HeadVars, ArgTypes0,
-                    VarTypes),
-                clauses_info_set_vartypes(VarTypes, !ClausesInfo),
-                pred_info_set_clauses_info(!.ClausesInfo, !PredInfo),
-                % We also need to set the external_type_params field
-                % to indicate that all the existentially quantified tvars
-                % in the head of this pred are indeed bound by this predicate.
-                type_vars_list(ArgTypes0, HeadVarsInclExistentials),
-                pred_info_set_external_type_params(HeadVarsInclExistentials,
-                    !PredInfo),
-                ContainsErrors = no,
-                Specs = []
-            else
-                ContainsErrors = yes,
-                (
-                    FoundSyntaxError = no,
-                    Specs = [report_no_clauses(ModuleInfo, PredId, !.PredInfo)]
-                ;
-                    FoundSyntaxError = yes,
-                    % There were clauses, they just had errors. Printing
-                    % a message saying there were no clauses would be
-                    % misleading, and the messages for the syntax errors
-                    % will mean that this compiler invocation won't succeed
-                    % anyway.
-                    Specs = []
-                )
-            ),
-            Changed = no
-        ;
-            ClausesRep1IsEmpty = no,
+        % There are no clauses for class methods. The clauses are generated
+        % later on, in polymorphism.expand_class_method_bodies.
+        % XXX Why the delay?
+        ( if check_marker(Markers0, marker_class_method) then
+            % For the moment, we just insert the types of the head vars
+            % into the clauses_info.
+            clauses_info_get_headvar_list(ClausesInfo1, HeadVars),
+            pred_info_get_arg_types(!.PredInfo, _ArgTypeVarSet, _ExistQVars,
+                ArgTypes),
+            vartypes_from_corresponding_lists(HeadVars, ArgTypes, VarTypes),
+            clauses_info_set_vartypes(VarTypes, ClausesInfo1, ClausesInfo),
+            pred_info_set_clauses_info(ClausesInfo, !PredInfo),
+            % We also need to set the external_type_params field
+            % to indicate that all the existentially quantified tvars
+            % in the head of this pred are indeed bound by this predicate.
+            type_vars_list(ArgTypes, HeadVarsInclExistentials),
+            pred_info_set_external_type_params(HeadVarsInclExistentials,
+                !PredInfo),
+            ContainsErrors = no,
+            !:Specs = []
+        else
+            ContainsErrors = yes,
             (
                 FoundSyntaxError = no,
-                do_typecheck_pred(ModuleInfo, PredId, !PredInfo,
-                    StartingSpecs, Specs, Changed),
-                ContainsErrors = contains_errors(Globals, Specs)
+                !:Specs = [report_no_clauses(ModuleInfo, PredId, !.PredInfo)]
             ;
                 FoundSyntaxError = yes,
-                Specs = [],
-                ContainsErrors = yes,
-                Changed = no
+                % There were clauses, they just had errors. Printing a message
+                % saying that there were no clauses would be misleading,
+                % and the messages for the syntax errors will mean that
+                % this compiler invocation won't succeed anyway.
+                !:Specs = []
             )
+        ),
+        Changed = no,
+        MaybeNeedTypecheck = do_not_need_typecheck(ContainsErrors, Changed)
+    ;
+        ClausesRep1IsEmpty = no,
+        (
+            FoundSyntaxError = no,
+            MaybeNeedTypecheck = do_need_typecheck
+        ;
+            FoundSyntaxError = yes,
+            % Printing the messages we generated above could be misleading,
+            % and the messages for the syntax errors will mean that
+            % this compiler invocation won't succeed anyway.
+            !:Specs = [],
+            ContainsErrors = yes,
+            Changed = no,
+            MaybeNeedTypecheck = do_not_need_typecheck(ContainsErrors, Changed)
         )
     ).
+
+:- func report_any_non_contiguous_clauses(module_info, pred_id, pred_info,
+    clause_item_numbers, clause_item_number_types) = list(error_spec).
+
+report_any_non_contiguous_clauses(ModuleInfo, PredId, PredInfo, ItemNumbers,
+        Type) = Specs :-
+    ( if
+        clauses_are_non_contiguous(ItemNumbers, Type,
+            FirstRegion, SecondRegion, LaterRegions)
+    then
+        Spec = report_non_contiguous_clauses(ModuleInfo, PredId,
+            PredInfo, FirstRegion, SecondRegion, LaterRegions),
+        Specs = [Spec]
+    else
+        Specs = []
+    ).
+
+%---------------------------------------------------------------------------%
 
 :- pred do_typecheck_pred(module_info::in, pred_id::in,
     pred_info::in, pred_info::out,
@@ -772,22 +808,6 @@ do_typecheck_pred(ModuleInfo, PredId, !PredInfo, !Specs, Changed) :-
         typecheck_info_get_all_errors(!.Info, !:Specs)
     ).
 
-:- func report_any_non_contiguous_clauses(module_info, pred_id, pred_info,
-    clause_item_numbers, clause_item_number_types) = list(error_spec).
-
-report_any_non_contiguous_clauses(ModuleInfo, PredId, PredInfo, ItemNumbers,
-        Type) = Specs :-
-    ( if
-        clauses_are_non_contiguous(ItemNumbers, Type,
-            FirstRegion, SecondRegion, LaterRegions)
-    then
-        Spec = report_non_contiguous_clauses(ModuleInfo, PredId,
-            PredInfo, FirstRegion, SecondRegion, LaterRegions),
-        Specs = [Spec]
-    else
-        Specs = []
-    ).
-
 :- pred check_existq_clause(tvarset::in, existq_tvars::in, clause::in,
     typecheck_info::in, typecheck_info::out) is det.
 
@@ -828,10 +848,10 @@ check_mention_existq_var(Context, TypeVarSet, Impl, TVar, !Info) :-
     % depending on whether the predicate is part of
     % the Mercury standard library or not.
     %
-:- pred generate_stub_clause(pred_id::in, pred_info::in, pred_info::out,
-    module_info::in) is det.
+:- pred generate_stub_clause(module_info::in, pred_id::in,
+    pred_info::in, pred_info::out) is det.
 
-generate_stub_clause(PredId, !PredInfo, ModuleInfo) :-
+generate_stub_clause(ModuleInfo, PredId, !PredInfo) :-
     some [!ClausesInfo] (
         pred_info_get_clauses_info(!.PredInfo, !:ClausesInfo),
         clauses_info_get_varset(!.ClausesInfo, VarSet0),
@@ -851,8 +871,8 @@ generate_stub_clause(PredId, !PredInfo, ModuleInfo) :-
     module_info::in, clause::out, prog_varset::in, prog_varset::out) is det.
 
 generate_stub_clause_2(PredName, !PredInfo, ModuleInfo, StubClause, !VarSet) :-
-    % Mark the predicate as a stub
-    % (i.e. record that it originally had no clauses)
+    % Mark the predicate as a stub, i.e. record that it originally
+    % had no clauses.
     pred_info_get_markers(!.PredInfo, Markers0),
     add_marker(marker_stub, Markers0, Markers),
     pred_info_set_markers(Markers, !PredInfo),
@@ -870,9 +890,9 @@ generate_stub_clause_2(PredName, !PredInfo, ModuleInfo, StubClause, !VarSet) :-
     else
         CalleeName = "no_clauses"
     ),
-    generate_simple_call(mercury_private_builtin_module, CalleeName,
-        pf_predicate, only_mode, detism_det, purity_pure, [PredNameVar], [],
-        instmap_delta_bind_no_var, ModuleInfo, Context, CallGoal),
+    generate_simple_call(ModuleInfo, mercury_private_builtin_module,
+        CalleeName, pf_predicate, only_mode, detism_det, purity_pure,
+        [PredNameVar], [], instmap_delta_bind_no_var, Context, CallGoal),
 
     % Combine the unification and call into a conjunction.
     goal_info_init(Context, GoalInfo),
@@ -1056,56 +1076,6 @@ special_pred_needs_typecheck(PredInfo, ModuleInfo) :-
     lookup_type_ctor_defn(TypeTable, TypeCtor, TypeDefn),
     hlds_data.get_type_defn_body(TypeDefn, Body),
     special_pred_for_type_needs_typecheck(ModuleInfo, SpecialPredId, Body).
-
-%---------------------------------------------------------------------------%
-
-    % For a field access function for which the user has supplied
-    % a declaration but no clauses, add a clause
-    % 'foo :='(X, Y) = 'foo :='(X, Y).
-    % As for the default clauses added for builtins, this is not a recursive
-    % call -- post_typecheck.m will expand the body into unifications.
-    %
-:- pred maybe_add_field_access_function_clause(module_info::in,
-    pred_info::in, pred_info::out) is det.
-
-maybe_add_field_access_function_clause(ModuleInfo, !PredInfo) :-
-    pred_info_get_status(!.PredInfo, PredStatus),
-    pred_info_get_clauses_info(!.PredInfo, ClausesInfo0),
-    clauses_info_get_clauses_rep(ClausesInfo0, ClausesRep0, _ItemNumbers0),
-    ( if
-        pred_info_is_field_access_function(ModuleInfo, !.PredInfo),
-        clause_list_is_empty(ClausesRep0) = yes,
-        pred_status_defined_in_this_module(PredStatus) = yes
-    then
-        clauses_info_get_headvars(ClausesInfo0, HeadVars),
-        proc_arg_vector_to_func_args(HeadVars, FuncArgs, FuncRetVal),
-        pred_info_get_context(!.PredInfo, Context),
-        FuncModule = pred_info_module(!.PredInfo),
-        FuncName = pred_info_name(!.PredInfo),
-        PredArity = pred_info_orig_arity(!.PredInfo),
-        adjust_func_arity(pf_function, FuncArity, PredArity),
-        FuncSymName = qualified(FuncModule, FuncName),
-        FuncConsId = cons(FuncSymName, FuncArity, cons_id_dummy_type_ctor),
-        FuncRHS = rhs_functor(FuncConsId, is_not_exist_constr, FuncArgs),
-        create_pure_atomic_complicated_unification(FuncRetVal,
-            FuncRHS, Context, umc_explicit, [], Goal0),
-        Goal0 = hlds_goal(GoalExpr, GoalInfo0),
-        NonLocals = set_of_var.list_to_set(proc_arg_vector_to_list(HeadVars)),
-        goal_info_set_nonlocals(NonLocals, GoalInfo0, GoalInfo),
-        Goal = hlds_goal(GoalExpr, GoalInfo),
-        Clause = clause(all_modes, Goal, impl_lang_mercury, Context, []),
-        set_clause_list([Clause], ClausesRep),
-        ItemNumbers = init_clause_item_numbers_comp_gen,
-        clauses_info_set_clauses_rep(ClausesRep, ItemNumbers,
-            ClausesInfo0, ClausesInfo),
-        pred_info_update_goal_type(goal_type_clause_and_foreign, !PredInfo),
-        pred_info_set_clauses_info(ClausesInfo, !PredInfo),
-        pred_info_get_markers(!.PredInfo, Markers0),
-        add_marker(marker_calls_are_fully_qualified, Markers0, Markers),
-        pred_info_set_markers(Markers, !PredInfo)
-    else
-        true
-    ).
 
 %---------------------------------------------------------------------------%
 
@@ -3515,7 +3485,7 @@ convert_cons_defn(Info, GoalId, Action, HLDS_ConsDefn, ConsTypeInfo) :-
     ( if
         Body ^ du_type_is_foreign_type = yes(_),
         not pred_info_get_goal_type(PredInfo, goal_type_clause_and_foreign),
-        not is_unify_or_compare_pred(PredInfo),
+        not is_unify_index_or_compare_pred(PredInfo),
         PredStatus \= pred_status(status_opt_imported)
     then
         ConsTypeInfo = error(foreign_type_constructor(TypeCtor, TypeDefn))
@@ -3524,7 +3494,7 @@ convert_cons_defn(Info, GoalId, Action, HLDS_ConsDefn, ConsTypeInfo) :-
         % the current predicate is opt_imported.
         hlds_data.get_type_defn_status(TypeDefn, TypeStatus),
         TypeStatus = type_status(status_abstract_imported),
-        not is_unify_or_compare_pred(PredInfo),
+        not is_unify_index_or_compare_pred(PredInfo),
         PredStatus \= pred_status(status_opt_imported)
     then
         ConsTypeInfo = error(abstract_imported_type)

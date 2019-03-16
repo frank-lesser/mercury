@@ -1345,8 +1345,8 @@
     %
     % d     int     signed integer
     % i     int     signed integer
-    % o     int     signed octal        with '0' prefix
-    % x,X   int     signed hex          with '0x', '0X' prefix
+    % o     int     unsigned octal      with '0' prefix
+    % x,X   int     unsigned hex        with '0x', '0X' prefix
     % u     int     unsigned integer
     % c     char    character
     % s     string  string
@@ -3265,6 +3265,26 @@ suffix_length_loop(P, S, I, Index) :-
 sub_string_search(WholeString, Pattern, Index) :-
     sub_string_search_start(WholeString, Pattern, 0, Index).
 
+:- pragma foreign_decl("Erlang", local, "
+-export([sub_string_search_start_2/5]).
+").
+
+:- pragma foreign_code("Erlang", "
+sub_string_search_start_2(String, SubString, I, Length, SubLength) ->
+    case I + SubLength =< Length of
+        true ->
+            case String of
+                <<_:I/binary, SubString:SubLength/binary, _/binary>> ->
+                    I;
+                _ ->
+                    sub_string_search_start_2(String, SubString, I + 1,
+                        Length, SubLength)
+            end;
+        false ->
+            -1
+    end.
+").
+
 :- pragma foreign_proc("C",
     sub_string_search_start(WholeString::in, Pattern::in, BeginAt::in,
         Index::out),
@@ -3308,26 +3328,6 @@ sub_string_search(WholeString, Pattern, Index) :-
     Index = mercury__string:sub_string_search_start_2(String, SubString,
         BeginAt, size(String), size(SubString)),
     SUCCESS_INDICATOR = (Index =/= -1)
-").
-
-:- pragma foreign_decl("Erlang", local, "
--export([sub_string_search_start_2/5]).
-").
-
-:- pragma foreign_code("Erlang", "
-sub_string_search_start_2(String, SubString, I, Length, SubLength) ->
-    case I + SubLength =< Length of
-        true ->
-            case String of
-                <<_:I/binary, SubString:SubLength/binary, _/binary>> ->
-                    I;
-                _ ->
-                    sub_string_search_start_2(String, SubString, I + 1,
-                        Length, SubLength)
-            end;
-        false ->
-            -1
-    end.
 ").
 
 sub_string_search_start(String, SubString, BeginAt, Index) :-
@@ -5889,7 +5889,9 @@ int8_to_string(_) = _ :-
     uint8_to_string(U8::in) = (S::uo),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail],
 "
-    char buffer[4]; // 3 for digits, 1 for nul.
+    // Use a larger buffer than necessary (3 bytes for digits, 1 for nul)
+    // to avoid spurious warning from gcc -Werror=format-overflow.
+    char buffer[24];
     sprintf(buffer, ""%"" PRIu8, U8);
     MR_allocate_aligned_string_msg(S, strlen(buffer), MR_ALLOC_ID);
     strcpy(S, buffer);

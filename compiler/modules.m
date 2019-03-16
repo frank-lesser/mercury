@@ -123,7 +123,6 @@
 :- import_module parse_tree.prog_data_foreign.
 
 :- import_module cord.
-:- import_module dir.
 :- import_module map.
 :- import_module multi_map.
 :- import_module require.
@@ -132,67 +131,6 @@
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
-
-:- type which_grab
-    --->    grab_imported(maybe(timestamp), set(module_name))
-    ;       grab_unqual_imported.
-
-:- pred grab_maybe_qual_imported_modules(file_name::in, module_name::in,
-    which_grab::in, raw_compilation_unit::in,
-    list(src_item_block)::out, module_and_imports::out,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::out, io::di, io::uo) is det.
-
-grab_maybe_qual_imported_modules(SourceFileName, SourceFileModuleName,
-        WhichGrab, RawCompUnit, SrcItemBlocks, !:ModuleAndImports,
-        !:IntImported, !:IntUsed, !:ImpImported, !:ImpUsed, !IO) :-
-    RawCompUnit = raw_compilation_unit(ModuleName, ModuleNameContext,
-        RawItemBlocks),
-    % XXX Why do we compute NestedChildren, FactDeps, ForeignIncludeFiles,
-    % SrcItemBlocks and PublicChildren differently in these two cases?
-    (
-        WhichGrab = grab_imported(MaybeTimestamp, NestedChildren),
-        (
-            MaybeTimestamp = yes(Timestamp),
-            MaybeTimestampMap = yes(map.singleton(ModuleName,
-                module_timestamp(fk_src, Timestamp, may_be_unqualified)))
-        ;
-            MaybeTimestamp = no,
-            MaybeTimestampMap = no
-        ),
-
-        get_src_item_blocks_public_children(RawCompUnit,
-            SrcItemBlocks, PublicChildren),
-
-        % XXX ITEM_LIST Store the FactDeps and ForeignIncludeFiles
-        % in the raw_comp_unit.
-        get_fact_table_dependencies_in_item_blocks(RawItemBlocks, FactDeps),
-        get_foreign_include_files_in_item_blocks(RawItemBlocks,
-            ForeignIncludeFiles)
-    ;
-        WhichGrab = grab_unqual_imported,
-        set.init(NestedChildren),
-        MaybeTimestampMap = no,
-
-        raw_item_blocks_to_src(RawItemBlocks, SrcItemBlocks),
-        map.init(PublicChildren),
-
-        FactDeps = [],
-        ForeignIncludeFiles = cord.init
-    ),
-
-    % Construct the initial module import structure.
-    InitSpecs = [],
-    make_module_and_imports(SourceFileName, SourceFileModuleName,
-        ModuleName, ModuleNameContext, SrcItemBlocks, InitSpecs,
-        PublicChildren, NestedChildren, FactDeps, ForeignIncludeFiles,
-        MaybeTimestampMap, !:ModuleAndImports),
-
-    % Find the modules named in import_module and use_module decls.
-    get_dependencies_int_imp_in_raw_item_blocks(RawItemBlocks,
-        !:IntImported, !:IntUsed, !:ImpImported, !:ImpUsed).
 
 grab_imported_modules(Globals, SourceFileName, SourceFileModuleName,
         MaybeTimestamp, NestedChildren, RawCompUnit, HaveReadModuleMaps,
@@ -207,16 +145,18 @@ grab_imported_modules(Globals, SourceFileName, SourceFileModuleName,
         !IntImpIndirectImported, !ImpImpIndirectImported]
     (
         WhichGrab = grab_imported(MaybeTimestamp, NestedChildren),
-        grab_maybe_qual_imported_modules(SourceFileName, SourceFileModuleName,
-            WhichGrab, RawCompUnit, SrcItemBlocks, !:ModuleAndImports,
-            IntImportedMap, IntUsedMap, ImpImportedMap, ImpUsedMap, !IO),
+        make_initial_module_and_imports(SourceFileName, SourceFileModuleName,
+            WhichGrab, RawCompUnit, SrcItemBlocks, !:ModuleAndImports),
+
+        % Find the modules named in import_module and use_module decls.
+        RawCompUnit = raw_compilation_unit(ModuleName, ModuleNameContext,
+            RawItemBlocks),
+        get_dependencies_int_imp_in_raw_item_blocks(RawItemBlocks,
+            IntImportedMap, IntUsedMap, ImpImportedMap, ImpUsedMap),
         set.sorted_list_to_set(map.keys(IntImportedMap), !:IntImported),
         set.sorted_list_to_set(map.keys(IntUsedMap), !:IntUsed),
         set.sorted_list_to_set(map.keys(ImpImportedMap), !:ImpImported),
         set.sorted_list_to_set(map.keys(ImpUsedMap), !:ImpUsed),
-
-        RawCompUnit = raw_compilation_unit(ModuleName, ModuleNameContext,
-            RawItemBlocks),
 
         HaveReadModuleMapInt = HaveReadModuleMaps ^ hrmm_int,
 
@@ -368,16 +308,18 @@ grab_unqual_imported_modules(Globals, SourceFileName, SourceFileModuleName,
     (
         WhichGrab = grab_unqual_imported,
         % XXX _SrcItemBlocks
-        grab_maybe_qual_imported_modules(SourceFileName, SourceFileModuleName,
-            WhichGrab, RawCompUnit, _SrcItemBlocks, !:ModuleAndImports,
-            IntImportedMap, IntUsedMap, ImpImportedMap, ImpUsedMap, !IO),
+        make_initial_module_and_imports(SourceFileName, SourceFileModuleName,
+            WhichGrab, RawCompUnit, _SrcItemBlocks, !:ModuleAndImports),
+
+        % Find the modules named in import_module and use_module decls.
+        RawCompUnit = raw_compilation_unit(ModuleName, _ModuleNameContext,
+            RawItemBlocks),
+        get_dependencies_int_imp_in_raw_item_blocks(RawItemBlocks,
+            IntImportedMap, IntUsedMap, ImpImportedMap, ImpUsedMap),
         set.sorted_list_to_set(map.keys(IntImportedMap), !:IntImported),
         set.sorted_list_to_set(map.keys(IntUsedMap), !:IntUsed),
         set.sorted_list_to_set(map.keys(ImpImportedMap), !:ImpImported),
         set.sorted_list_to_set(map.keys(ImpUsedMap), !:ImpUsed),
-
-        RawCompUnit = raw_compilation_unit(ModuleName, _ModuleNameContext,
-            RawItemBlocks),
 
         map.init(HaveReadModuleMapInt),
 
@@ -478,6 +420,69 @@ grab_unqual_imported_modules(Globals, SourceFileName, SourceFileModuleName,
 
 %---------------------------------------------------------------------------%
 
+:- type which_grab
+    --->    grab_imported(maybe(timestamp), set(module_name))
+    ;       grab_unqual_imported.
+
+:- pred make_initial_module_and_imports(file_name::in, module_name::in,
+    which_grab::in, raw_compilation_unit::in,
+    list(src_item_block)::out, module_and_imports::out) is det.
+
+make_initial_module_and_imports(SourceFileName, SourceFileModuleName,
+        WhichGrab, RawCompUnit, SrcItemBlocks, ModuleAndImports) :-
+    RawCompUnit = raw_compilation_unit(ModuleName, ModuleNameContext,
+        RawItemBlocks),
+    % XXX Why do we compute NestedChildren, FactDeps, ForeignIncludeFiles,
+    % SrcItemBlocks and PublicChildren differently in these two cases?
+    % XXX And why do we return SrcItemBlocks, instead of SrcItemBlocksWithFIMs?
+    (
+        WhichGrab = grab_imported(MaybeTimestamp, NestedChildren),
+        (
+            MaybeTimestamp = yes(Timestamp),
+            MaybeTimestampMap = yes(map.singleton(ModuleName,
+                module_timestamp(fk_src, Timestamp, may_be_unqualified)))
+        ;
+            MaybeTimestamp = no,
+            MaybeTimestampMap = no
+        ),
+
+        get_src_item_blocks_public_children(RawCompUnit,
+            SrcItemBlocks, PublicChildren),
+
+        % XXX ITEM_LIST Store the FactDeps and ForeignIncludeFiles
+        % in the raw_comp_unit.
+        get_fact_table_dependencies_in_item_blocks(RawItemBlocks, FactDeps),
+        get_foreign_include_files_in_item_blocks(RawItemBlocks,
+            ForeignIncludeFiles)
+    ;
+        WhichGrab = grab_unqual_imported,
+        set.init(NestedChildren),
+        MaybeTimestampMap = no,
+
+        raw_item_blocks_to_src(RawItemBlocks, SrcItemBlocks),
+        map.init(PublicChildren),
+
+        FactDeps = [],
+        ForeignIncludeFiles = cord.init
+    ),
+
+    % Construct the initial module import structure.
+    % XXX ITEM_LIST sms_interface is a guess. The original code (whose
+    % behavior the current code is trying to emulate) simply added
+    % the generated items to a raw item list, seemingly without caring
+    % about what section those items would end up (it certainly did not
+    % look for any section markers).
+    add_needed_foreign_import_module_items_to_item_blocks(ModuleName,
+        sms_interface, SrcItemBlocks, SrcItemBlocksWithFIMs),
+
+    InitSpecs = [],
+    make_module_and_imports(SourceFileName, SourceFileModuleName,
+        ModuleName, ModuleNameContext, SrcItemBlocksWithFIMs, InitSpecs,
+        PublicChildren, NestedChildren, FactDeps, ForeignIncludeFiles,
+        MaybeTimestampMap, ModuleAndImports).
+
+%---------------------------------------------------------------------------%
+
 :- pred get_src_item_blocks_public_children(raw_compilation_unit::in,
     list(src_item_block)::out, multi_map(module_name, prog_context)::out)
     is det.
@@ -495,8 +500,7 @@ get_src_item_blocks_public_children(RawCompUnit,
         raw_item_blocks_to_src(RawItemBlocks, SrcItemBlocks),
         map.init(PublicChildren)
     else
-        get_int_and_impl(dont_include_impl_types, RawCompUnit,
-            IFileItemBlocks, NoIFileItemBlocks),
+        get_int_and_imp(RawCompUnit, IFileItemBlocks, NoIFileItemBlocks),
         raw_item_blocks_to_src(IFileItemBlocks, IFileSrcItemBlocks),
         raw_item_blocks_to_split_src(NoIFileItemBlocks, NoIFileSrcItemBlocks),
         SrcItemBlocks = IFileSrcItemBlocks ++ NoIFileSrcItemBlocks,
@@ -597,6 +601,7 @@ split_items_into_clauses_and_decls([Item | Items],
         ; Item = item_typeclass(_)
         ; Item = item_instance(_)
         ; Item = item_mutable(_)
+        ; Item = item_foreign_import_module(_)
         ; Item = item_type_repn(_)
         ; Item = item_nothing(_)
         ),
@@ -1097,7 +1102,7 @@ process_module_private_interface(Globals, HaveReadModuleMapInt,
 process_module_long_interface(Globals, HaveReadModuleMapInt, NeedQual,
         Module, IntFileKind, NewIntSection, NewImpSection, SectionAppend,
         !IntImportsUses, !ImpImportsUses, !ModuleAndImports, !IO) :-
-    % XXX It should be possible to factor our the differences between
+    % XXX It should be possible to factor out the differences between
     % process_module_{long,short}_interface.
     ProcessInterfaceKind = pik_long(IntFileKind, NeedQual),
     process_module_interface_general(Globals, ProcessInterfaceKind,
@@ -1124,7 +1129,7 @@ process_module_long_interface(Globals, HaveReadModuleMapInt, NeedQual,
 process_module_short_interface(Globals, HaveReadModuleMapInt,
         Module, IntFileKind, NewIntSection, NewImpSection, SectionAppend,
         !IntImportsUses, !ImpImportsUses, !ModuleAndImports, !IO) :-
-    % XXX It should be possible to factor our the differences between
+    % XXX It should be possible to factor out the differences between
     % process_module_{long,short}_interface.
     ProcessInterfaceKind = pik_short(IntFileKind),
     process_module_interface_general(Globals, ProcessInterfaceKind,
@@ -1253,45 +1258,6 @@ maybe_log_augment_decision(Why, Kind, ModuleName, IntFileKind, Read, !IO) :-
             [s(Why), s(Kind), s(ReadStr),
             s(ModuleNameStr), s(ExtensionStr)], !TIO)
     ).
-
-%---------------------------------------------------------------------------%
-
-:- pred make_module_and_imports(file_name::in,
-    module_name::in, module_name::in, prog_context::in,
-    list(src_item_block)::in, list(error_spec)::in,
-    multi_map(module_name, prog_context)::in, set(module_name)::in,
-    list(string)::in, foreign_include_file_infos::in,
-    maybe(module_timestamp_map)::in, module_and_imports::out) is det.
-
-make_module_and_imports(SourceFileName, SourceFileModuleName,
-        ModuleName, ModuleNameContext, SrcItemBlocks0, Specs,
-        PublicChildren, NestedChildren, FactDeps, ForeignIncludeFiles,
-        MaybeTimestampMap, Module) :-
-    % XXX The reason why make_module_and_imports is here and not in
-    % module_imports.m is this call. This should be fixed, preferably
-    % by changing the module_and_imports structure.
-    % XXX ITEM_LIST oms_interface is a guess. The original code (whose
-    % behavior the current code is trying to emulate) simply added
-    % the generated items to a raw item list, seemingly without caring
-    % about what section those items would end up (it certainly did not
-    % look for any section markers).
-    add_needed_foreign_import_module_items_to_item_blocks(ModuleName,
-        sms_interface, SrcItemBlocks0, SrcItemBlocks),
-    set.init(Ancestors),
-    map.init(IntDeps),
-    map.init(ImpDeps),
-    set.init(IndirectDeps),
-    map.init(IncludeDeps),
-    ForeignImports = init_foreign_import_modules,
-    set.init(Errors),
-    Module = module_and_imports(SourceFileName, SourceFileModuleName,
-        ModuleName, ModuleNameContext,
-        Ancestors, IntDeps, ImpDeps, IndirectDeps, IncludeDeps,
-        PublicChildren, NestedChildren, FactDeps,
-        ForeignImports, ForeignIncludeFiles,
-        contains_foreign_code_unknown, contains_no_foreign_export,
-        SrcItemBlocks, cord.init, cord.init, cord.init, cord.init, map.init,
-        Specs, Errors, MaybeTimestampMap, no_main, dir.this_directory).
 
 %---------------------------------------------------------------------------%
 
@@ -1534,6 +1500,8 @@ check_module_accessibility(ModuleName, InclMap, ImportUseMap, ImportedModule,
     string::in, import_or_use_context::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
+report_inaccessible_module_error(ModuleName, ParentModule, SubModule,
+        ImportOrUseContext, !Specs) :-
 % The error message should come out like this
 % (the second sentence is included only with --verbose-errors):
 % very_long_name.m:123: In module `very_long_name':
@@ -1545,8 +1513,6 @@ check_module_accessibility(ModuleName, InclMap, ImportUseMap, ImportedModule,
 % very_long_name.m:123:   `parent_module' does not contain an `include_module'
 % very_long_name.m:123:   declaration for module `sub_module'.
 
-report_inaccessible_module_error(ModuleName, ParentModule, SubModule,
-        ImportOrUseContext, !Specs) :-
     ImportOrUseContext = import_or_use_context(ImportOrUse, Context),
     ( ImportOrUse = import_decl, DeclName = "import_module"
     ; ImportOrUse = use_decl, DeclName = "use_module"

@@ -57,9 +57,9 @@ DEBUGGER_SCRIPTS = $(CONF_DEBUG_SCRIPTS) 	\
 		mdb_track			\
 		mdb_term_browser.js		\
 		mdb_term_browser.css		\
-		jquery.slim.min.js		\
-		jstree.min.js			\
-		jstree.style.min.css		\
+		jquery.slim.js			\
+		jstree.js			\
+		jstree.style.css		\
 		32px.png			\
 		40px.png			\
 		throbber.gif
@@ -203,5 +203,6 @@ realclean_local: clean_scripts
 clean_scripts:
 	for file in *.in; do rm -f `basename $$file .in`; done
 	rm -f test_mdbrc
+	rm -f config.log
 
 #-----------------------------------------------------------------------------#

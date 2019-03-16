@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1993-2012 The University of Melbourne.
-% Copyright (C) 2013-2018 The Mercury team.
+% Copyright (C) 2013-2019 The Mercury team.
 % This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
@@ -106,6 +106,19 @@
 :- type result(T)
     --->    ok(T)
     ;       eof
+    ;       error(io.error).
+
+    % maybe_incomplete_result is returned when reading multibyte values from a
+    % binary stream. `incomplete(Bytes)' is returned when at least one byte of
+    % a value has already been read but there are insufficient bytes
+    % remaining the stream to complete the value. In that case, `Bytes' will
+    % contain the bytes that have already been read from the stream, in the
+    % order in which they were read.
+    %
+:- type maybe_incomplete_result(T)
+    --->    ok(T)
+    ;       eof
+    ;       incomplete(list(uint8))
     ;       error(io.error).
 
 :- type read_result(T)
@@ -872,11 +885,125 @@
 :- pred read_binary_uint8(io.binary_input_stream::in, io.result(uint8)::out,
     io::di, io::uo) is det.
 
+    % The following predicates read multibyte integer values, either
+    % from the current binary input stream, or from the specified
+    % binary input stream.
+    %
+    % The names of these predicates have the form:
+    %
+    %    read_binary_<TYPE><SUFFIX>
+    %
+    % where <TYPE> is the name of one of the Mercury multibyte fixed size
+    % integer types. The optional <SUFFIX> specifies the order in which
+    % the bytes that make up the multibyte integer occur in input stream.
+    % The suffix may be one of:
+    %
+    % "_le":    the bytes are in little endian byte order.
+    % "_be":    the bytes are in big endian byte order.
+    % none:     the bytes are in the byte order of the underlying platform.
+    %
+:- pred read_binary_int16(maybe_incomplete_result(int16)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_int16(io.binary_input_stream::in,
+    maybe_incomplete_result(int16)::out, io::di, io::uo) is det.
+
+:- pred read_binary_int16_le(maybe_incomplete_result(int16)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_int16_le(io.binary_input_stream::in,
+    maybe_incomplete_result(int16)::out, io::di, io::uo) is det.
+
+:- pred read_binary_int16_be(maybe_incomplete_result(int16)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_int16_be(io.binary_input_stream::in,
+    maybe_incomplete_result(int16)::out, io::di, io::uo) is det.
+
+:- pred read_binary_uint16(maybe_incomplete_result(uint16)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_uint16(io.binary_input_stream::in,
+    maybe_incomplete_result(uint16)::out, io::di, io::uo) is det.
+
+:- pred read_binary_uint16_le(maybe_incomplete_result(uint16)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_uint16_le(io.binary_input_stream::in,
+    maybe_incomplete_result(uint16)::out, io::di, io::uo) is det.
+
+:- pred read_binary_uint16_be(maybe_incomplete_result(uint16)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_uint16_be(io.binary_input_stream::in,
+    maybe_incomplete_result(uint16)::out, io::di, io::uo) is det.
+
+%---------------------%
+
+:- pred read_binary_int32(maybe_incomplete_result(int32)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_int32(io.binary_input_stream::in,
+    maybe_incomplete_result(int32)::out, io::di, io::uo) is det.
+
+:- pred read_binary_int32_le(maybe_incomplete_result(int32)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_int32_le(io.binary_input_stream::in,
+    maybe_incomplete_result(int32)::out, io::di, io::uo) is det.
+
+:- pred read_binary_int32_be(maybe_incomplete_result(int32)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_int32_be(io.binary_input_stream::in,
+    maybe_incomplete_result(int32)::out, io::di, io::uo) is det.
+
+:- pred read_binary_uint32(maybe_incomplete_result(uint32)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_uint32(io.binary_input_stream::in,
+    maybe_incomplete_result(uint32)::out, io::di, io::uo) is det.
+
+:- pred read_binary_uint32_le(maybe_incomplete_result(uint32)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_uint32_le(io.binary_input_stream::in,
+    maybe_incomplete_result(uint32)::out, io::di, io::uo) is det.
+
+:- pred read_binary_uint32_be(maybe_incomplete_result(uint32)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_uint32_be(io.binary_input_stream::in,
+    maybe_incomplete_result(uint32)::out, io::di, io::uo) is det.
+
+%---------------------%
+
+:- pred read_binary_int64(maybe_incomplete_result(int64)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_int64(io.binary_input_stream::in,
+    maybe_incomplete_result(int64)::out, io::di, io::uo) is det.
+
+:- pred read_binary_int64_le(maybe_incomplete_result(int64)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_int64_le(io.binary_input_stream::in,
+    maybe_incomplete_result(int64)::out, io::di, io::uo) is det.
+
+:- pred read_binary_int64_be(maybe_incomplete_result(int64)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_int64_be(io.binary_input_stream::in,
+    maybe_incomplete_result(int64)::out, io::di, io::uo) is det.
+
+:- pred read_binary_uint64(maybe_incomplete_result(uint64)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_uint64(io.binary_input_stream::in,
+    maybe_incomplete_result(uint64)::out, io::di, io::uo) is det.
+
+:- pred read_binary_uint64_le(maybe_incomplete_result(uint64)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_uint64_le(io.binary_input_stream::in,
+    maybe_incomplete_result(uint64)::out, io::di, io::uo) is det.
+
+:- pred read_binary_uint64_be(maybe_incomplete_result(uint64)::out,
+    io::di, io::uo) is det.
+:- pred read_binary_uint64_be(io.binary_input_stream::in,
+    maybe_incomplete_result(uint64)::out, io::di, io::uo) is det.
+
+%---------------------%
+
     % Fill a bitmap from the current binary input stream
     % or from the specified binary input stream.
     % Return the number of bytes read. On end-of-file, the number of
     % bytes read will be less than the size of the bitmap, and
     % the result will be `ok'.
+    % Throws an exception if the bitmap has a partial final byte.
     %
 :- pred read_bitmap(bitmap::bitmap_di, bitmap::bitmap_uo,
     int::out, io.res::out, io::di, io::uo) is det.
@@ -996,11 +1123,12 @@
 :- mode binary_input_stream_foldl2_io_maybe_stop(in,
     (pred(in, out, in, out, di, uo) is cc_multi), in, out, di, uo) is cc_multi.
 
-    % Un-reads a byte from the current binary input stream
-    % or from the specified stream.
+    % Un-reads a byte from the current binary input stream or from the
+    % specified stream. The byte is taken from the bottom 8 bits of the
+    % specified int.
     %
     % You can put back as many bytes as you like.
-    % You can even put back something that you didn't actually read.
+    % You can even put back something that you did not actually read.
     %
     % On some systems and backends, only one byte of pushback is guaranteed.
     % `putback_byte' will throw an io.error exception if the pushback buffer
@@ -1010,8 +1138,23 @@
     % the file position is already zero, in which case the new file position
     % is unspecified.
     %
+    %
 :- pred putback_byte(int::in, io::di, io::uo) is det.
 :- pred putback_byte(io.binary_input_stream::in, int::in, io::di, io::uo)
+    is det.
+
+    % Like putback_byte, but where the byte value un-read is the 8 bits of the
+    % int8 reinterpreted as a uint8.
+    %
+:- pred putback_int8(int8::in, io::di, io::uo) is det.
+:- pred putback_int8(io.binary_input_stream::in, int8::in, io::di, io::uo)
+    is det.
+
+    % Like putback_byte, but where the byte value un-read is the 8 bits of the
+    % uint8.
+    %
+:- pred putback_uint8(uint8::in, io::di, io::uo) is det.
+:- pred putback_uint8(io.binary_input_stream::in, uint8::in, io::di, io::uo)
     is det.
 
 %---------------------------------------------------------------------------%
@@ -1056,20 +1199,21 @@
 
 %---------------------%
 
-    % The following predicates write multibyte integer values to the current
-    % binary output stream or to the specified output stream.
+    % The following predicates write multibyte integer values, either to the
+    % current binary output stream, or to the specified binary output stream.
     %
     % These names of these predicates have the form:
     %
     %    write_binary_<TYPE><SUFFIX>
     %
     % where <TYPE> is the name of one of the Mercury multibyte fixed size
-    % integer types. <SUFFIX> is optional and specifies the byte order in
-    % which the integer value is written to the stream.  It may be one of:
+    % integer types. The optional <SUFFIX> specifies the order in which
+    % the bytes that make up the multibyte integer are written to the stream.
+    % The suffix may be one of:
     %
-    %     no suffix - native byte order of the underlying platform.
-    %     "_le"     - little endian byte order.
-    %     "_be"     - big endian byte order.
+    % "_le":    the bytes are in little endian byte order.
+    % "_be":    the bytes are in big endian byte order.
+    % none:     the bytes are in the byte order of the underlying platform.
     %
 :- pred write_binary_int16(int16::in, io::di, io::uo) is det.
 :- pred write_binary_int16(io.binary_output_stream::in, int16::in,
@@ -1748,9 +1892,13 @@
 :- instance stream.stream(binary_input_stream,  io).
 :- instance stream.input(binary_input_stream, io).
 :- instance stream.reader(binary_input_stream, int, io, io.error).
+:- instance stream.reader(binary_input_stream, int8, io, io.error).
+:- instance stream.reader(binary_input_stream, uint8, io, io.error).
 :- instance stream.bulk_reader(binary_input_stream, int,
         bitmap, io, io.error).
 :- instance stream.putback(binary_input_stream, int, io, io.error).
+:- instance stream.putback(binary_input_stream, int8, io, io.error).
+:- instance stream.putback(binary_input_stream, uint8, io, io.error).
 :- instance stream.seekable(binary_input_stream, io).
 
 %---------------------------------------------------------------------------%
@@ -1956,6 +2104,9 @@
 :- import_module exception.
 :- import_module int.
 :- import_module int8.
+:- import_module int16.
+:- import_module int32.
+:- import_module int64.
 :- import_module parser.
 :- import_module require.
 :- import_module stream.string_writer.
@@ -2100,16 +2251,29 @@ using System.Security.Principal;
     % inner loops.
 
 :- type result_code
-    --->    ok
-    ;       eof
-    ;       error.
+    --->    result_code_ok
+    ;       result_code_eof
+    ;       result_code_error.
 
 :- pragma foreign_export_enum("C", result_code/0,
-    [prefix("ML_RESULT_CODE_"), uppercase]).
+    [prefix("ML_"), uppercase]).
 :- pragma foreign_export_enum("C#", result_code/0,
-    [prefix("ML_RESULT_CODE_"), uppercase]).
+    [prefix("ML_"), uppercase]).
 :- pragma foreign_export_enum("Java", result_code/0,
-    [prefix("ML_RESULT_CODE_"), uppercase]).
+    [prefix("ML_"), uppercase]).
+
+:- type maybe_incomplete_result_code
+    --->    mirc_ok
+    ;       mirc_eof
+    ;       mirc_incomplete
+    ;       mirc_error.
+
+:- pragma foreign_export_enum("C", maybe_incomplete_result_code/0,
+    [prefix("ML_"), uppercase]).
+:- pragma foreign_export_enum("C#", maybe_incomplete_result_code/0,
+    [prefix("ML_"), uppercase]).
+:- pragma foreign_export_enum("Java", maybe_incomplete_result_code/0,
+    [prefix("ML_"), uppercase]).
 
     % Reads a character (code point) from specified stream. This may
     % involve converting external character encodings into Mercury's internal
@@ -2273,15 +2437,15 @@ read_char(Result, !IO) :-
     read_char(Stream, Result, !IO).
 
 read_char(Stream, Result, !IO) :-
-    read_char_code(Stream, Result0, Char, Error, !IO),
+    read_char_code(Stream, ResultCode, Char, Error, !IO),
     (
-        Result0 = ok,
+        ResultCode = result_code_ok,
         Result = ok(Char)
     ;
-        Result0 = eof,
+        ResultCode = result_code_eof,
         Result = eof
     ;
-        Result0 = error,
+        ResultCode = result_code_error,
         make_err_msg(Error, "read failed: ", Msg),
         Result = error(io_error(Msg))
     ).
@@ -2289,15 +2453,15 @@ read_char(Stream, Result, !IO) :-
 :- pragma inline(read_char_unboxed/5).
 
 read_char_unboxed(Stream, Result, Char, !IO) :-
-    read_char_code(Stream, Result0, Char, Error, !IO),
+    read_char_code(Stream, ResultCode, Char, Error, !IO),
     (
-        Result0 = ok,
+        ResultCode = result_code_ok,
         Result = ok
     ;
-        Result0 = eof,
+        ResultCode = result_code_eof,
         Result = eof
     ;
-        Result0 = error,
+        ResultCode = result_code_error,
         make_err_msg(Error, "read failed: ", Msg),
         Result = error(io_error(Msg))
     ).
@@ -2311,15 +2475,15 @@ read_byte(Result, !IO) :-
     read_byte(Stream, Result, !IO).
 
 read_byte(binary_input_stream(Stream), Result, !IO) :-
-    read_byte_val(input_stream(Stream), Result0, Byte, Error, !IO),
+    read_byte_val(input_stream(Stream), ResultCode, Byte, Error, !IO),
     (
-        Result0 = ok,
+        ResultCode = result_code_ok,
         Result = ok(Byte)
     ;
-        Result0 = eof,
+        ResultCode = result_code_eof,
         Result = eof
     ;
-        Result0 = error,
+        ResultCode = result_code_error,
         make_err_msg(Error, "read failed: ", Msg),
         Result = error(io_error(Msg))
     ).
@@ -2329,16 +2493,16 @@ read_binary_int8(Result, !IO) :-
     read_binary_int8(Stream, Result, !IO).
 
 read_binary_int8(binary_input_stream(Stream), Result, !IO) :-
-    read_byte_val(input_stream(Stream), Result0, Int, Error, !IO),
+    read_byte_val(input_stream(Stream), ResultCode, Int, Error, !IO),
     (
-        Result0 = ok,
+        ResultCode = result_code_ok,
         Int8 = cast_from_int(Int),
         Result = ok(Int8)
     ;
-        Result0 = eof,
+        ResultCode = result_code_eof,
         Result = eof
     ;
-        Result0 = error,
+        ResultCode = result_code_error,
         make_err_msg(Error, "read failed: ", Msg),
         Result = error(io_error(Msg))
     ).
@@ -2348,19 +2512,921 @@ read_binary_uint8(Result, !IO) :-
     read_binary_uint8(Stream, Result, !IO).
 
 read_binary_uint8(binary_input_stream(Stream), Result, !IO) :-
-    read_byte_val(input_stream(Stream), Result0, Int, Error, !IO),
+    read_byte_val(input_stream(Stream), ResultCode, Int, Error, !IO),
     (
-        Result0 = ok,
+        ResultCode = result_code_ok,
         UInt8 = cast_from_int(Int),
         Result = ok(UInt8)
     ;
-        Result0 = eof,
+        ResultCode = result_code_eof,
         Result = eof
     ;
-        Result0 = error,
+        ResultCode = result_code_error,
         make_err_msg(Error, "read failed: ", Msg),
         Result = error(io_error(Msg))
     ).
+
+%---------------------%
+
+read_binary_int16(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_int16(Stream, Result, !IO).
+
+read_binary_int16(Stream, Result, !IO) :-
+    ( if native_byte_order_is_big_endian then
+        read_binary_int16_be(Stream, Result, !IO)
+    else
+        read_binary_int16_le(Stream, Result, !IO)
+    ).
+
+%---------------------%
+
+read_binary_int16_le(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_int16_le(Stream, Result, !IO).
+
+read_binary_int16_le(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint16(Stream, little_endian, ResultCode, UInt16,
+        IncompleteBytes,
+        Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Int16 = cast_from_uint16(UInt16),
+        Result = ok(Int16)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+read_binary_int16_be(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_int16_be(Stream, Result, !IO).
+
+read_binary_int16_be(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint16(Stream, big_endian, ResultCode, UInt16,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Int16 = cast_from_uint16(UInt16),
+        Result = ok(Int16)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+read_binary_uint16(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_uint16(Stream, Result, !IO).
+
+read_binary_uint16(Stream, Result, !IO) :-
+    ( if native_byte_order_is_big_endian then
+        read_binary_uint16_be(Stream, Result, !IO)
+    else
+        read_binary_uint16_le(Stream, Result, !IO)
+    ).
+
+%---------------------%
+
+read_binary_uint16_le(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_uint16_le(Stream, Result, !IO).
+
+read_binary_uint16_le(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint16(Stream, little_endian, ResultCode, UInt16,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Result = ok(UInt16)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+read_binary_uint16_be(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_uint16_be(Stream, Result, !IO).
+
+read_binary_uint16_be(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint16(Stream, big_endian, ResultCode, UInt16,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Result = ok(UInt16)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+:- pred do_read_binary_uint16(stream::in, byte_order::in,
+    maybe_incomplete_result_code::out, uint16::out, list(uint8)::out,
+    system_error::out, io::di, io::uo) is det.
+
+:- pragma foreign_proc("C",
+    do_read_binary_uint16(Stream::in, ByteOrder::in, ResultCode::out,
+        UInt16::out, IncompleteBytes::out, Error::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
+        tabled_for_io],
+"
+    ML_do_read_binary_uintN(2, 16, Stream, ByteOrder, ResultCode, UInt16,
+        IncompleteBytes, Error);
+").
+
+:- pragma foreign_proc("C#",
+    do_read_binary_uint16(Stream::in, ByteOrder::in, ResultCode::out,
+        UInt16::out, IncompleteBytes::out, Error::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    byte[] buffer = new byte[2];
+    io.MR_MercuryFileStruct mf = Stream;
+    UInt16 = 0;
+    IncompleteBytes = list.empty_list();
+
+    int nread = 0;
+
+    if (mf.putback != -1) {
+        buffer[nread] = (byte) mf.putback;
+        nread++;
+        mf.putback = -1;
+    }
+
+    try {
+        for ( ; nread < 2; nread++) {
+            int b = mf.stream.ReadByte();
+            if (b == -1) {
+                break;
+            }
+            buffer[nread] = (byte) b;
+        }
+        if (nread < 2) {
+            if (nread > 0) {
+                ResultCode = io.ML_MIRC_INCOMPLETE;
+                IncompleteBytes = list.cons(buffer[0], IncompleteBytes);
+            } else {
+                ResultCode = io.ML_MIRC_EOF;
+            }
+        } else {
+            ResultCode = io.ML_MIRC_OK;
+            if (ByteOrder == io.ML_LITTLE_ENDIAN) {
+                UInt16 = (ushort) (buffer[1] << 8 | (buffer[0] & 0x00ff));
+            } else {
+                UInt16 = (ushort) (buffer[0] << 8 | (buffer[1] & 0x00ff));
+            }
+        }
+        Error = null;
+    } catch (System.Exception e) {
+        ResultCode = io.ML_MIRC_ERROR;
+        Error = e;
+    }
+").
+
+:- pragma foreign_proc("Java",
+    do_read_binary_uint16(Stream::in, ByteOrder::in, ResultCode::out,
+        UInt16::out, IncompleteBytes::out, Error::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    byte[] buffer = new byte[2];
+    MR_BinaryInputFile mf = (MR_BinaryInputFile) Stream;
+    UInt16 = 0;
+    IncompleteBytes = list.empty_list();
+
+    try {
+        int nread;
+        for (nread = 0; nread < 2; nread++) {
+            int next = mf.read_byte();
+            if (next == -1) {
+                break;
+            }
+            buffer[nread] = (byte) next;
+        }
+        if (nread < 2) {
+            if (nread > 0) {
+                ResultCode = io.ML_MIRC_INCOMPLETE;
+                IncompleteBytes = list.cons(buffer[0], IncompleteBytes);
+            } else {
+                ResultCode = io.ML_MIRC_EOF;
+            }
+        } else {
+            ResultCode = io.ML_MIRC_OK;
+            if (ByteOrder == io.ML_LITTLE_ENDIAN) {
+                UInt16 = (short) (buffer[1] << 8 | (buffer[0] & 0x00ff));
+            } else {
+                UInt16 = (short) (buffer[0] << 8 | (buffer[1] & 0x00ff));
+            }
+        }
+        Error = null;
+    } catch (java.lang.Exception e) {
+        ResultCode = io.ML_MIRC_ERROR;
+        Error = e;
+    }
+").
+
+do_read_binary_uint16(_, _, _, _, _, _, _, _) :-
+    sorry($module, "do_read_binary_uint16 NYI for Erlang").
+
+%---------------------%
+
+read_binary_int32(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_int32(Stream, Result, !IO).
+
+read_binary_int32(Stream, Result, !IO) :-
+    ( if native_byte_order_is_big_endian then
+        read_binary_int32_be(Stream, Result, !IO)
+    else
+        read_binary_int32_le(Stream, Result, !IO)
+    ).
+
+%---------------------%
+
+read_binary_int32_le(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_int32_le(Stream, Result, !IO).
+
+read_binary_int32_le(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint32(Stream, little_endian, ResultCode, UInt32,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Int32 = cast_from_uint32(UInt32),
+        Result = ok(Int32)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+read_binary_int32_be(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_int32_be(Stream, Result, !IO).
+
+read_binary_int32_be(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint32(Stream, big_endian, ResultCode, UInt32,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Int32 = cast_from_uint32(UInt32),
+        Result = ok(Int32)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+read_binary_uint32(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_uint32(Stream, Result, !IO).
+
+read_binary_uint32(Stream, Result, !IO) :-
+    ( if native_byte_order_is_big_endian then
+        read_binary_uint32_be(Stream, Result, !IO)
+    else
+        read_binary_uint32_le(Stream, Result, !IO)
+    ).
+
+%---------------------%
+
+read_binary_uint32_le(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_uint32_le(Stream, Result, !IO).
+
+read_binary_uint32_le(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint32(Stream, little_endian, ResultCode, UInt32,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Result = ok(UInt32)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+read_binary_uint32_be(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_uint32_be(Stream, Result, !IO).
+
+read_binary_uint32_be(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint32(Stream, big_endian, ResultCode, UInt32,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Result = ok(UInt32)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+:- pred do_read_binary_uint32(stream::in, byte_order::in,
+    maybe_incomplete_result_code::out, uint32::out, list(uint8)::out,
+    system_error::out, io::di, io::uo) is det.
+
+:- pragma foreign_proc("C",
+    do_read_binary_uint32(Stream::in, ByteOrder::in, ResultCode::out,
+        UInt32::out, IncompleteBytes::out, Error::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
+        tabled_for_io],
+"
+    ML_do_read_binary_uintN(4, 32, Stream, ByteOrder, ResultCode, UInt32,
+        IncompleteBytes, Error);
+").
+
+:- pragma foreign_proc("C#",
+    do_read_binary_uint32(Stream::in, ByteOrder::in, ResultCode::out,
+        UInt32::out, IncompleteBytes::out, Error::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    byte[] buffer = new byte[4];
+    io.MR_MercuryFileStruct mf = Stream;
+    UInt32 = 0;
+    IncompleteBytes = list.empty_list();
+
+    int nread = 0;
+
+    if (mf.putback != -1) {
+        buffer[nread] = (byte) mf.putback;
+        nread++;
+        mf.putback = -1;
+    }
+
+    try {
+        for ( ; nread < 4; nread++) {
+            int b = mf.stream.ReadByte();
+            if (b == -1) {
+                break;
+            }
+            buffer[nread] = (byte) b;
+        }
+        if (nread < 4) {
+            if (nread > 0) {
+                ResultCode = io.ML_MIRC_INCOMPLETE;
+                for (int i = nread - 1; i >= 0; i--) {
+                    IncompleteBytes = list.cons(buffer[i], IncompleteBytes);
+                }
+            } else {
+                ResultCode = io.ML_MIRC_EOF;
+            }
+        } else {
+            ResultCode = io.ML_MIRC_OK;
+            if (ByteOrder == io.ML_LITTLE_ENDIAN) {
+                UInt32 = (uint) (
+                    buffer[3] << 24 |
+                    buffer[2] << 16 |
+                    buffer[1] << 8  |
+                    buffer[0]);
+            } else {
+                UInt32 = (uint) (
+                    buffer[0] << 24 |
+                    buffer[1] << 16 |
+                    buffer[2] << 8  |
+                    buffer[3]);
+            }
+        }
+        Error = null;
+    } catch (System.Exception e) {
+        ResultCode = io.ML_MIRC_ERROR;
+        Error = e;
+    }
+").
+
+:- pragma foreign_proc("Java",
+    do_read_binary_uint32(Stream::in, ByteOrder::in, ResultCode::out,
+        UInt32::out, IncompleteBytes::out, Error::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    byte[] buffer = new byte[4];
+    MR_BinaryInputFile mf = (MR_BinaryInputFile) Stream;
+    UInt32 = 0;
+    IncompleteBytes = list.empty_list();
+
+    try {
+        int nread;
+        for (nread = 0; nread < 4; nread++) {
+            int next = mf.read_byte();
+            if (next == -1) {
+                break;
+            }
+            buffer[nread] = (byte) next;
+        }
+        if (nread < 4) {
+            if (nread > 0) {
+                ResultCode = io.ML_MIRC_INCOMPLETE;
+                for (int i = nread - 1; i >= 0; i--) {
+                    IncompleteBytes = list.cons(buffer[i], IncompleteBytes);
+                }
+            } else {
+                ResultCode = io.ML_MIRC_EOF;
+            }
+        } else {
+            ResultCode = io.ML_MIRC_OK;
+            if (ByteOrder == io.ML_LITTLE_ENDIAN) {
+                UInt32 =
+                    (buffer[3] & 0xff) << 24 |
+                    (buffer[2] & 0xff) << 16 |
+                    (buffer[1] & 0xff) << 8  |
+                    (buffer[0] & 0xff);
+            } else {
+                UInt32 =
+                    (buffer[0] & 0xff) << 24 |
+                    (buffer[1] & 0xff) << 16 |
+                    (buffer[2] & 0xff) << 8  |
+                    (buffer[3] & 0xff);
+            }
+        }
+        Error = null;
+    } catch (java.lang.Exception e) {
+        ResultCode = io.ML_MIRC_ERROR;
+        Error = e;
+    }
+").
+
+do_read_binary_uint32(_, _, _, _, _, _, _, _) :-
+    sorry($module, "do_read_binary_uint32 NYI for Erlang").
+
+%---------------------%
+
+read_binary_int64(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_int64(Stream, Result, !IO).
+
+read_binary_int64(Stream, Result, !IO) :-
+    ( if native_byte_order_is_big_endian then
+        read_binary_int64_be(Stream, Result, !IO)
+    else
+        read_binary_int64_le(Stream, Result, !IO)
+    ).
+
+%---------------------%
+
+read_binary_int64_le(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_int64_le(Stream, Result, !IO).
+
+read_binary_int64_le(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint64(Stream, little_endian, ResultCode, UInt64,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Int64 = cast_from_uint64(UInt64),
+        Result = ok(Int64)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+read_binary_int64_be(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_int64_be(Stream, Result, !IO).
+
+read_binary_int64_be(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint64(Stream, big_endian, ResultCode, UInt64,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Int64 = cast_from_uint64(UInt64),
+        Result = ok(Int64)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+read_binary_uint64(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_uint64(Stream, Result, !IO).
+
+read_binary_uint64(Stream, Result, !IO) :-
+    ( if native_byte_order_is_big_endian then
+        read_binary_uint64_be(Stream, Result, !IO)
+    else
+        read_binary_uint64_le(Stream, Result, !IO)
+    ).
+
+%---------------------%
+
+read_binary_uint64_le(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_uint64_le(Stream, Result, !IO).
+
+read_binary_uint64_le(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint64(Stream, little_endian, ResultCode, UInt64,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Result = ok(UInt64)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+read_binary_uint64_be(Result, !IO) :-
+    binary_input_stream(Stream, !IO),
+    read_binary_uint64_be(Stream, Result, !IO).
+
+read_binary_uint64_be(binary_input_stream(Stream), Result, !IO) :-
+    do_read_binary_uint64(Stream, big_endian, ResultCode, UInt64,
+        IncompleteBytes, Error, !IO),
+    (
+        ResultCode = mirc_ok,
+        Result = ok(UInt64)
+    ;
+        ResultCode = mirc_eof,
+        Result = eof
+    ;
+        ResultCode = mirc_incomplete,
+        Result = incomplete(IncompleteBytes)
+    ;
+        ResultCode = mirc_error,
+        make_err_msg(Error, "read failed: ", Msg),
+        Result = error(io_error(Msg))
+    ).
+
+%---------------------%
+
+:- pred do_read_binary_uint64(stream::in, byte_order::in,
+    maybe_incomplete_result_code::out, uint64::out, list(uint8)::out,
+    system_error::out, io::di, io::uo) is det.
+
+:- pragma foreign_proc("C",
+    do_read_binary_uint64(Stream::in, ByteOrder::in, ResultCode::out,
+        UInt64::out, IncompleteBytes::out, Error::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
+        tabled_for_io],
+"
+    ML_do_read_binary_uintN(8, 64, Stream, ByteOrder, ResultCode, UInt64,
+        IncompleteBytes, Error);
+").
+
+:- pragma foreign_proc("C#",
+    do_read_binary_uint64(Stream::in, ByteOrder::in, ResultCode::out,
+        UInt64::out, IncompleteBytes::out, Error::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    byte[] buffer = new byte[8];
+    io.MR_MercuryFileStruct mf = Stream;
+    UInt64 = 0;
+    IncompleteBytes = list.empty_list();
+
+    int nread = 0;
+
+    if (mf.putback != -1) {
+        buffer[nread] = (byte) mf.putback;
+        nread++;
+        mf.putback = -1;
+    }
+
+    try {
+        for ( ; nread < 8; nread++) {
+            int b = mf.stream.ReadByte();
+            if (b == -1) {
+                break;
+            }
+            buffer[nread] = (byte) b;
+        }
+        if (nread < 8) {
+            if (nread > 0) {
+                ResultCode = io.ML_MIRC_INCOMPLETE;
+                for (int i = nread - 1; i >=0; i--) {
+                    IncompleteBytes = list.cons(buffer[i], IncompleteBytes);
+                }
+            } else {
+                ResultCode = io.ML_MIRC_EOF;
+            }
+        } else {
+            ResultCode = io.ML_MIRC_OK;
+            if (ByteOrder == io.ML_LITTLE_ENDIAN) {
+                UInt64 = (ulong) (
+                    (ulong) buffer[7] << 56 |
+                    (ulong) buffer[6] << 48 |
+                    (ulong) buffer[5] << 40 |
+                    (ulong) buffer[4] << 32 |
+                    (ulong) buffer[3] << 24 |
+                    (ulong) buffer[2] << 16 |
+                    (ulong) buffer[1] << 8  |
+                    (ulong) buffer[0]);
+            } else {
+                UInt64 = (ulong) (
+                    (ulong) buffer[0] << 56 |
+                    (ulong) buffer[1] << 48 |
+                    (ulong) buffer[2] << 40 |
+                    (ulong) buffer[3] << 32 |
+                    (ulong) buffer[4] << 24 |
+                    (ulong) buffer[5] << 16 |
+                    (ulong) buffer[6] << 8  |
+                    (ulong) buffer[7]);
+            }
+        }
+        Error = null;
+    } catch (System.Exception e) {
+        ResultCode = io.ML_MIRC_ERROR;
+        Error = e;
+    }
+").
+
+:- pragma foreign_proc("Java",
+    do_read_binary_uint64(Stream::in, ByteOrder::in, ResultCode::out,
+        UInt64::out, IncompleteBytes::out, Error::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    byte[] buffer = new byte[8];
+    MR_BinaryInputFile mf = (MR_BinaryInputFile) Stream;
+    UInt64 = 0;
+    IncompleteBytes = list.empty_list();
+
+    try {
+        int nread;
+        for (nread = 0; nread < 8; nread++) {
+            int next = mf.read_byte();
+            if (next == -1) {
+                break;
+            }
+            buffer[nread] = (byte) next;
+        }
+        if (nread < 8) {
+            if (nread > 0) {
+                ResultCode = io.ML_MIRC_INCOMPLETE;
+                for (int i = nread - 1; i >= 0; i--) {
+                    IncompleteBytes = list.cons(buffer[i], IncompleteBytes);
+                }
+            } else {
+                ResultCode = io.ML_MIRC_EOF;
+            }
+        } else {
+            ResultCode = io.ML_MIRC_OK;
+            if (ByteOrder == io.ML_LITTLE_ENDIAN) {
+                UInt64 =
+                    (long) (buffer[7] & 0xff) << 56 |
+                    (long) (buffer[6] & 0xff) << 48 |
+                    (long) (buffer[5] & 0xff) << 40 |
+                    (long) (buffer[4] & 0xff) << 32 |
+                    (long) (buffer[3] & 0xff) << 24 |
+                    (long) (buffer[2] & 0xff) << 16 |
+                    (long) (buffer[1] & 0xff) << 8  |
+                    (long) (buffer[0] & 0xff);
+            } else {
+                UInt64 =
+                    (long) (buffer[0] & 0xff) << 56 |
+                    (long) (buffer[1] & 0xff) << 48 |
+                    (long) (buffer[2] & 0xff) << 40 |
+                    (long) (buffer[3] & 0xff) << 32 |
+                    (long) (buffer[4] & 0xff) << 24 |
+                    (long) (buffer[5] & 0xff) << 16 |
+                    (long) (buffer[6] & 0xff) << 8  |
+                    (long) (buffer[7] & 0xff);
+            }
+        }
+        Error = null;
+    } catch (java.lang.Exception e) {
+        ResultCode = io.ML_MIRC_ERROR;
+        Error = e;
+    }
+").
+
+do_read_binary_uint64(_, _, _, _, _, _, _, _) :-
+    sorry($module, "do_read_binary_uint64_le NYI for Erlang").
+
+%---------------------%
+
+:- type byte_order
+    --->    big_endian
+    ;       little_endian.
+
+:- pragma foreign_export_enum("C", byte_order/0,
+    [prefix("ML_"), uppercase]).
+:- pragma foreign_export_enum("Java", byte_order/0,
+    [prefix("ML_"), uppercase]).
+:- pragma foreign_export_enum("C#", byte_order/0,
+    [prefix("ML_"), uppercase]).
+
+:- pred native_byte_order_is_big_endian is semidet.
+
+:- pragma foreign_proc("C",
+    native_byte_order_is_big_endian,
+    [promise_pure, will_not_call_mercury, thread_safe],
+"
+    #if defined(MR_BIG_ENDIAN)
+        SUCCESS_INDICATOR = MR_TRUE;
+    #else
+        SUCCESS_INDICATOR = MR_FALSE;
+    #endif
+").
+
+:- pragma foreign_proc("C#",
+    native_byte_order_is_big_endian,
+    [promise_pure, will_not_call_mercury, thread_safe],
+"
+    SUCCESS_INDICATOR = !(BitConverter.IsLittleEndian);
+").
+
+:- pragma foreign_proc("Java",
+    native_byte_order_is_big_endian,
+    [promise_pure, will_not_call_mercury, thread_safe],
+"
+    SUCCESS_INDICATOR =
+        (java.nio.ByteOrder.nativeOrder() == java.nio.ByteOrder.BIG_ENDIAN);
+").
+
+native_byte_order_is_big_endian :-
+    sorry($module,
+        "native_byte_order_is_big_endian/0 NYI for Erlang").
+
+%---------------------%
+%
+% C implementation of reading multibyte integers from binary streams.
+%
+
+:- pragma foreign_decl("C", "
+
+// ML_N_BIT_UINT_T(n) expands to the name of an n-bit unsigned integer type
+// in C, if N is 8, 16, 32 or 64.
+//
+#define ML_N_BIT_INT_T(n) \
+    MR_PASTE3(uint, n, _t)
+
+// ML_REVERSE_BYTES_FUNC(n) expands to the name a function exported by the
+// Mercury runtime that can be used to reverse the bytes in an n-bit
+// unsigned integer, if N is 16, 32 or 64.
+//
+#define ML_REVERSE_BYTES_FUNC(n) \
+    MR_PASTE3(MR_uint, n, _reverse_bytes)
+
+// ML_build_uintN(int n, MR_Word byte_order, unsigned char *buffer,
+//     uintN_t value):
+//
+// Build an n-bit unsigned integer using the bytes stored in the array
+// 'buffer'. The order of the bytes in the buffer are given by 'byte_order'.
+// The result is assigned to the lvalue 'value'
+//
+// We have two definitions of this macro, one for big-endian machines
+// and one for little-endian machines.
+//
+#if defined(MR_BIG_ENDIAN)
+#define ML_build_uintN(n, byte_order, buffer, value)                 \
+    do {                                                             \
+        if (byte_order == ML_LITTLE_ENDIAN) {                        \
+            value = ML_REVERSE_BYTES_FUNC(n)(                        \
+                *((ML_N_BIT_INT_T(n) *) buffer));                    \
+        } else {                                                     \
+            value = *((ML_N_BIT_INT_T(n) *) buffer);                 \
+        }                                                            \
+    } while (0)
+#else
+#define ML_build_uintN(n, byte_order, buffer, value)                 \
+    do {                                                             \
+        if (byte_order == ML_LITTLE_ENDIAN) {                        \
+            value = *((ML_N_BIT_INT_T(n) *) buffer);                 \
+        } else {                                                     \
+            value = ML_REVERSE_BYTES_FUNC(n)(                        \
+                *((ML_N_BIT_INT_T(n) *) buffer));                    \
+        }                                                            \
+    } while (0)
+#endif
+
+// ML_do_read_binary_uintN(int nbytes, int nbits, MR_Word stream,
+//     MR_Word byte_order, MR_Word result_code, MR_Word result_value,
+//     MR_Word result_incomplete, MR_Word result_error):
+//
+// This macro implements the do_read_binary_uint{16 32,64}/8 predicates.
+// It expands to code for reading an 'nbits'-bit ('nbytes'-byte) unsigned
+// integer from the binary stream 'stream', with the bytes in the stream
+// being in 'byte_order' order.
+//
+// The result is returned as follows:
+//
+// 'result_code' is set the status code (maybe_incomplete_result_code/0)
+// for the read.
+// 'result_value' is the value of the integer read on a successful read
+// and zero otherwise.
+// 'result_incomplete' is the list of bytes read so far for an incomplete
+// read, and the empty list otherwise.
+// 'result_error' is the errno if an I/O error occurs, and zero otherwise.
+//
+#define ML_do_read_binary_uintN(nbytes, nbits, stream, byte_order,           \
+       result_code, result_value, result_incomplete, result_error)           \
+    do {                                                                     \
+        unsigned char buffer[nbytes];                                        \
+        size_t nread = MR_READ(*stream, buffer, nbytes);                     \
+        result_incomplete = MR_list_empty();                                 \
+                                                                             \
+        if (nread < nbytes) {                                                \
+            result_value = 0;                                                \
+            if (MR_FERROR(*stream)) {                                        \
+                result_code = ML_MIRC_ERROR,                                 \
+                result_error = errno;                                        \
+            } else if (nread > 0) {                                          \
+                int i;                                                       \
+                result_code = ML_MIRC_INCOMPLETE;                            \
+                for (i = nread - 1; i >= 0; i--) {                           \
+                    result_incomplete =                                      \
+                        MR_list_cons(buffer[i],                              \
+                        result_incomplete);                                  \
+                }                                                            \
+                result_error = 0;                                            \
+            } else {                                                         \
+                result_code = ML_MIRC_EOF;                                   \
+                result_error = 0;                                            \
+            }                                                                \
+        } else {                                                             \
+            result_code = ML_MIRC_OK;                                        \
+            ML_build_uintN(nbits, byte_order, buffer, result_value);         \
+            result_error = 0;                                                \
+        }                                                                    \
+    } while (0)
+").
+
+%---------------------%
 
 read_bitmap(!Bitmap, BytesRead, Result, !IO) :-
     binary_input_stream(Stream, !IO),
@@ -2410,18 +3476,18 @@ read_bitmap(binary_input_stream(Stream), Start, NumBytes, !Bitmap,
     % Default implementation for Erlang.
 do_read_bitmap(Stream, Start, NumBytes, !Bitmap, !BytesRead, Error, !IO) :-
     ( if NumBytes > 0 then
-        read_byte_val(input_stream(Stream), Result0, Byte, Error0, !IO),
+        read_byte_val(input_stream(Stream), ResultCode, Byte, Error0, !IO),
         (
-            Result0 = ok,
+            ResultCode = result_code_ok,
             !:Bitmap = !.Bitmap ^ unsafe_byte(Start) := Byte,
             !:BytesRead = !.BytesRead + 1,
             do_read_bitmap(Stream, Start + 1, NumBytes - 1,
                 !Bitmap, !BytesRead, Error, !IO)
         ;
-            Result0 = eof,
+            ResultCode = result_code_eof,
             Error = Error0
         ;
-            Result0 = error,
+            ResultCode = result_code_error,
             Error = Error0
         )
     else
@@ -2620,15 +3686,15 @@ read_line(Result, !IO) :-
     read_line(Stream, Result, !IO).
 
 read_line(Stream, Result, !IO) :-
-    read_line_2(Stream, Result0, Chars, Error, !IO),
+    read_line_2(Stream, ResultCode, Chars, Error, !IO),
     (
-        Result0 = ok,
+        ResultCode = result_code_ok,
         Result = ok(Chars)
     ;
-        Result0 = eof,
+        ResultCode = result_code_eof,
         Result = eof
     ;
-        Result0 = error,
+        ResultCode = result_code_error,
         make_err_msg(Error, "read failed: ", Msg),
         Result = error(io_error(Msg))
     ).
@@ -2639,9 +3705,9 @@ read_line(Stream, Result, !IO) :-
 read_line_2(Stream, Result, Chars, Error, !IO) :-
     read_char_code(Stream, Result0, Char, Error0, !IO),
     (
-        Result0 = ok,
+        Result0 = result_code_ok,
         ( if Char = '\n' then
-            Result = ok,
+            Result = result_code_ok,
             Chars = [Char],
             Error = Error0
         else
@@ -2649,8 +3715,8 @@ read_line_2(Stream, Result, Chars, Error, !IO) :-
             Chars = [Char | CharsTail] % lcmc
         )
     ;
-        ( Result0 = eof
-        ; Result0 = error
+        ( Result0 = result_code_eof
+        ; Result0 = result_code_error
         ),
         Result = Result0,
         Chars = [],
@@ -2783,9 +3849,9 @@ read_line_as_string(input_stream(Stream), Result, !IO) :-
 read_line_as_string_2(Stream, FirstCall, Res, String, Error, !IO) :-
     % XXX This is terribly inefficient, a better approach would be to
     % use a buffer like what is done for io.read_file_as_string.
-    read_char_code(input_stream(Stream), ReadChar, Char, Error0, !IO),
+    read_char_code(input_stream(Stream), ResultCode, Char, Error0, !IO),
     (
-        ReadChar = ok,
+        ResultCode = result_code_ok,
         ( if Char = '\n' then
             Res = ok,
             String = "\n",
@@ -2799,7 +3865,7 @@ read_line_as_string_2(Stream, FirstCall, Res, String, Error, !IO) :-
             string.first_char(String, Char, String0)
         )
     ;
-        ReadChar = eof,
+        ResultCode = result_code_eof,
         (
             FirstCall = yes,
             Res = eof
@@ -2810,7 +3876,7 @@ read_line_as_string_2(Stream, FirstCall, Res, String, Error, !IO) :-
         String = "",
         Error = Error0
     ;
-        ReadChar = error,
+        ResultCode = result_code_error,
         Res = error,
         String = "",
         Error = Error0
@@ -3047,6 +4113,7 @@ binary_input_stream_file_size(binary_input_stream(Stream), Size, !IO) :-
 #endif
 #include ""mercury_types.h""            // for MR_Integer
 #include ""mercury_library_types.h""    // for MercuryFilePtr
+#include ""mercury_int.h""              // for MR_*_reverse_bytes
 ").
 
 :- pragma foreign_proc("C",
@@ -4091,17 +5158,17 @@ read_into_array(Stream, !Array, !Pos, Size, Error, !IO) :-
     ( if !.Pos >= Size then
         Error = no_error
     else
-        read_char_code(Stream, Result, Char, Error0, !IO),
+        read_char_code(Stream, ResultCode, Char, Error0, !IO),
         (
-            Result = ok,
+            ResultCode = result_code_ok,
             array.set(!.Pos, Char, !Array),
             !:Pos = !.Pos + 1,
             read_into_array(Stream, !Array, !Pos, Size, Error, !IO)
         ;
-            Result = eof,
+            ResultCode = result_code_eof,
             Error = Error0
         ;
-            Result = error,
+            ResultCode = result_code_error,
             Error = Error0
         )
     ).
@@ -4477,6 +5544,14 @@ putback_char(Char, !IO) :-
 putback_byte(Char, !IO) :-
     binary_input_stream(Stream, !IO),
     putback_byte(Stream, Char, !IO).
+
+putback_int8(Int8, !IO) :-
+    binary_input_stream(Stream, !IO),
+    putback_int8(Stream, Int8, !IO).
+
+putback_uint8(UInt8, !IO) :-
+    binary_input_stream(Stream, !IO),
+    putback_uint8(Stream, UInt8, !IO).
 
 read(Result, !IO) :-
     term_io.read_term(ReadResult, !IO),
@@ -5646,16 +6721,14 @@ int             ML_fprintf(MercuryFilePtr mf, const char *format, ...);
 
 :- pragma foreign_code("Java",
 "
-    // All text files (including stdin/stdout/stderr) are run through
-    // stream readers/writers, which use the default charset encoding.
-    // In other words, while strings and characters are stored internally
-    // using unicode, all files are read and written using the default
-    // system charset.
+    // While strings are stored internally as UTF-16, all text file I/O
+    // (including stdin/stdout/stderr) is run through stream readers/writers
+    // that use UTF-8 encoding.
     // Binary files are opened via RandomAccessFile, which supports seek,
     // but not character encoding/decoding or buffering.
     // Binary stdin and stdout are a special case. They are opened via
     // FileInput/OutputStreams and seeking is controlled through use of
-    // FileChannels (requiring Java versions >= 1.4).
+    // FileChannels.
     //
     // The use of the methods in this implementation is not very flexible.
     // You may not perform text mode operations on a binary file or vice versa.
@@ -7576,14 +8649,14 @@ throw_on_close_error(Error, !IO) :-
 % Input predicates.
 %
 
-read_char_code(input_stream(Stream), Result, Char, Error, !IO) :-
-    read_char_code_2(Stream, Result, Char, Error, !IO).
+read_char_code(input_stream(Stream), ResultCode, Char, Error, !IO) :-
+    read_char_code_2(Stream, ResultCode, Char, Error, !IO).
 
 :- pred read_char_code_2(stream::in, result_code::out, char::out,
     system_error::out, io::di, io::uo) is det.
 
 :- pragma foreign_proc("C",
-    read_char_code_2(Stream::in, Result::out, Char::out, Error::out,
+    read_char_code_2(Stream::in, ResultCode::out, Char::out, Error::out,
         _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, tabled_for_io,
         does_not_affect_liveness, no_sharing, may_not_duplicate],
@@ -7597,15 +8670,15 @@ read_char_code(input_stream(Stream), Result, Char, Error, !IO) :-
     c = mercury_get_byte(Stream);
     uc = c;
     if (uc <= 0x7f) {
-        Result = ML_RESULT_CODE_OK;
+        ResultCode = ML_RESULT_CODE_OK;
         Char = uc;
         Error = 0;
     } else if (c == EOF) {
         if (MR_FERROR(*Stream)) {
-            Result = ML_RESULT_CODE_ERROR;
+            ResultCode = ML_RESULT_CODE_ERROR;
             Error = errno;
         } else {
-            Result = ML_RESULT_CODE_EOF;
+            ResultCode = ML_RESULT_CODE_EOF;
             Error = 0;
         }
         Char = 0;
@@ -7626,7 +8699,7 @@ read_char_code(input_stream(Stream), Result, Char, Error, !IO) :-
                 uc = c;
                 if (c == EOF) {
                     // Illegal byte sequence whether EOF or I/O error.
-                    Result = ML_RESULT_CODE_ERROR;
+                    ResultCode = ML_RESULT_CODE_ERROR;
                     Error = MR_FERROR(*Stream) ? errno : EILSEQ;
                     Char = 0;
                     break;
@@ -7637,18 +8710,18 @@ read_char_code(input_stream(Stream), Result, Char, Error, !IO) :-
                 buf[i] = '\\0';
                 c = MR_utf8_get(buf, 0);
                 if (c < 0) {
-                    Result = ML_RESULT_CODE_ERROR;
+                    ResultCode = ML_RESULT_CODE_ERROR;
                     Error = EILSEQ;
                     Char = 0;
                 } else {
-                    Result = ML_RESULT_CODE_OK;
+                    ResultCode = ML_RESULT_CODE_OK;
                     Char = c;
                     Error = 0;
                 }
             }
         } else {
             // Invalid lead byte.
-            Result = ML_RESULT_CODE_ERROR;
+            ResultCode = ML_RESULT_CODE_ERROR;
             Error = EILSEQ;
             Char = 0;
         }
@@ -7661,7 +8734,7 @@ read_byte_val(input_stream(Stream), Result, ByteVal, Error, !IO) :-
 :- pred read_byte_val_2(stream::in, result_code::out, int::out,
     system_error::out, io::di, io::uo) is det.
 :- pragma foreign_proc("C",
-    read_byte_val_2(Stream::in, Result::out, ByteVal::out, Error::out,
+    read_byte_val_2(Stream::in, ResultCode::out, ByteVal::out, Error::out,
         _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, tabled_for_io,
         does_not_affect_liveness, no_sharing],
@@ -7669,15 +8742,15 @@ read_byte_val(input_stream(Stream), Result, ByteVal, Error, !IO) :-
     int b = mercury_get_byte(Stream);
     if (b == EOF) {
         if (MR_FERROR(*Stream)) {
-            Result = ML_RESULT_CODE_ERROR;
+            ResultCode = ML_RESULT_CODE_ERROR;
             Error = errno;
         } else {
-            Result = ML_RESULT_CODE_EOF;
+            ResultCode = ML_RESULT_CODE_EOF;
             Error = 0;
         }
         ByteVal = 0;
     } else {
-        Result = ML_RESULT_CODE_OK;
+        ResultCode = ML_RESULT_CODE_OK;
         ByteVal = b;
         Error = 0;
     }
@@ -7745,8 +8818,41 @@ putback_byte(binary_input_stream(Stream), Character, !IO) :-
     }
 ").
 
+putback_int8(binary_input_stream(Stream), Int8, !IO) :-
+    UInt8 = uint8.cast_from_int8(Int8),
+    putback_uint8_2(Stream, UInt8, Ok, !IO),
+    (
+        Ok = yes
+    ;
+        Ok = no,
+        throw(io_error("failed to put back int8"))
+    ).
+
+putback_uint8(binary_input_stream(Stream), UInt8, !IO) :-
+    putback_uint8_2(Stream, UInt8, Ok, !IO),
+    (
+        Ok = yes
+    ;
+        Ok = no,
+        throw(io_error("failed to put back uint8"))
+    ).
+
+:- pred putback_uint8_2(stream::in, uint8::in, bool::out, io::di, io::uo) is det.
+:- pragma foreign_proc("C",
+    putback_uint8_2(Stream::in, UInt8::in, Ok::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, tabled_for_io,
+        does_not_affect_liveness, no_sharing],
+"
+    MercuryFilePtr mf = Stream;
+    if (MR_UNGETCH(*mf, UInt8) == EOF) {
+        Ok = MR_FALSE;
+    } else {
+        Ok = MR_TRUE;
+    }
+").
+
 :- pragma foreign_proc("C#",
-    read_char_code_2(File::in, Result::out, Char::out, Error::out,
+    read_char_code_2(File::in, ResultCode::out, Char::out, Error::out,
         _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure],
 "
@@ -7754,28 +8860,28 @@ putback_byte(binary_input_stream(Stream), Character, !IO) :-
     try {
         int c = io.mercury_getc(mf);
         if (c == -1) {
-            Result = io.ML_RESULT_CODE_EOF;
+            ResultCode = io.ML_RESULT_CODE_EOF;
             Char = 0;
         } else {
-            Result = io.ML_RESULT_CODE_OK;
+            ResultCode = io.ML_RESULT_CODE_OK;
             Char = c;
         }
         Error = null;
     } catch (System.Exception e) {
-        Result = io.ML_RESULT_CODE_ERROR;
+        ResultCode = io.ML_RESULT_CODE_ERROR;
         Char = 0;
         Error = e;
     }
 ").
 
 :- pragma foreign_proc("C#",
-    read_byte_val_2(File::in, Result::out, ByteVal::out, Error::out,
+    read_byte_val_2(File::in, ResultCode::out, ByteVal::out, Error::out,
         _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure],
 "
     io.MR_MercuryFileStruct mf = File;
     if (mf.putback != -1) {
-        Result = io.ML_RESULT_CODE_OK;
+        ResultCode = io.ML_RESULT_CODE_OK;
         ByteVal = mf.putback;
         Error = null;
         mf.putback = -1;
@@ -7783,15 +8889,15 @@ putback_byte(binary_input_stream(Stream), Character, !IO) :-
         try {
             int b = mf.stream.ReadByte();
             if (b == -1) {
-                Result = io.ML_RESULT_CODE_EOF;
+                ResultCode = io.ML_RESULT_CODE_EOF;
                 ByteVal = 0;
             } else {
-                Result = io.ML_RESULT_CODE_OK;
+                ResultCode = io.ML_RESULT_CODE_OK;
                 ByteVal = b;
             }
             Error = null;
         } catch (System.Exception e) {
-            Result = io.ML_RESULT_CODE_ERROR;
+            ResultCode = io.ML_RESULT_CODE_ERROR;
             ByteVal = 0;
             Error = e;
         }
@@ -7827,45 +8933,58 @@ putback_byte(binary_input_stream(Stream), Character, !IO) :-
     }
 ").
 
+:- pragma foreign_proc("C#",
+    putback_uint8_2(File::in, UInt8::in, Ok::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure],
+"
+    io.MR_MercuryFileStruct mf = File;
+    if (mf.putback == -1) {
+        mf.putback = UInt8;
+        Ok = mr_bool.YES;
+    } else {
+        Ok = mr_bool.NO;
+    }
+").
+
 :- pragma foreign_proc("Java",
-    read_char_code_2(File::in, Result::out, CharCode::out, Error::out,
+    read_char_code_2(File::in, ResultCode::out, CharCode::out, Error::out,
         _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
 "
     try {
         int c = ((io.MR_TextInputFile) File).read_char();
         if (c == -1) {
-            Result = io.ML_RESULT_CODE_EOF;
+            ResultCode = io.ML_RESULT_CODE_EOF;
             CharCode = 0;
         } else {
-            Result = io.ML_RESULT_CODE_OK;
+            ResultCode = io.ML_RESULT_CODE_OK;
             CharCode = c;
         }
         Error = null;
     } catch (java.io.IOException e) {
-        Result = io.ML_RESULT_CODE_ERROR;
+        ResultCode = io.ML_RESULT_CODE_ERROR;
         CharCode = 0;
         Error = e;
     }
 ").
 
 :- pragma foreign_proc("Java",
-    read_byte_val_2(File::in, Result::out, ByteVal::out, Error::out,
+    read_byte_val_2(File::in, ResultCode::out, ByteVal::out, Error::out,
         _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
 "
     try {
         int b = ((io.MR_BinaryInputFile) File).read_byte();
         if (b == -1) {
-            Result = io.ML_RESULT_CODE_EOF;
+            ResultCode = io.ML_RESULT_CODE_EOF;
             ByteVal = 0;
         } else {
-            Result = io.ML_RESULT_CODE_OK;
+            ResultCode = io.ML_RESULT_CODE_OK;
             ByteVal = b;
         }
         Error = null;
     } catch (java.io.IOException e) {
-        Result = io.ML_RESULT_CODE_ERROR;
+        ResultCode = io.ML_RESULT_CODE_ERROR;
         ByteVal = 0;
         Error = e;
     }
@@ -7887,45 +9006,53 @@ putback_byte(binary_input_stream(Stream), Character, !IO) :-
     Ok = bool.YES;
 ").
 
+:- pragma foreign_proc("Java",
+    putback_uint8_2(File::in, UInt8::in, Ok::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
+"
+    ((io.MR_BinaryInputFile) File).ungetc((byte) UInt8);
+    Ok = bool.YES;
+").
+
 :- pragma foreign_proc("Erlang",
-    read_char_code_2(Stream::in, Result::out, Char::out, Error::out,
+    read_char_code_2(Stream::in, ResultCode::out, Char::out, Error::out,
         _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, tabled_for_io,
         does_not_affect_liveness],
 "
     case mercury__io:mercury_getc(Stream) of
         C when is_integer(C) ->
-            Result = {ok},
+            ResultCode = {ok},
             Char = C,
             Error = ok;
         eof ->
-            Result = {eof},
+            ResultCode = {eof},
             Char = 0,
             Error = ok;
         {error, Reason} ->
-            Result = {error},
+            ResultCode = {error},
             Char = 0,
             Error = {error, Reason}
     end
 ").
 
 :- pragma foreign_proc("Erlang",
-    read_byte_val_2(Stream::in, Result::out, ByteVal::out, Error::out,
+    read_byte_val_2(Stream::in, ResultCode::out, ByteVal::out, Error::out,
         _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, tabled_for_io,
         does_not_affect_liveness],
 "
     case mercury__io:mercury_getc(Stream) of
         B when is_integer(B) ->
-            Result = {ok},
+            ResultCode = {ok},
             ByteVal = B,
             Error = ok;
         eof ->
-            Result = {eof},
+            ResultCode = {eof},
             ByteVal = 0,
             Error = ok;
         {error, Reason} ->
-            Result = {error},
+            ResultCode = {error},
             ByteVal = 0,
             Error = {error, Reason}
     end
@@ -7944,6 +9071,14 @@ putback_byte(binary_input_stream(Stream), Character, !IO) :-
     [will_not_call_mercury, promise_pure, tabled_for_io],
 "
     mercury__io:mercury_putback(File, Byte),
+    Ok = {yes}
+").
+
+:- pragma foreign_proc("Erlang",
+    putback_uint8_2(File::in, UInt8::in, Ok::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, tabled_for_io],
+"
+    mercury__io:mercury_putback(File, UInt8),
     Ok = {yes}
 ").
 
@@ -9969,6 +11104,8 @@ binary_output_stream(binary_output_stream(Stream), !IO) :-
     Stream = mercury_current_binary_output();
 ").
 
+%---------------------------------------------------------------------------%
+
 :- pragma foreign_proc("C",
     get_line_number(LineNum::out, _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, tabled_for_io,
@@ -9976,11 +11113,20 @@ binary_output_stream(binary_output_stream(Stream), !IO) :-
 "
     LineNum = MR_line_number(*mercury_current_text_input());
 ").
+:- pragma foreign_proc("C#",
+    get_line_number(LineNum::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, tabled_for_io],
+"
+    LineNum = io.mercury_current_text_input.line_number;
+").
 
 get_line_number(input_stream(Stream), LineNum, !IO) :-
     get_line_number_2(Stream, LineNum, !IO).
 
+%---------------------%
+
 :- pred get_line_number_2(stream::in, int::out, io::di, io::uo) is det.
+
 :- pragma foreign_proc("C",
     get_line_number_2(Stream::in, LineNum::out, _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, tabled_for_io,
@@ -9988,6 +11134,14 @@ get_line_number(input_stream(Stream), LineNum, !IO) :-
 "
     LineNum = MR_line_number(*Stream);
 ").
+:- pragma foreign_proc("C#",
+    get_line_number_2(Stream::in, LineNum::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, tabled_for_io],
+"
+    LineNum = Stream.line_number;
+").
+
+%---------------------%
 
 :- pragma foreign_proc("C",
     set_line_number(LineNum::in, _IO0::di, _IO::uo),
@@ -9996,12 +11150,19 @@ get_line_number(input_stream(Stream), LineNum, !IO) :-
 "
     MR_line_number(*mercury_current_text_input()) = LineNum;
 ").
+:- pragma foreign_proc("C#",
+    set_line_number(LineNum::in, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, tabled_for_io],
+"
+    io.mercury_current_text_input.line_number = LineNum;
+").
 
 set_line_number(input_stream(Stream), LineNum, !IO) :-
     set_line_number_2(Stream, LineNum,!IO).
 
-:- pred set_line_number_2(stream::in, int::in, io::di, io::uo)
-    is det.
+%---------------------%
+
+:- pred set_line_number_2(stream::in, int::in, io::di, io::uo) is det.
 
 :- pragma foreign_proc("C",
     set_line_number_2(Stream::in, LineNum::in, _IO0::di, _IO::uo),
@@ -10010,6 +11171,14 @@ set_line_number(input_stream(Stream), LineNum, !IO) :-
 "
     MR_line_number(*Stream) = LineNum;
 ").
+:- pragma foreign_proc("C#",
+    set_line_number_2(Stream::in, LineNum::in, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, tabled_for_io],
+"{
+    Stream.line_number = LineNum;
+}").
+
+%---------------------%
 
 :- pragma foreign_proc("C",
     get_output_line_number(LineNum::out, _IO0::di, _IO::uo),
@@ -10018,9 +11187,17 @@ set_line_number(input_stream(Stream), LineNum, !IO) :-
 "
     LineNum = MR_line_number(*mercury_current_text_output());
 ").
+:- pragma foreign_proc("C#",
+    get_output_line_number(LineNum::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, tabled_for_io],
+"
+    LineNum = io.mercury_current_text_output.line_number;
+").
 
 get_output_line_number(output_stream(Stream), LineNum, !IO) :-
     get_output_line_number_2(Stream, LineNum, !IO).
+
+%---------------------%
 
 :- pred get_output_line_number_2(stream::in, int::out, io::di, io::uo)
     is det.
@@ -10032,6 +11209,14 @@ get_output_line_number(output_stream(Stream), LineNum, !IO) :-
 "
     LineNum = MR_line_number(*Stream);
 ").
+:- pragma foreign_proc("C#",
+    get_output_line_number_2(Stream::in, LineNum::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, tabled_for_io],
+"{
+    LineNum = Stream.line_number;
+}").
+
+%---------------------%
 
 :- pragma foreign_proc("C",
     set_output_line_number(LineNum::in, _IO0::di, _IO::uo),
@@ -10040,11 +11225,20 @@ get_output_line_number(output_stream(Stream), LineNum, !IO) :-
 "
     MR_line_number(*mercury_current_text_output()) = LineNum;
 ").
+:- pragma foreign_proc("C#",
+    set_output_line_number(LineNum::in, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, tabled_for_io],
+"
+    io.mercury_current_text_output.line_number = LineNum;
+").
 
 set_output_line_number(output_stream(Stream), LineNum, !IO) :-
     set_output_line_number_2(Stream, LineNum, !IO).
 
+%---------------------%
+
 :- pred set_output_line_number_2(stream::in, int::in, io::di, io::uo) is det.
+
 :- pragma foreign_proc("C",
     set_output_line_number_2(Stream::in, LineNum::in, _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, tabled_for_io,
@@ -10052,12 +11246,20 @@ set_output_line_number(output_stream(Stream), LineNum, !IO) :-
 "
     MR_line_number(*Stream) = LineNum;
 ").
+:- pragma foreign_proc("C#",
+    set_output_line_number_2(Stream::in, LineNum::in, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, tabled_for_io],
+"{
+    Stream.line_number = LineNum;
+}").
+
+%---------------------------------------------------------------------------%
 
 set_input_stream(input_stream(NewStream), input_stream(OutStream), !IO) :-
     set_input_stream_2(NewStream, OutStream, !IO).
 
-:- pred set_input_stream_2(stream::in, stream::out, io::di, io::uo)
-    is det.
+:- pred set_input_stream_2(stream::in, stream::out, io::di, io::uo) is det.
+
 :- pragma foreign_proc("C",
     set_input_stream_2(NewStream::in, OutStream::out, _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io,
@@ -10069,8 +11271,9 @@ set_input_stream(input_stream(NewStream), input_stream(OutStream), !IO) :-
         mercury_current_text_input_index);
 ").
 
-set_output_stream(output_stream(NewStream), output_stream(OutStream),
-        !IO) :-
+%---------------------%
+
+set_output_stream(output_stream(NewStream), output_stream(OutStream), !IO) :-
     set_output_stream_2(NewStream, OutStream, !IO).
 
 :- pred set_output_stream_2(stream::in, stream::out, io::di, io::uo) is det.
@@ -10086,12 +11289,15 @@ set_output_stream(output_stream(NewStream), output_stream(OutStream),
         mercury_current_text_output_index);
 ").
 
+%---------------------%
+
 set_binary_input_stream(binary_input_stream(NewStream),
         binary_input_stream(OutStream), !IO) :-
     set_binary_input_stream_2(NewStream, OutStream, !IO).
 
 :- pred set_binary_input_stream_2(stream::in, stream::out,
     io::di, io::uo) is det.
+
 :- pragma foreign_proc("C",
     set_binary_input_stream_2(NewStream::in, OutStream::out,
         _IO0::di, _IO::uo),
@@ -10108,8 +11314,11 @@ set_binary_output_stream(binary_output_stream(NewStream),
         binary_output_stream(OutStream), !IO) :-
     set_binary_output_stream_2(NewStream, OutStream, !IO).
 
+%---------------------%
+
 :- pred set_binary_output_stream_2(stream::in, stream::out,
     io::di, io::uo) is det.
+
 :- pragma foreign_proc("C",
     set_binary_output_stream_2(NewStream::in, OutStream::out,
         _IO0::di, _IO::uo),
@@ -10121,6 +11330,8 @@ set_binary_output_stream(binary_output_stream(NewStream),
     MR_set_thread_local_mutable(MercuryFilePtr, NewStream,
         mercury_current_binary_output_index);
 ").
+
+%---------------------------------------------------------------------------%
 
 :- pragma foreign_proc("C#",
     stdin_stream_2(Stream::out, _IO0::di, _IO::uo),
@@ -10185,61 +11396,7 @@ set_binary_output_stream(binary_output_stream(NewStream),
     Stream = io.mercury_current_binary_output;
 ").
 
-:- pragma foreign_proc("C#",
-    get_line_number(LineNum::out, _IO0::di, _IO::uo),
-    [will_not_call_mercury, promise_pure, tabled_for_io],
-"
-    LineNum = io.mercury_current_text_input.line_number;
-").
-
-:- pragma foreign_proc("C#",
-    get_line_number_2(Stream::in, LineNum::out, _IO0::di, _IO::uo),
-    [will_not_call_mercury, promise_pure, tabled_for_io],
-"
-    LineNum = Stream.line_number;
-").
-
-:- pragma foreign_proc("C#",
-    set_line_number(LineNum::in, _IO0::di, _IO::uo),
-    [will_not_call_mercury, promise_pure, tabled_for_io],
-"
-    io.mercury_current_text_input.line_number = LineNum;
-").
-
-:- pragma foreign_proc("C#",
-    set_line_number_2(Stream::in, LineNum::in, _IO0::di, _IO::uo),
-    [will_not_call_mercury, promise_pure, tabled_for_io],
-"{
-    Stream.line_number = LineNum;
-}").
-
-:- pragma foreign_proc("C#",
-    get_output_line_number(LineNum::out, _IO0::di, _IO::uo),
-    [will_not_call_mercury, promise_pure, tabled_for_io],
-"
-    LineNum = io.mercury_current_text_output.line_number;
-").
-
-:- pragma foreign_proc("C#",
-    get_output_line_number_2(Stream::in, LineNum::out, _IO0::di, _IO::uo),
-    [will_not_call_mercury, promise_pure, tabled_for_io],
-"{
-    LineNum = Stream.line_number;
-}").
-
-:- pragma foreign_proc("C#",
-    set_output_line_number(LineNum::in, _IO0::di, _IO::uo),
-    [will_not_call_mercury, promise_pure, tabled_for_io],
-"
-    io.mercury_current_text_output.line_number = LineNum;
-").
-
-:- pragma foreign_proc("C#",
-    set_output_line_number_2(Stream::in, LineNum::in, _IO0::di, _IO::uo),
-    [will_not_call_mercury, promise_pure, tabled_for_io],
-"{
-    Stream.line_number = LineNum;
-}").
+%---------------------%
 
 :- pragma foreign_proc("C#",
     set_input_stream_2(NewStream::in, OutStream::out, _IO0::di, _IO::uo),
@@ -11195,11 +12352,14 @@ decode_system_command_exit_code(Status, yes, Status, no, 0).
 %---------------------%
 
 :- pragma foreign_proc("Java",
-    progname(_Default::in, PrognameOut::out, _IO0::di, _IO::uo),
+    progname(Default::in, PrognameOut::out, _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, tabled_for_io, thread_safe,
         may_not_duplicate],
 "
     PrognameOut = jmercury.runtime.JavaInternal.progname;
+    if (PrognameOut == null) {
+        PrognameOut = Default;
+    }
 ").
 
 :- pragma foreign_proc("Java",
@@ -11208,9 +12368,13 @@ decode_system_command_exit_code(Status, yes, Status, no, 0).
 "
     String[] arg_vector = jmercury.runtime.JavaInternal.args;
     Args = list.empty_list();
-    // arg_vector does not include the executable name.
-    for (int i = arg_vector.length - 1; i >= 0; --i) {
-        Args = list.cons(arg_vector[i], Args);
+    // The argument vector may not be set if Mercury is being used
+    // as a library by a native Java application.
+    if (arg_vector != null) {
+        // arg_vector does not include the executable name.
+        for (int i = arg_vector.length - 1; i >= 0; --i) {
+            Args = list.cons(arg_vector[i], Args);
+        }
     }
 ").
 
@@ -11779,7 +12943,7 @@ import java.util.Random;
         end.
 ").
 
-%-----------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
 :- pred do_make_temp_directory(string::in, string::in, string::in, string::in,
     string::out, system_error::out, io::di, io::uo) is det.
@@ -12599,6 +13763,24 @@ result_to_stream_result(error(Error)) = error(Error).
     )
 ].
 
+:- instance stream.reader(binary_input_stream, int8, io, io.error)
+    where
+[
+    ( get(Stream, Result, !IO) :-
+        read_binary_int8(Stream, Result0, !IO),
+        Result = result_to_stream_result(Result0)
+    )
+].
+
+:- instance stream.reader(binary_input_stream, uint8, io, io.error)
+    where
+[
+    ( get(Stream, Result, !IO) :-
+        read_binary_uint8(Stream, Result0, !IO),
+        Result = result_to_stream_result(Result0)
+    )
+].
+
 :- instance stream.bulk_reader(binary_input_stream, int,
         bitmap, io, io.error)
     where
@@ -12614,6 +13796,18 @@ result_to_stream_result(error(Error)) = error(Error).
     where
 [
     pred(unget/4) is putback_byte
+].
+
+:- instance stream.putback(binary_input_stream, int8, io, io.error)
+    where
+[
+    pred(unget/4) is putback_int8
+].
+
+:- instance stream.putback(binary_input_stream, uint8, io, io.error)
+    where
+[
+    pred(unget/4) is putback_uint8
 ].
 
 :- instance stream.seekable(binary_input_stream, io)

@@ -126,7 +126,7 @@ real_main(!IO) :-
 
     unlimit_stack(!IO),
 
-    % Replace all @file arguments with the contents of the file
+    % Replace all @file arguments with the contents of the file.
     expand_at_file_arguments(CmdLineArgs, Res, !IO),
     (
         Res = ok(ExpandedCmdLineArgs),
@@ -137,7 +137,8 @@ real_main(!IO) :-
 
         io.write_string(io.error_message(E), !IO),
         io.nl(!IO)
-    ).
+    ),
+    write_translations_record_if_any(!IO).
 
     % Expand @File arguments.
     % Each argument in the above form is replaced with a list of arguments
@@ -829,7 +830,7 @@ compile_with_module_options(Globals, ModuleName, DetectedGradeFlags,
     ;
         InvokedByMake = no,
         Builder =
-            (pred(BuildGlobals::in, _::in, Succeeded0::out, X::in, X::out,
+            ( pred(BuildGlobals::in, _::in, Succeeded0::out, X::in, X::out,
                     IO0::di, IO::uo) is det :-
                 Compile(BuildGlobals, Succeeded0, IO0, IO)
             ),
@@ -948,8 +949,7 @@ process_compiler_arg(Globals, OpModeArgs, DetectedGradeFlags, OptionVariables,
 
 :- pred process_compiler_arg_build(op_mode_args::in, file_or_module::in,
     list(string)::in, globals::in, list(string)::in, bool::out,
-    unit::in, {list(string), list(string)}::out,
-    io::di, io::uo) is det.
+    unit::in, {list(string), list(string)}::out, io::di, io::uo) is det.
 
 process_compiler_arg_build(OpModeArgs, FileOrModule, OptionArgs, Globals, _,
         Succeeded, _DummyInput, {Modules, ExtraObjFiles}, !IO) :-
@@ -968,6 +968,32 @@ version_numbers_return_timestamp(yes) = do_return_timestamp.
 
 do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
         ModulesToLink, ExtraObjFiles, !IO) :-
+    % XXX ITEM_LIST There is an inconsistency between the various OpModeArgs
+    % that construct a module_and_imports structure in how they do it.
+    %
+    % The op modes that generate one or more dependency files call predicates
+    % in generate_dep_d_files.m, which all end up constructing that structure
+    % by calling init_module_and_imports. On the other hand, the op modes
+    % that augment the module call augment_and_process_module, which
+    % calls grab_imported_modules, which constructs that structure
+    % using make_module_and_imports. And once they create an initial
+    % module_and_imports structure, they subject that structure to
+    % different further processing.
+    %
+    % I (zs) think that this is probably the reason why the .d files
+    % of a program contain one set of contents just after the program's
+    % dependencies are built (or rebuilt), and a different set of contents
+    % after we start generated interface files and target code for the
+    % program's modules.
+    %
+    % This may be *acceptable* behavior if the approaches using
+    % init_module_and_imports and make_module_and_imports both compute
+    % supersets of all the actual dependencies, even if e.g.
+    % the approach using make_module_and_imports computes a *bigger*
+    % superset. However, it is definitely not *good* behavior.
+    %
+    % The best fix seems to be to use a single approach, and that
+    % approach should be the one using make_module_and_imports.
     (
         OpModeArgs = opma_generate_dependencies,
         (
@@ -1004,25 +1030,23 @@ do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
         else
             module_name_to_file_name(Globals, do_create_dirs, ".ugly",
                 ModuleName, OutputFileName, !IO),
-            convert_to_mercury_src(Globals, OutputFileName, ParseTreeSrc, !IO)
+            output_parse_tree_src(Globals, OutputFileName, ParseTreeSrc, !IO)
         ),
         ModulesToLink = [],
         ExtraObjFiles = []
     ;
+        OpModeArgs = opma_make_interface(InterfaceFile),
         (
-            OpModeArgs = opma_make_private_interface,
-            ProcessModule = call_make_private_interface(Globals0),
+            InterfaceFile = omif_int3,
+            ReturnTimestamp = dont_return_timestamp
+        ;
+            InterfaceFile = omif_int0,
             globals.lookup_bool_option(Globals0, generate_item_version_numbers,
                 GenerateVersionNumbers),
             ReturnTimestamp =
                 version_numbers_return_timestamp(GenerateVersionNumbers)
         ;
-            OpModeArgs = opma_make_short_interface,
-            ProcessModule = call_make_short_interface(Globals0),
-            ReturnTimestamp = dont_return_timestamp
-        ;
-            OpModeArgs = opma_make_interface,
-            ProcessModule = call_make_interface(Globals0),
+            InterfaceFile = omif_int1_int2,
             globals.lookup_bool_option(Globals0, generate_item_version_numbers,
                 GenerateVersionNumbers),
             ReturnTimestamp =
@@ -1042,10 +1066,24 @@ do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
             % XXX _NumErrors
             write_error_specs(Specs, Globals, 0, _NumWarnings, 0, _NumErrors,
                 !IO),
-            list.foldl(
-                apply_process_module(ProcessModule, FileName, ModuleName,
-                    MaybeTimestamp),
-                RawCompUnits, !IO)
+            (
+                InterfaceFile = omif_int0,
+                list.foldl(
+                    write_private_interface_file_int0(Globals0,
+                        FileName, ModuleName, MaybeTimestamp),
+                    RawCompUnits, !IO)
+            ;
+                InterfaceFile = omif_int1_int2,
+                list.foldl(
+                    write_interface_file_int1_int2(Globals0,
+                        FileName, ModuleName, MaybeTimestamp),
+                    RawCompUnits, !IO)
+            ;
+                InterfaceFile = omif_int3,
+                list.foldl(
+                    write_short_interface_file_int3(Globals0, FileName),
+                    RawCompUnits, !IO)
+            )
         ),
         ModulesToLink = [],
         ExtraObjFiles = []
@@ -1163,41 +1201,6 @@ find_timestamp_files_2(Globals, TimestampSuffix, ModuleName, TimestampFiles,
         ModuleName, FileName, !IO),
     TimestampFiles = [FileName].
 
-%---------------------%
-
-:- pred call_make_interface(globals::in, file_name::in, module_name::in,
-    maybe(timestamp)::in, raw_compilation_unit::in, io::di, io::uo) is det.
-
-call_make_interface(Globals, SourceFileName, SourceFileModuleName,
-        MaybeTimestamp, RawCompUnit, !IO) :-
-    write_interface_file(Globals, SourceFileName, SourceFileModuleName,
-        RawCompUnit, MaybeTimestamp, !IO).
-
-:- pred call_make_short_interface(globals::in, file_name::in, module_name::in,
-    maybe(timestamp)::in, raw_compilation_unit::in, io::di, io::uo) is det.
-
-call_make_short_interface(Globals, SourceFileName, _, _, RawCompUnit, !IO) :-
-    write_short_interface_file(Globals, SourceFileName, RawCompUnit, !IO).
-
-:- pred call_make_private_interface(globals::in, file_name::in,
-    module_name::in, maybe(timestamp)::in, raw_compilation_unit::in,
-    io::di, io::uo) is det.
-
-call_make_private_interface(Globals, SourceFileName, SourceFileModuleName,
-        MaybeTimestamp, RawCompUnit, !IO) :-
-    write_private_interface_file(Globals, SourceFileName, SourceFileModuleName,
-        RawCompUnit, MaybeTimestamp, !IO).
-
-:- pred apply_process_module(
-    pred(file_name, module_name, maybe(timestamp), raw_compilation_unit,
-        io, io)::in(pred(in, in, in, in, di, uo) is det),
-    file_name::in, module_name::in, maybe(timestamp)::in,
-    raw_compilation_unit::in, io::di, io::uo) is det.
-
-apply_process_module(ProcessModule, FileName, ModuleName, MaybeTimestamp,
-        RawCompUnit, !IO) :-
-    ProcessModule(FileName, ModuleName, MaybeTimestamp, RawCompUnit, !IO).
-
 %---------------------------------------------------------------------------%
 
 :- pred read_augment_and_process_module(globals::in,
@@ -1239,11 +1242,12 @@ read_augment_and_process_module(Globals0, OpModeAugment, OptionArgs,
             RawCompUnits0, Specs0, Specs1),
         (
             MaybeModulesToRecompile = some_modules(ModulesToRecompile),
-            ToRecompile = (pred(RawCompUnit::in) is semidet :-
-                RawCompUnit =
-                    raw_compilation_unit(RawCompUnitModuleName, _, _),
-                list.member(RawCompUnitModuleName, ModulesToRecompile)
-            ),
+            ToRecompile =
+                ( pred(RawCompUnit::in) is semidet :-
+                    RawCompUnit =
+                        raw_compilation_unit(RawCompUnitModuleName, _, _),
+                    list.member(RawCompUnitModuleName, ModulesToRecompile)
+                ),
             list.filter(ToRecompile, RawCompUnits0, RawCompUnitsToCompile)
         ;
             MaybeModulesToRecompile = all_modules,
@@ -1532,8 +1536,10 @@ augment_and_process_module(Globals, OpModeAugment,
         SourceFileName, SourceFileModuleName, MaybeTimestamp,
         NestedSubModules0, HaveReadModuleMaps, FindTimestampFiles,
         RawCompUnit, ExtraObjFiles, !Specs, !IO) :-
-    check_for_no_exports(Globals, RawCompUnit, !Specs),
-    RawCompUnit = raw_compilation_unit(ModuleName, _, _),
+    RawCompUnit = raw_compilation_unit(ModuleName, ModuleNameContext,
+        RawItemBlocks),
+    check_interface_item_blocks_for_no_exports(Globals,
+        ModuleName, ModuleNameContext, RawItemBlocks, !Specs),
     ( if ModuleName = SourceFileModuleName then
         NestedSubModules = NestedSubModules0
     else

@@ -91,7 +91,8 @@
 :- func make_empty_array = (array(T)::array_uo) is det.
 
     % init(Size, Init, Array) creates an array with bounds from 0
-    % to Size-1, with each element initialized to Init.
+    % to Size-1, with each element initialized to Init.  Throws an
+    % exception if Size < 0.
     %
 :- pred init(int, T, array(T)).
 :- mode init(in, in, array_uo) is det.
@@ -111,7 +112,7 @@
     % Create an array with bounds from 0 to Size - 1 using the function
     % Generate to set the initial value of each element of the array.
     % The initial value of the element at index K will be the result of
-    % calling the function Generate(K).
+    % calling the function Generate(K). Throws an exception if Size < 0.
     %
 :- func generate(int::in, (func(int) = T)::in) = (array(T)::array_uo)
     is det.
@@ -264,7 +265,7 @@
 %:- mode unsafe_lookup(array_ui, in, out) is det.
 :- mode unsafe_lookup(in, in, out) is det.
 
-    % set sets the nth element of an array, and returns the
+    % set sets the N'th element of an array, and returns the
     % resulting array (good opportunity for destructive update ;-).
     % Throws an exception if the index is out of bounds.
     %
@@ -332,6 +333,18 @@
 :- func 'unsafe_elem :='(int, array(T), T) = array(T).
 :- mode 'unsafe_elem :='(in, array_di, in) = array_uo is det.
 
+    % swap(I, J, !Array):
+    % Swap the item in the I'th position with the item in the J'th position.
+    % Throws an exception if either of I or J is out-of-bounds.
+    %
+:- pred swap(int, int, array(T), array(T)).
+:- mode swap(in, in, array_di, array_uo) is det.
+
+    % As above, but omit the bounds checks.
+    %
+:- pred unsafe_swap(int, int, array(T), array(T)).
+:- mode unsafe_swap(in, in, array_di, array_uo) is det.
+
     % Returns every element of the array, one by one.
     %
 :- pred member(array(T)::in, T::out) is nondet.
@@ -351,31 +364,48 @@
 
     % resize(Size, Init, Array0, Array):
     % The array is expanded or shrunk to make it fit the new size `Size'.
-    % Any new entries are filled with `Init'.
+    % Any new entries are filled with `Init'. Throws an exception if
+    % `Size' < 0.
     %
 :- pred resize(int, T, array(T), array(T)).
 :- mode resize(in, in, array_di, array_uo) is det.
 
     % resize(Array0, Size, Init) = Array:
     % The array is expanded or shrunk to make it fit the new size `Size'.
-    % Any new entries are filled with `Init'.
+    % Any new entries are filled with `Init'. Throws an exception if
+    % `Size' < 0.
     %
 :- func resize(array(T), int, T) = array(T).
 :- mode resize(array_di, in, in) = array_uo is det.
 
     % shrink(Size, Array0, Array):
     % The array is shrunk to make it fit the new size `Size'.
-    % Throws an exception if `Size' is larger than the size of `Array0'.
+    % Throws an exception if `Size' is larger than the size of `Array0' or
+    % if `Size' < 0.
     %
 :- pred shrink(int, array(T), array(T)).
 :- mode shrink(in, array_di, array_uo) is det.
 
     % shrink(Array0, Size) = Array:
     % The array is shrunk to make it fit the new size `Size'.
-    % Throws an exception if `Size' is larger than the size of `Array0'.
+    % Throws an exception if `Size' is larger than the size of `Array0' or
+    % if `Size' < 0.
     %
 :- func shrink(array(T), int) = array(T).
 :- mode shrink(array_di, in) = array_uo is det.
+
+    % fill(Item, Array0, Array):
+    % Sets every element of the array to `Elem'.
+    %
+:- pred fill(T::in, array(T)::array_di, array(T)::array_uo) is det.
+
+    % fill_range(Item, Lo, Hi, !Array):
+    % Sets every element of the array with index in the range Lo..Hi
+    % (inclusive) to Item. Throws a software_error/1 exception if Lo > Hi.
+    % Throws an index_out_of_bounds/0 exception if Lo or Hi is out of bounds.
+    %
+:- pred fill_range(T::in, int::in, int::in,
+     array(T)::array_di, array(T)::array_uo) is det.
 
     % from_list takes a list, and returns an array containing those
     % elements in the same order that they occurred in the list.
@@ -399,9 +429,11 @@
 %:- mode to_list(array_ui) = out is det.
 :- mode to_list(in) = out is det.
 
-    % fetch_items takes an array and a lower and upper index,
-    % and places those items in the array between these indices into a list.
-    % It is an error if either index is out of bounds.
+    % fetch_items(Array, Lo, Hi, List):
+    % Returns a list containing the items in the array with index in the range
+    % Lo..Hi (both inclusive) in the same order that they occurred in the
+    % array. Returns an empty list if Hi < Lo. Throws an index_out_of_bounds/0
+    % exception if Lo or Hi is out of bounds.
     %
 :- pred fetch_items(array(T), int, int, list(T)).
 :- mode fetch_items(in, in, in, out) is det.
@@ -1130,7 +1162,6 @@ ML_shrink_array(System.Array arr, int Size)
         return tmp;
     }
 }
-
 ").
 
 :- pragma foreign_code("Java", "
@@ -1379,6 +1410,35 @@ ML_array_resize(Object Array0, int Size, Object Item)
         return Array;
     }
 }
+
+public static Object
+ML_array_fill(Object array, int fromIndex, int toIndex, Object Item)
+{
+    if (array == null) {
+        return null;
+    }
+
+    if (array instanceof int[]) {
+        java.util.Arrays.fill(((int []) array), fromIndex, toIndex, (Integer) Item);
+    } else if (array instanceof double[]) {
+        java.util.Arrays.fill(((double []) array), fromIndex, toIndex, (Double) Item);
+    } else if (array instanceof byte[]) {
+        java.util.Arrays.fill(((byte []) array), fromIndex, toIndex, (Byte) Item);
+    } else if (array instanceof short[]) {
+        java.util.Arrays.fill(((short []) array), fromIndex, toIndex,(Short) Item);
+    } else if (array instanceof long[]) {
+        java.util.Arrays.fill(((long []) array), fromIndex, toIndex,(Long) Item);
+    } else if (array instanceof char[]) {
+        java.util.Arrays.fill(((char []) array), fromIndex, toIndex,(Character) Item);
+    } else if (array instanceof boolean[]) {
+        java.util.Arrays.fill(((boolean []) array), fromIndex, toIndex,(Boolean) Item);
+    } else if (array instanceof float[]) {
+        java.util.Arrays.fill(((float []) array), fromIndex, toIndex,(Float) Item);
+    } else {
+        java.util.Arrays.fill(((Object []) array), fromIndex, toIndex,Item);
+    }
+    return array;
+}
 ").
 
 init(N, X) = A :-
@@ -1405,6 +1465,24 @@ init(Size, Item, Array) :-
     ML_alloc_array(Array, Size + 1, MR_ALLOC_ID);
     ML_init_array(Array, Size, Item);
 ").
+:- pragma foreign_proc("C#",
+    init_2(Size::in, Item::in, Array::array_uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    Array = array.ML_new_array(Size, Item);
+").
+:- pragma foreign_proc("Java",
+    init_2(Size::in, Item::in, Array::array_uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    Array = array.ML_new_array(Size, Item, true);
+").
+:- pragma foreign_proc("Erlang",
+    init_2(Size::in, Item::in, Array::array_uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    Array = erlang:make_tuple(Size, Item)
+").
 
 make_empty_array = A :-
     array.make_empty_array(A).
@@ -1416,13 +1494,6 @@ make_empty_array = A :-
 "
     ML_alloc_array(Array, 1, MR_ALLOC_ID);
     ML_init_array(Array, 0, 0);
-").
-
-:- pragma foreign_proc("C#",
-    init_2(Size::in, Item::in, Array::array_uo),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Array = array.ML_new_array(Size, Item);
 ").
 :- pragma foreign_proc("C#",
     make_empty_array(Array::array_uo),
@@ -1437,32 +1508,18 @@ make_empty_array = A :-
     // a non-trivial amount of work.
     Array = null;
 ").
-
-:- pragma foreign_proc("Erlang",
-    init_2(Size::in, Item::in, Array::array_uo),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Array = erlang:make_tuple(Size, Item)
-").
-:- pragma foreign_proc("Erlang",
-    make_empty_array(Array::array_uo),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Array = {}
-").
-
-:- pragma foreign_proc("Java",
-    init_2(Size::in, Item::in, Array::array_uo),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Array = array.ML_new_array(Size, Item, true);
-").
 :- pragma foreign_proc("Java",
     make_empty_array(Array::array_uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
     // XXX as per C#
     Array = null;
+").
+:- pragma foreign_proc("Erlang",
+    make_empty_array(Array::array_uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    Array = {}
 ").
 
 %---------------------------------------------------------------------------%
@@ -1923,8 +1980,18 @@ ML_resize_array(MR_ArrayPtr array, MR_ArrayPtr old_array,
 resize(!.Array, N, X) = !:Array :-
     array.resize(N, X, !Array).
 
+resize(N, X, !Array) :-
+    ( if N  < 0 then
+        unexpected($pred, "cannot resize to a negative size")
+    else
+        do_resize(N, X, !Array)
+    ).
+
+:- pred do_resize(int, T, array(T), array(T)).
+:- mode do_resize(in, in, array_di, array_uo) is det.
+
 :- pragma foreign_proc("C",
-    resize(Size::in, Item::in, Array0::array_di, Array::array_uo),
+    do_resize(Size::in, Item::in, Array0::array_di, Array::array_uo),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness,
         sharing(yes(int, T, array(T), array(T)), [
@@ -1942,14 +2009,14 @@ resize(!.Array, N, X) = !:Array :-
 ").
 
 :- pragma foreign_proc("C#",
-    resize(Size::in, Item::in, Array0::array_di, Array::array_uo),
+    do_resize(Size::in, Item::in, Array0::array_di, Array::array_uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
     Array = array.ML_array_resize(Array0, Size, Item);
 ").
 
 :- pragma foreign_proc("Erlang",
-    resize(Size::in, Item::in, Array0::array_di, Array::array_uo),
+    do_resize(Size::in, Item::in, Array0::array_di, Array::array_uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
     InitialSize = size(Array0),
@@ -1966,7 +2033,7 @@ resize(!.Array, N, X) = !:Array :-
 ").
 
 :- pragma foreign_proc("Java",
-    resize(Size::in, Item::in, Array0::array_di, Array::array_uo),
+    do_resize(Size::in, Item::in, Array0::array_di, Array::array_uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
     Array = jmercury.array.ML_array_resize(Array0, Size, Item);
@@ -2008,7 +2075,9 @@ shrink(!.Array, N) = !:Array :-
 
 shrink(Size, !Array) :-
     OldSize = array.size(!.Array),
-    ( if Size > OldSize then
+    ( if Size < 0 then
+        unexpected($pred, "cannot shrink to a negative size")
+    else if Size > OldSize then
         unexpected($pred, "cannot shrink to a larger size")
     else if Size = OldSize then
         true
@@ -2055,8 +2124,16 @@ shrink(Size, !Array) :-
         Array = new int[Size];
     } else if (Array0 instanceof double[]) {
         Array = new double[Size];
+    } else if (Array0 instanceof byte[]) {
+        Array = new byte[Size];
+    } else if (Array0 instanceof short[]) {
+        Array = new short[Size];
+    } else if (Array0 instanceof long[]) {
+        Array = new long[Size];
     } else if (Array0 instanceof char[]) {
         Array = new char[Size];
+    } else if (Array0 instanceof float[]) {
+        Array = new float[Size];
     } else if (Array0 instanceof boolean[]) {
         Array = new boolean[Size];
     } else {
@@ -2067,6 +2144,44 @@ shrink(Size, !Array) :-
         System.arraycopy(Array0, 0, Array, 0, Size);
     }
 ").
+
+%---------------------------------------------------------------------------%
+
+fill(Item, !Array) :-
+    array.bounds(!.Array, Min, Max),
+    do_fill_range(Item, Min, Max, !Array).
+
+fill_range(Item, Lo, Hi, !Array) :-
+    ( if Lo > Hi then
+        unexpected($pred, "empty range")
+    else if not in_bounds(!.Array, Lo) then
+        arg_out_of_bounds_error(!.Array, "second", "fill_range", Lo)
+    else if not in_bounds(!.Array, Hi) then
+        arg_out_of_bounds_error(!.Array, "third", "fill_range", Hi)
+    else
+        do_fill_range(Item, Lo, Hi, !Array)
+    ).
+
+%---------------------------------------------------------------------------%
+
+:- pred do_fill_range(T::in, int::in, int::in,
+     array(T)::array_di, array(T)::array_uo) is det.
+
+:- pragma foreign_proc("Java",
+    do_fill_range(Item::in, Lo::in, Hi::in,
+        Array0::array_di, Array::array_uo),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    Array = jmercury.array.ML_array_fill(Array0, Lo, Hi + 1, Item);
+").
+
+do_fill_range(Item, Lo, Hi, !Array) :-
+    ( if Lo =< Hi then
+        array.unsafe_set(Lo, Item, !Array),
+        do_fill_range(Item, Lo + 1, Hi, !Array)
+    else
+        true
+    ).
 
 %---------------------------------------------------------------------------%
 
@@ -2141,9 +2256,21 @@ copy(A1) = A2 :-
     } else if (Array0 instanceof double[]) {
         Size = ((double[]) Array0).length;
         Array = new double[Size];
+    } else if (Array0 instanceof byte[]) {
+        Size = ((byte[]) Array0).length;
+        Array = new byte[Size];
+    } else if (Array0 instanceof short[]) {
+        Size = ((short[]) Array0).length;
+        Array = new short[Size];
+    } else if (Array0 instanceof long[]) {
+        Size = ((long[]) Array0).length;
+        Array = new long[Size];
     } else if (Array0 instanceof char[]) {
         Size = ((char[]) Array0).length;
         Array = new char[Size];
+    } else if (Array0 instanceof float[]) {
+        Size = ((float[]) Array0).length;
+        Array = new float[Size];
     } else if (Array0 instanceof boolean[]) {
         Size = ((boolean[]) Array0).length;
         Array = new boolean[Size];
@@ -2207,8 +2334,12 @@ to_list(Array) = List :-
     to_list(Array, List).
 
 to_list(Array, List) :-
-    bounds(Array, Low, High),
-    fetch_items(Array, Low, High, List).
+    ( if is_empty(Array) then
+        List = []
+    else
+        bounds(Array, Low, High),
+        fetch_items(Array, Low, High, List)
+    ).
 
 %---------------------------------------------------------------------------%
 
@@ -2216,21 +2347,18 @@ fetch_items(Array, Low, High) = List :-
     fetch_items(Array, Low, High, List).
 
 fetch_items(Array, Low, High, List) :-
-    ( if
-        High < Low
-    then
+    ( if not in_bounds(Array, Low) then
+        arg_out_of_bounds_error(Array, "second", "fetch_items", Low)
+    else if not in_bounds(Array, High) then
+        arg_out_of_bounds_error(Array, "third", "fetch_items", High)
+    else if High < Low then
         % If High is less than Low, then there cannot be any array indexes
         % within the range Low -> High (inclusive). This can happen when
         % calling to_list/2 on the empty array. Testing for this condition
         % here rather than in to_list/2 is more general.
         List = []
-    else if
-        array.in_bounds(Array, Low),
-        array.in_bounds(Array, High)
-    then
-        List = do_foldr_func(func(X, Xs) = [X | Xs], Array, [], Low, High)
     else
-        unexpected($pred, "one or more indexes is out-of-bounds")
+        List = do_foldr_func(func(X, Xs) = [X | Xs], Array, [], Low, High)
     ).
 
 %---------------------------------------------------------------------------%
@@ -2313,6 +2441,23 @@ map_2(N, Size, Closure, OldArray, !NewArray) :-
         array.unsafe_set(N, NewElem, !NewArray),
         map_2(N + 1, Size, Closure, OldArray, !NewArray)
     ).
+
+%---------------------------------------------------------------------------%
+
+swap(I, J, !Array) :-
+    ( if not in_bounds(!.Array, I) then
+        arg_out_of_bounds_error(!.Array, "first", "array.swap", I)
+    else if not in_bounds(!.Array, J) then
+        arg_out_of_bounds_error(!.Array, "second", "array.swap", J)
+    else
+        unsafe_swap(I, J, !Array)
+    ).
+
+unsafe_swap(I, J, !Array) :-
+    array.unsafe_lookup(!.Array, I, IVal),
+    array.unsafe_lookup(!.Array, J, JVal),
+    array.unsafe_set(I, JVal, !Array),
+    array.unsafe_set(J, IVal, !Array).
 
 %---------------------------------------------------------------------------%
 
@@ -3283,6 +3428,18 @@ out_of_bounds_error(Array, Index, PredName) :-
     array.bounds(Array, Min, Max),
     string.format("%s: index %d not in range [%d, %d]",
         [s(PredName), i(Index), i(Min), i(Max)], Msg),
+    throw(array.index_out_of_bounds(Msg)).
+
+    % Like the above, but for use in cases where the are multiple arguments
+    % that correspond to array indices.
+    %
+:- pred arg_out_of_bounds_error(array(T), string, string, int).
+:- mode arg_out_of_bounds_error(in, in, in, in) is erroneous.
+
+arg_out_of_bounds_error(Array, ArgPosn, PredName, Index) :-
+    array.bounds(Array, Min, Max),
+    string.format("%s argument of %s: index %d not in range [%d, %d]",
+        [s(ArgPosn), s(PredName), i(Index), i(Min), i(Max)], Msg),
     throw(array.index_out_of_bounds(Msg)).
 
 %---------------------------------------------------------------------------%

@@ -51,10 +51,14 @@ instead, we include the code of the callee next to the code of the caller,
 and use local (within a function) branches to transfer control.
 </ul>
 This means that TRO is a less general form of last call optimization,
-because it is applicable only
-when the call is a first order, so the callee is statically known,
-and the caller and callee are in the same compilation unit,
+because it is applicable only when
+<ul>
+<li>
+the call is a first order, so the callee is statically known, and
+<li>
+the caller and callee are in the same compilation unit,
 so they can be compiled together into a single target language function.
+</ul>
 
 <p>
 Tail recursion optimization is applicable
@@ -83,7 +87,7 @@ len(L, Len0, Len) :-
   ;
     L = [_ | T],
     Len1 = Len0 + 1,
-      len(T, Len1, Len)
+    len(T, Len1, Len)
   ).
 </pre>
 
@@ -423,7 +427,7 @@ yielding the code represented by "body of procedure ..." above.
 We call these <em>inner</em> or <em>wrapped</em> procedures.
 If the TSCC contains N procedures,
 then each C function we generate will contain N wrapped procedures.
-We call entirety of each C function
+We call the entirety of each C function
 an <em>outer</em> or <em>container</em> procedure,
 since each contains two or more wrapped procedures.
 We must generate a container procedure
@@ -455,7 +459,7 @@ because (except in the case of self-tail-calls)
 the actual parameters in the caller and the formal parameters of the callee
 will come from two different procedures, and thus from two different varsets.
 Since every procedure's varset contains variables
-whose numbers are allocated consecutively from zero,
+whose numbers are allocated consecutively from one,
 the sets of variable numbers in two different procedures
 will of course greatly overlap,
 and it is possible for a variable with a given number
@@ -778,7 +782,7 @@ as part of the vector of return values.
 <p>
 When an output argument is passed by reference,
 we create a tscc_output_ptr_M_VarName variable for it
-as well as a tscc_output_ptr_M_VarName variable.
+as well as a tscc_output_M_VarName variable.
 The parts of a container function
 corresponding to such an output argument are the following.
 
