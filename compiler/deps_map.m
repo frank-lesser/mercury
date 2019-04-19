@@ -18,7 +18,9 @@
 :- module parse_tree.deps_map.
 :- interface.
 
+:- import_module libs.
 :- import_module libs.globals.
+:- import_module mdbcomp.
 :- import_module mdbcomp.sym_name.
 :- import_module parse_tree.file_names.
 :- import_module parse_tree.module_imports.
@@ -106,8 +108,8 @@ get_submodule_kind(ModuleName, DepsMap) = Kind :-
     ( if list.last(Ancestors, Parent) then
         map.lookup(DepsMap, ModuleName, deps(_, ModuleImports)),
         map.lookup(DepsMap, Parent, deps(_, ParentImports)),
-        ModuleFileName = ModuleImports ^ mai_source_file_name,
-        ParentFileName = ParentImports ^ mai_source_file_name,
+        module_and_imports_get_source_file_name(ModuleImports, ModuleFileName),
+        module_and_imports_get_source_file_name(ParentImports, ParentFileName),
         ( if ModuleFileName = ParentFileName then
             Kind = nested_submodule
         else
@@ -159,25 +161,28 @@ generate_deps_map_step(Globals, Module, ExpectationContexts,
         Done0 = not_yet_processed,
         Deps = deps(already_processed, ModuleImports),
         map.det_update(Module, Deps, !DepsMap),
-        ForeignImportedModules = ModuleImports ^ mai_foreign_import_modules,
+        module_and_imports_get_foreign_import_modules(ModuleImports,
+            ForeignImportedModules),
         % We could keep a list of the modules we have already processed
         % and subtract it from the sets of modules we add here, but doing that
         % actually leads to a small slowdown.
-        ModuleNameContext = ModuleImports ^ mai_module_name_context,
-        ParentModuleNames = ModuleImports ^ mai_parent_deps,
+        module_and_imports_get_module_name_context(ModuleImports,
+            ModuleNameContext),
+        module_and_imports_get_ancestors(ModuleImports, AncestorModuleNames),
         ForeignImportedModuleNames =
             get_all_foreign_import_modules(ForeignImportedModules),
         set.foldl(add_module_name_and_context(ModuleNameContext),
-            ParentModuleNames, !Modules),
+            AncestorModuleNames, !Modules),
         set.foldl(add_module_name_and_context(ModuleNameContext),
             ForeignImportedModuleNames, !Modules),
 
-        multi_map.to_assoc_list(ModuleImports ^ mai_int_deps,
-            IntDepsModuleNamesContexts),
-        multi_map.to_assoc_list(ModuleImports ^ mai_imp_deps,
-            ImpDepsModuleNamesContexts),
-        multi_map.to_assoc_list(ModuleImports ^ mai_public_children,
-            ChildrenModuleNamesContexts),
+        module_and_imports_get_int_deps_map(ModuleImports, IntDepsMap),
+        module_and_imports_get_imp_deps_map(ModuleImports, ImpDepsMap),
+        module_and_imports_get_public_children_map(ModuleImports,
+            PublicChildren),
+        multi_map.to_assoc_list(IntDepsMap, IntDepsModuleNamesContexts),
+        multi_map.to_assoc_list(ImpDepsMap, ImpDepsModuleNamesContexts),
+        multi_map.to_assoc_list(PublicChildren, ChildrenModuleNamesContexts),
         list.foldl(add_module_name_with_contexts,
             IntDepsModuleNamesContexts, !Modules),
         list.foldl(add_module_name_with_contexts,
@@ -266,7 +271,7 @@ read_dependencies(Globals, ModuleName, ExpectationContexts, Search,
         ParseTreeInt = parse_tree_int(_, _, ModuleContext,
             _MaybeVersionNumbers, IntIncl, ImpIncls, IntAvails, ImpAvails,
             IntItems, ImpItems),
-        int_imp_items_to_item_blocks(ModuleContext,
+        int_imp_items_to_item_blocks(ModuleName,
             ms_interface, ms_implementation, IntIncl, ImpIncls,
             IntAvails, ImpAvails, IntItems, ImpItems, RawItemBlocks),
         RawCompUnits =
@@ -275,7 +280,7 @@ read_dependencies(Globals, ModuleName, ExpectationContexts, Search,
         FileName = FileName0,
         split_into_compilation_units_perform_checks(ParseTreeSrc,
             RawCompUnits, SrcSpecs, Specs),
-        write_error_specs(Specs, Globals, 0, _NumWarnings, 0, _NumErrors, !IO)
+        write_error_specs_ignore(Specs, Globals, !IO)
     ),
     RawCompUnitModuleNames =
         list.map(raw_compilation_unit_project_name, RawCompUnits),

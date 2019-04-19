@@ -20,8 +20,10 @@
 :- import_module hlds.
 :- import_module hlds.hlds_module.
 :- import_module hlds.hlds_pred.
+:- import_module mdbcomp.
 :- import_module mdbcomp.prim_data.
 :- import_module mdbcomp.sym_name.
+:- import_module parse_tree.
 :- import_module parse_tree.prog_data.
 :- import_module parse_tree.module_imports.
 
@@ -91,6 +93,7 @@
 :- import_module hlds.hlds_data.
 :- import_module hlds.hlds_inst_mode.
 :- import_module hlds.pred_table.
+:- import_module libs.
 :- import_module libs.file_util.
 :- import_module libs.globals.
 :- import_module libs.options.
@@ -776,8 +779,7 @@ find_matching_functors(ModuleInfo, SymName, Arity, ResolvedConstructors) :-
                         type_ctor_to_item_name(TypeCtor),
                         item_name(ConsName, ConsArity))
                 else
-                    unexpected($module, $pred,
-                        "weird cons_id in hlds_field_defn")
+                    unexpected($pred, "weird cons_id in hlds_field_defn")
                 )
             ), FieldDefns)
     else
@@ -961,8 +963,8 @@ find_items_used_by_item(typeclass_item, ClassItemId, !Info) :-
     (
         ClassInterface = class_interface_abstract
     ;
-        ClassInterface = class_interface_concrete(Methods),
-        list.foldl(find_items_used_by_class_method, Methods, !Info)
+        ClassInterface = class_interface_concrete(ClassDecls),
+        list.foldl(find_items_used_by_class_decl, ClassDecls, !Info)
     ),
     module_info_get_instance_table(ModuleInfo, Instances),
     ( if map.search(Instances, ClassId, InstanceDefns) then
@@ -976,7 +978,7 @@ find_items_used_by_item(predicate_item, ItemId, !Info) :-
 find_items_used_by_item(function_item, ItemId, !Info) :-
     record_used_pred_or_func(pf_function, ItemId, !Info).
 find_items_used_by_item(functor_item, _, !Info) :-
-    unexpected($module, $pred, "functor").
+    unexpected($pred, "functor").
 find_items_used_by_item(mutable_item, _MutableItemId, !Info).
     % XXX What should be done here???
 find_items_used_by_item(foreign_proc_item, _, !Info).
@@ -1029,17 +1031,21 @@ find_items_used_by_instance(ClassId, Defn, !Info) :-
         !Info ^ module_instances := ModuleInstances
     ).
 
-:- pred find_items_used_by_class_method(class_method::in,
+:- pred find_items_used_by_class_decl(class_decl::in,
     recompilation_usage_info::in, recompilation_usage_info::out) is det.
 
-find_items_used_by_class_method(Method, !Info) :-
-    Method = method_pred_or_func(_, _, ArgTypesAndModes, _, _, _, _, _, _, _,
-        Constraints, _),
-    find_items_used_by_class_context(Constraints, !Info),
-    list.foldl(find_items_used_by_type_and_mode, ArgTypesAndModes, !Info).
-find_items_used_by_class_method(Method, !Info) :-
-    Method = method_pred_or_func_mode(_, _, Modes, _, _, _, _),
-    find_items_used_by_modes(Modes, !Info).
+find_items_used_by_class_decl(Decl, !Info) :-
+    (
+        Decl = class_decl_pred_or_func(PredOrFuncInfo),
+        PredOrFuncInfo = class_pred_or_func_info(_, _, ArgTypesAndModes,
+            _, _, _, _, _, _, _, Constraints, _),
+        find_items_used_by_class_context(Constraints, !Info),
+        list.foldl(find_items_used_by_type_and_mode, ArgTypesAndModes, !Info)
+    ;
+        Decl = class_decl_mode(ModeInfo),
+        ModeInfo = class_mode_info(_, _, Modes, _, _, _, _),
+        find_items_used_by_modes(Modes, !Info)
+    ).
 
 :- pred find_items_used_by_type_and_mode(type_and_mode::in,
     recompilation_usage_info::in, recompilation_usage_info::out) is det.
@@ -1105,12 +1111,8 @@ find_items_used_by_mode_defn(Defn, !Info) :-
 
 find_items_used_by_inst_defn(Defn, !Info) :-
     Defn = hlds_inst_defn(_, _, InstBody, IFTC, _, _),
-    (
-        InstBody = eqv_inst(Inst),
-        find_items_used_by_inst(Inst, !Info)
-    ;
-        InstBody = abstract_inst
-    ),
+    InstBody = eqv_inst(Inst),
+    find_items_used_by_inst(Inst, !Info),
     (
         IFTC = iftc_applicable_declared(ForTypeCtor),
         find_items_used_by_type_ctor(ForTypeCtor, !Info)
@@ -1182,8 +1184,7 @@ find_items_used_by_pred(PredOrFunc, Name - Arity, PredId - PredModule,
             ClassArity = list.length(ClassArgTypes)
         ;
             MethodUnivConstraints = [],
-            unexpected($module, $pred,
-                "class method with no class constraints")
+            unexpected($pred, "class method with no class constraints")
         ),
         maybe_record_item_to_process(typeclass_item,
             item_name(ClassName, ClassArity), !Info)
@@ -1504,7 +1505,7 @@ record_imported_item(ItemType, ItemName, !Info) :-
         Name = Name0
     ;
         SymName = unqualified(_),
-        unexpected($module, $pred, "unqualified item")
+        unexpected($pred, "unqualified item")
     ),
 
     ImportedItems0 = !.Info ^ imported_items,

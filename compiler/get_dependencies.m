@@ -138,7 +138,7 @@ get_dependencies_in_item_blocks(ItemBlocks, ImportDeps, UseDeps) :-
 get_dependencies_in_item_blocks_acc([], !ImportDeps, !UseDeps).
 get_dependencies_in_item_blocks_acc([ItemBlock | ItemBlocks],
         !ImportDeps, !UseDeps) :-
-    ItemBlock = item_block(_Section, _Context, _Incls, Imports, _Items),
+    ItemBlock = item_block(_, _, _, Imports, _),
     get_dependencies_in_avails_acc(Imports, !ImportDeps, !UseDeps),
     get_dependencies_in_item_blocks_acc(ItemBlocks,
         !ImportDeps, !UseDeps).
@@ -167,7 +167,7 @@ get_dependencies_in_int_imp_in_raw_item_blocks_acc([],
 get_dependencies_in_int_imp_in_raw_item_blocks_acc(
         [RawItemBlock | RawItemBlocks],
         !IntImportDeps, !IntUseDeps, !ImpImportDeps, !ImpUseDeps) :-
-    RawItemBlock = item_block(Section, _Context, _Incls, Imports, _Items),
+    RawItemBlock = item_block(_, Section, _Incls, Imports, _Items),
     (
         Section = ms_interface,
         get_dependencies_in_avails_acc(Imports, !IntImportDeps, !IntUseDeps)
@@ -250,7 +250,7 @@ compute_implicit_import_needs(Globals, ImplicitImportNeeds,
     ;
         ItemsNeedTabling = dont_need_tabling,
         expect(unify(ItemsNeedTablingStatistics, dont_need_tabling_statistics),
-            $module, $pred, "tabling statistics without tabling"),
+            $pred, "tabling statistics without tabling"),
         ( if
             % These forms of tabling cannot ask for statistics.
             (
@@ -428,7 +428,7 @@ init_implicit_import_needs = ImplicitImportNeeds :-
 gather_implicit_import_needs_in_item_blocks([], !ImplicitImportNeeds).
 gather_implicit_import_needs_in_item_blocks([ItemBlock | ItemBlocks],
         !ImplicitImportNeeds) :-
-    ItemBlock = item_block(_Section, _Context, _Incls, _Imports, Items),
+    ItemBlock = item_block(_, _, _Incls, _Imports, Items),
     gather_implicit_import_needs_in_items(Items,
         !ImplicitImportNeeds),
     gather_implicit_import_needs_in_item_blocks(ItemBlocks,
@@ -547,7 +547,6 @@ gather_implicit_import_needs_in_items([Item | Items], !ImplicitImportNeeds) :-
         ; Item = item_initialise(_)
         ; Item = item_finalise(_)
         ; Item = item_foreign_import_module(_)
-        ; Item = item_nothing(_)
         )
     ;
         Item = item_type_repn(_),

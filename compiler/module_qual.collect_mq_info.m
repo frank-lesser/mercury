@@ -109,16 +109,13 @@ int_section_mq_info(IntSection, MQSection, Permissions) :-
 
 collect_mq_info_in_item_blocks(_, [], !Info).
 collect_mq_info_in_item_blocks(SectionInfo, [ItemBlock | ItemBlocks], !Info) :-
-    ItemBlock = item_block(Section, Context, Incls, Avails, Items),
+    ItemBlock = item_block(_, Section, Incls, Avails, Items),
     SectionInfo(Section, MQSection, Permissions),
 
     trace [compile_time(flag("debug_collect_mq_info")), io(!IO)] (
         io.write_string("collect_mq_info_in_item_block:\n", !IO),
         io.write_string("    ", !IO),
         io.write(Section, !IO),
-        io.nl(!IO),
-        io.write_string("    ", !IO),
-        io.write(Context, !IO),
         io.nl(!IO),
         io.write_string("    ", !IO),
         io.write(MQSection, !IO),
@@ -333,7 +330,6 @@ collect_mq_info_in_item(MQSection, Permissions, Item, !Info) :-
         ; Item = item_mutable(_)
         ; Item = item_foreign_import_module(_)
         ; Item = item_type_repn(_)
-        ; Item = item_nothing(_)
         )
         % Do nothing.
     ).

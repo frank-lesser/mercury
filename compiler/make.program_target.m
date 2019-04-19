@@ -40,8 +40,10 @@
 :- implementation.
 
 :- import_module analysis.
+:- import_module libs.
 :- import_module libs.compute_grade.
 :- import_module libs.process_util.
+:- import_module parse_tree.
 :- import_module parse_tree.file_names.
 :- import_module parse_tree.module_cmds.
 :- import_module parse_tree.module_deps_graph.
@@ -54,7 +56,6 @@
 :- import_module dir.
 :- import_module getopt_io.
 :- import_module int.
-:- import_module multi_map.
 :- import_module require.
 
 %-----------------------------------------------------------------------------%
@@ -291,10 +292,13 @@ get_target_modules(Globals, TargetType, AllModules, TargetModules,
     make_info::in, make_info::out, io::di, io::uo) is det.
 
 get_target_modules_2(Globals, ModuleName, !TargetModules, !Info, !IO) :-
-    get_module_dependencies(Globals, ModuleName, MaybeImports, !Info, !IO),
+    get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
+        !Info, !IO),
     ( if
-        MaybeImports = yes(Imports),
-        ModuleName = Imports ^ mai_source_file_module_name
+        MaybeModuleAndImports = yes(ModuleAndImports),
+        module_and_imports_get_source_file_module_name(ModuleAndImports,
+            SourceFileModuleName),
+        ModuleName = SourceFileModuleName
     then
         !:TargetModules = [ModuleName | !.TargetModules]
     else
@@ -359,36 +363,37 @@ get_foreign_object_targets(Globals, PIC, ModuleName, ObjectTargets,
         !Info, !IO) :-
     % Find externally compiled foreign code files for
     % `:- pragma foreign_proc' declarations.
+    %
+    % Any changed here may require corresponding changes in
+    % external_foreign_code_files.
 
     globals.get_target(Globals, CompilationTarget),
-    get_module_dependencies(Globals, ModuleName, MaybeImports, !Info, !IO),
+    get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports, !Info, !IO),
     (
-        MaybeImports = yes(Imports)
+        MaybeModuleAndImports = yes(ModuleAndImports)
     ;
-        MaybeImports = no,
-        unexpected($module, $pred, "unknown imports")
+        MaybeModuleAndImports = no,
+        unexpected($pred, "unknown imports")
     ),
 
-    % XXX only used by the IL backend.
-    ForeignObjectTargets = [],
-
-    % Find out if any externally compiled foreign code files for fact tables
-    % exist.
+    % None of the current backends require externally compiled foreign
+    % code, except the C backend for fact tables.
     (
         CompilationTarget = target_c,
-        FactObjectTargets = list.map(
-            (func(FactFile) =
+        FactFileToTarget =
+            ( func(FactFile) =
                 dep_target(target_file(ModuleName,
                     module_target_fact_table_object(PIC, FactFile)))
             ),
-            Imports ^ mai_fact_table_deps),
-        ObjectTargets = FactObjectTargets ++ ForeignObjectTargets
+        module_and_imports_get_fact_table_deps(ModuleAndImports, FactDeps),
+        FactObjectTargets = list.map(FactFileToTarget, FactDeps),
+        ObjectTargets = FactObjectTargets
     ;
         ( CompilationTarget = target_java
         ; CompilationTarget = target_csharp
         ; CompilationTarget = target_erlang
         ),
-        ObjectTargets = ForeignObjectTargets
+        ObjectTargets = []
     ).
 
 :- pred build_linked_target(module_name::in, linked_target_type::in,
@@ -553,16 +558,16 @@ build_linked_target_2(Globals, MainModuleName, FileType, OutputFileName,
         list.map_foldl2(
             ( pred(ModuleName::in, ForeignFiles::out,
                     MakeInfo0::in, MakeInfo::out, !.IO::di, !:IO::uo) is det :-
-                get_module_dependencies(Globals, ModuleName, MaybeImports,
+                get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
                     MakeInfo0, MakeInfo, !IO),
                 (
-                    MaybeImports = yes(Imports),
-                    external_foreign_code_files(Globals, PIC, Imports,
+                    MaybeModuleAndImports = yes(ModuleAndImports),
+                    external_foreign_code_files(Globals, PIC, ModuleAndImports,
                         ForeignFiles, !IO)
                 ;
-                    MaybeImports = no,
+                    MaybeModuleAndImports = no,
                     % This error should have been detected earlier.
-                    unexpected($module, $pred, "error in dependencies")
+                    unexpected($pred, "error in dependencies")
                 )
             ), AllModulesList, ExtraForeignFiles, !Info, !IO),
         ForeignObjects = list.map(
@@ -851,20 +856,16 @@ make_all_interface_files(Globals, AllModules0, Succeeded, !Info, !IO) :-
     remove_nested_modules(Globals, AllModules0, NonnestedModules, !Info, !IO),
     list.foldl3(collect_modules_with_children(Globals), NonnestedModules,
         [], ParentModules, !Info, !IO),
-    ShortInts = make_dependency_list(NonnestedModules,
-        module_target_unqualified_short_interface),
-    PrivateInts = make_dependency_list(ParentModules,
-        module_target_private_interface),
-    LongInts = make_dependency_list(NonnestedModules,
-        module_target_long_interface),
+    Int3s = make_dependency_list(NonnestedModules, module_target_int3),
+    Int0s = make_dependency_list(ParentModules, module_target_int0),
+    Int1s = make_dependency_list(NonnestedModules, module_target_int1),
     globals.get_any_intermod(Globals, AnyIntermod),
     (
         AnyIntermod = yes,
-        OptFiles = make_dependency_list(NonnestedModules,
-            module_target_intermodule_interface)
+        Opts = make_dependency_list(NonnestedModules, module_target_opt)
     ;
         AnyIntermod = no,
-        OptFiles = []
+        Opts = []
     ),
     globals.lookup_bool_option(Globals, keep_going, KeepGoing),
     % Private interfaces (.int0) need to be made before building long interface
@@ -872,13 +873,13 @@ make_all_interface_files(Globals, AllModules0, Succeeded, !Info, !IO) :-
     % private interface file.
     foldl2_maybe_stop_at_error(KeepGoing,
         foldl2_maybe_stop_at_error(KeepGoing, make_module_target),
-        Globals, [ShortInts, PrivateInts], Succeeded0, !Info, !IO),
+        Globals, [Int3s, Int0s], Succeeded0, !Info, !IO),
     (
         Succeeded0 = yes,
         foldl2_maybe_stop_at_error(KeepGoing,
             foldl2_maybe_stop_at_error_maybe_parallel(KeepGoing,
                 make_module_target),
-            Globals, [LongInts, OptFiles], Succeeded, !Info, !IO)
+            Globals, [Int1s, Opts], Succeeded, !Info, !IO)
     ;
         Succeeded0 = no,
         Succeeded = no
@@ -890,17 +891,19 @@ make_all_interface_files(Globals, AllModules0, Succeeded, !Info, !IO) :-
 
 collect_modules_with_children(Globals, ModuleName, !ParentModules,
         !Info, !IO) :-
-    get_module_dependencies(Globals, ModuleName, MaybeImports, !Info, !IO),
+    get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
+        !Info, !IO),
     (
-        MaybeImports = yes(Imports),
-        Children = Imports ^ mai_children,
-        ( if multi_map.is_empty(Children) then
-            true
-        else
+        MaybeModuleAndImports = yes(ModuleAndImports),
+        module_and_imports_get_children(ModuleAndImports, Children),
+        (
+            Children = []
+        ;
+            Children = [_ | _],
             !:ParentModules = [ModuleName | !.ParentModules]
         )
     ;
-        MaybeImports = no
+        MaybeModuleAndImports = no
     ).
 
 %-----------------------------------------------------------------------------%
@@ -1142,7 +1145,7 @@ lookup_module_and_imports_in_maybe_map(ModuleDeps, ModuleName)
         MaybeModuleImports = yes(ModuleImports)
     ;
         MaybeModuleImports = no,
-        unexpected($module, $pred, "MaybeModuleImports = no")
+        unexpected($pred, "MaybeModuleImports = no")
     ).
 
 :- pred modules_needing_reanalysis(bool::in, globals::in,
@@ -1330,9 +1333,12 @@ install_ints_and_headers(Globals, SubdirLinkSucceeded, ModuleName, Succeeded,
         (
             AnyIntermod = yes,
             % `.int0' files are imported by `.opt' files.
-            ( if multi_map.is_empty(ModuleAndImports ^ mai_children) then
+            module_and_imports_get_children(ModuleAndImports, Children),
+            (
+                Children = [],
                 Exts = ["opt"]
-            else
+            ;
+                Children = [_ | _],
                 Exts = ["int0", "opt"]
             )
         ;
@@ -1436,7 +1442,7 @@ install_library_grade(LinkSucceeded0, ModuleName, AllModules, Globals, Grade,
     ;
         MaybeMCFlags = no,
         % Errors should have been caught before.
-        unexpected($module, $pred, "bad DEFAULT_MCFLAGS")
+        unexpected($pred, "bad DEFAULT_MCFLAGS")
     ),
 
     (
@@ -1605,9 +1611,10 @@ install_grade_init(Globals, GradeDir, ModuleName, Succeeded, !IO) :-
 
 install_grade_ints_and_headers(Globals, LinkSucceeded, GradeDir, ModuleName,
         Succeeded, !Info, !IO) :-
-    get_module_dependencies(Globals, ModuleName, MaybeImports, !Info, !IO),
+    get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
+        !Info, !IO),
     (
-        MaybeImports = yes(_Imports),
+        MaybeModuleAndImports = yes(_ModuleAndImports),
         globals.lookup_string_option(Globals, install_prefix, Prefix),
         LibDir = Prefix/"lib"/"mercury",
 
@@ -1655,7 +1662,7 @@ install_grade_ints_and_headers(Globals, LinkSucceeded, GradeDir, ModuleName,
         Succeeded = HeaderSucceeded `and` OptSucceeded `and`
             IntermodAnalysisSucceeded
     ;
-        MaybeImports = no,
+        MaybeModuleAndImports = no,
         Succeeded = no
     ).
 
@@ -1973,12 +1980,14 @@ make_module_clean(Globals, ModuleName, !Info, !IO) :-
     make_remove_module_file(Globals, very_verbose, ModuleName, ".prof",
         !Info, !IO),
 
-    get_module_dependencies(Globals, ModuleName, MaybeImports, !Info, !IO),
+    get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
+        !Info, !IO),
     (
-        MaybeImports = yes(Imports),
-        FactTableFiles = Imports ^ mai_fact_table_deps
+        MaybeModuleAndImports = yes(ModuleAndImports),
+        module_and_imports_get_fact_table_deps(ModuleAndImports,
+            FactTableFiles)
     ;
-        MaybeImports = no,
+        MaybeModuleAndImports = no,
         FactTableFiles = []
     ),
 
@@ -2040,17 +2049,15 @@ make_module_realclean(Globals, ModuleName, !Info, !IO) :-
             write_sym_name(ModuleName, !IO),
             io.write_string("'.\n", !IO)
         ), !IO),
-    list.foldl2(
-        make_remove_target_file_by_name(Globals, very_verbose, ModuleName),
-        [module_target_private_interface,
-        module_target_long_interface,
-        module_target_short_interface,
-        module_target_unqualified_short_interface,
-        module_target_intermodule_interface,
+    Targets = [module_target_int0, module_target_int1, module_target_int2,
+        module_target_int3, module_target_opt,
         module_target_analysis_registry,
         module_target_c_header(header_mh),
         module_target_erlang_header,
-        module_target_track_flags], !Info, !IO),
+        module_target_track_flags],
+    list.foldl2(
+        make_remove_target_file_by_name(Globals, very_verbose, ModuleName),
+        Targets, !Info, !IO),
     make_remove_module_file(Globals, very_verbose, ModuleName,
         make_module_dep_file_extension, !Info, !IO),
     make_remove_module_file(Globals, very_verbose, ModuleName,

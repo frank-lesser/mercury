@@ -17,6 +17,7 @@
 :- module analysis.file.
 :- interface.
 
+:- import_module libs.
 :- import_module libs.globals.
 
     % read_module_overall_status(Compiler, Globals, ModuleName,
@@ -242,18 +243,18 @@ read_module_overall_status_2(FileName, ModuleStatus, !IO) :-
             else if string.prefix(String, "invalid.") then
                 ModuleStatus = invalid
             else
-                unexpected($module, $pred, "unexpected line")
+                unexpected($pred, "unexpected line")
             )
         ;
             ReadResult = eof,
-            unexpected($module, $pred, "unexpected eof")
+            unexpected($pred, "unexpected eof")
         ;
             ReadResult = error(IOError),
-            unexpected($module, $pred, io.error_message(IOError))
+            unexpected($pred, io.error_message(IOError))
         )
     ;
         OpenResult = error(IOError),
-        unexpected($module, $pred, io.error_message(IOError))
+        unexpected($pred, io.error_message(IOError))
     ).
 
 %-----------------------------------------------------------------------------%
@@ -648,7 +649,7 @@ write_module_overall_status(Info, Globals, ModuleName, Status, !IO) :-
         io.close_output(Stream, !IO)
     ;
         OpenResult = error(IOError),
-        unexpected($module, $pred, io.error_message(IOError))
+        unexpected($pred, io.error_message(IOError))
     ).
 
 %-----------------------------------------------------------------------------%
@@ -762,7 +763,7 @@ write_request_entry(Compiler, AnalysisName, FuncId, Request, !IO) :-
     then
         VersionNumber = analysis_version_number(_ : Call, _ :  Answer)
     else
-        unexpected($module, $pred, "unknown analysis type")
+        unexpected($pred, "unknown analysis type")
     ),
 
     write_quoted_module_name(CallerModule, !IO),
@@ -794,7 +795,7 @@ write_imdg_arc(Compiler, AnalysisName, FuncId, Arc, !IO) :-
     then
         VersionNumber = analysis_version_number(_ : Call, _ : Answer)
     else
-        unexpected($module, $pred, "unknown analysis type")
+        unexpected($pred, "unknown analysis type")
     ),
 
     write_quoted_module_name(DependentModule, !IO),
@@ -867,7 +868,7 @@ write_analysis_file(FileName, WriteEntry, ModuleResults, !IO) :-
         io.close_output(Stream, !IO)
     ;
         OpenResult = error(IOError),
-        unexpected($module, $pred,
+        unexpected($pred,
             "error opening `" ++ FileName ++ "' for output: " ++
             io.error_message(IOError))
     ).
@@ -959,7 +960,7 @@ write_analysis_cache_file(CacheFileName, ModuleResults, !IO) :-
         )
     ;
         TellRes = error(Error),
-        unexpected($module, $pred, io.error_message(Error))
+        unexpected($pred, io.error_message(Error))
     ).
 
 :- func init_analysis_picklers = picklers.
@@ -1013,7 +1014,7 @@ unpickle_analysis_result(Compiler, Unpicklers, Handle, _Type, Univ, !State) :-
         Result = 'new some_analysis_result'(Call, Answer, Status),
         type_to_univ(Result, Univ)
     else
-        unexpected($module, $pred, AnalysisName)
+        unexpected($pred, AnalysisName)
     ).
 
 % This is only needed so we can get the type_ctor_desc of

@@ -16,9 +16,12 @@
 :- module recompilation.check.
 :- interface.
 
+:- import_module libs.
 :- import_module libs.file_util.
 :- import_module libs.globals.
+:- import_module mdbcomp.
 :- import_module mdbcomp.sym_name.
+:- import_module parse_tree.
 :- import_module parse_tree.read_modules.
 
 :- import_module io.
@@ -138,7 +141,7 @@ should_recompile_2(Globals, IsSubModule, FindTargetFiles, FindTimestampFiles,
             Reasons = !.Info ^ rci_recompilation_reasons
         ;
             Result = failed,
-            unexpected($module, $pred, "try failed")
+            unexpected($pred, "try failed")
         ;
             Result = exception(Exception),
             ( if univ_to_type(Exception, RecompileException0) then
@@ -697,10 +700,10 @@ check_imported_module(Globals, Term, !Info, !IO) :-
         FileKind = fk_int(IntFileKind)
     ;
         FileKind = fk_src,
-        unexpected($module, $pred, "fk_src")
+        unexpected($pred, "fk_src")
     ;
         FileKind = fk_opt(_),
-        unexpected($module, $pred, "fk_opt")
+        unexpected($pred, "fk_opt")
     ),
     HaveReadModuleMaps = !.Info ^ rci_have_read_module_maps,
     HaveReadModuleMapInt = HaveReadModuleMaps ^ hrmm_int,
@@ -742,12 +745,12 @@ check_imported_module(Globals, Term, !Info, !IO) :-
             ),
             ( if
                 MaybeUsedItemsTerm = yes(UsedItemsTerm),
-                ParseTreeInt = parse_tree_int(_, _, ModuleContext,
+                ParseTreeInt = parse_tree_int(ParseTreeModuleName, _, _,
                     MaybeVersionNumbers, IntIncls, ImpIncls,
                     IntAvails, ImpAvails, IntItems, ImplItems),
                 MaybeVersionNumbers = yes(VersionNumbers)
             then
-                int_imp_items_to_item_blocks(ModuleContext,
+                int_imp_items_to_item_blocks(ParseTreeModuleName,
                     ms_interface, ms_implementation,
                     IntIncls, ImpIncls, IntAvails, ImpAvails,
                     IntItems, ImplItems, RawItemBlocks),
@@ -784,7 +787,7 @@ check_module_used_items(ModuleName, NeedQualifier, OldTimestamp,
         UsedItemsResult = error1(Specs),
         (
             Specs = [],
-            unexpected($module, $pred, "error1([])")
+            unexpected($pred, "error1([])")
         ;
             Specs = [_ | _],
             Reason = recompile_for_unreadable_used_items(Specs),
@@ -930,7 +933,7 @@ check_item_for_ambiguities(NeedQualifier, OldTimestamp, VersionNumbers, Item,
         !Info) :-
     (
         Item = item_clause(_),
-        unexpected($module, $pred, "clause")
+        unexpected($pred, "clause")
     ;
         Item = item_type_defn(ItemTypeDefn),
         ItemTypeDefn = item_type_defn_info(TypeSymName, TypeParams, TypeBody,
@@ -971,12 +974,12 @@ check_item_for_ambiguities(NeedQualifier, OldTimestamp, VersionNumbers, Item,
             NeedsCheck, !Info),
         ( if
             NeedsCheck = yes,
-            Interface = class_interface_concrete(Methods)
+            Interface = class_interface_concrete(ClassDecls)
         then
             list.foldl(
-                check_class_method_for_ambiguities(NeedQualifier,
+                check_class_decl_for_ambiguities(NeedQualifier,
                     OldTimestamp, VersionNumbers),
-                Methods, !Info)
+                ClassDecls, !Info)
         else
             true
         )
@@ -996,24 +999,24 @@ check_item_for_ambiguities(NeedQualifier, OldTimestamp, VersionNumbers, Item,
         ; Item = item_mutable(_)
         ; Item = item_foreign_import_module(_)
         ; Item = item_type_repn(_)
-        ; Item = item_nothing(_)
         )
     ).
 
-:- pred check_class_method_for_ambiguities(need_qualifier::in, timestamp::in,
-    item_version_numbers::in, class_method::in,
+:- pred check_class_decl_for_ambiguities(need_qualifier::in, timestamp::in,
+    item_version_numbers::in, class_decl::in,
     recompilation_check_info::in, recompilation_check_info::out) is det.
 
-check_class_method_for_ambiguities(NeedQualifier, OldTimestamp, VersionNumbers,
-        ClassMethod, !Info) :-
+check_class_decl_for_ambiguities(NeedQualifier, OldTimestamp, VersionNumbers,
+        Decl, !Info) :-
     (
-        ClassMethod = method_pred_or_func(MethodName, PredOrFunc, MethodArgs,
-            MethodWithType, _, _, _, _, _, _, _, _),
+        Decl = class_decl_pred_or_func(PredOrFuncInfo),
+        PredOrFuncInfo = class_pred_or_func_info(MethodName, PredOrFunc,
+            MethodArgs, MethodWithType, _, _, _, _, _, _, _, _),
         check_for_pred_or_func_item_ambiguity(yes, NeedQualifier, OldTimestamp,
             VersionNumbers, PredOrFunc, MethodName, MethodArgs, MethodWithType,
             !Info)
     ;
-        ClassMethod = method_pred_or_func_mode(_, _, _, _, _, _, _)
+        Decl = class_decl_mode(_)
     ).
 
 :- pred item_is_new_or_changed(timestamp::in, item_version_numbers::in,
@@ -1139,7 +1142,7 @@ check_for_pred_or_func_item_ambiguity(NeedsCheck, NeedQualifier, OldTimestamp,
                 AritiesToMatch, ResolvedFunctor, !Info)
         ;
             SymName = unqualified(_),
-            unexpected($module, $pred, "unqualified predicate name")
+            unexpected($pred, "unqualified predicate name")
         )
     else
         true
@@ -1497,7 +1500,7 @@ write_recompile_reason(Globals, ModuleName, Reason, !IO) :-
     recompile_reason_message(PrefixPieces, Reason, Spec),
     % Since these messages are informational, there should be no warnings
     % or errors.
-    write_error_spec(Spec, Globals, 0, _NumWarnings, 0, _NumErrors, !IO).
+    write_error_spec_ignore(Spec, Globals, !IO).
 
 :- pred recompile_reason_message(list(format_component)::in,
     recompile_reason::in, error_spec::out) is det.

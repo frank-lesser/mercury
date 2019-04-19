@@ -496,7 +496,7 @@ accumulate_ctor_repns(one_or_more(HeadCR, TailCRs), !AccCRs) :-
 write_constructors(TVarSet, Indent, Ctors, !IO) :-
     (
         Ctors = [],
-        unexpected($module, $pred, "empty constructor list")
+        unexpected($pred, "empty constructor list")
     ;
         Ctors = [HeadCtor | TailCtors],
         ArrowOrSemi0 = "--->    ",
@@ -510,7 +510,7 @@ write_constructors(TVarSet, Indent, Ctors, !IO) :-
 write_constructor_repns(TVarSet, Indent, CtorRepns, !IO) :-
     (
         CtorRepns = [],
-        unexpected($module, $pred, "empty constructor list")
+        unexpected($pred, "empty constructor list")
     ;
         CtorRepns = [HeadCtorRepn | TailCtorRepns],
         ArrowOrSemi0 = "--->    ",
@@ -992,16 +992,11 @@ write_user_inst(Indent, InstId - InstDefn, !IO) :-
         write_inst_params(HeadInstParam, TailInstParams, InstVarSet, !IO),
         io.write_string(")", !IO)
     ),
-    (
-        InstBody = abstract_inst,
-        io.write_string(": is abstract\n", !IO)
-    ;
-        InstBody = eqv_inst(EqvInst),
-        io.write_string(":\n", !IO),
-        write_indent(Indent, !IO),
-        mercury_output_inst(output_debug, InstVarSet, EqvInst, !IO),
-        io.write_string("\n", !IO)
-    ),
+    InstBody = eqv_inst(EqvInst),
+    io.write_string(":\n", !IO),
+    write_indent(Indent, !IO),
+    mercury_output_inst(output_debug, InstVarSet, EqvInst, !IO),
+    io.write_string("\n", !IO),
     write_indent(Indent, !IO),
     StatusStr = inst_import_status_to_string(Status),
     io.format("%% status %s\n", [s(StatusStr)], !IO).

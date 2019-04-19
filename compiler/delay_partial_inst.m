@@ -109,6 +109,7 @@
 :- module check_hlds.delay_partial_inst.
 :- interface.
 
+:- import_module hlds.
 :- import_module hlds.hlds_module.
 :- import_module hlds.hlds_pred.
 
@@ -125,7 +126,6 @@
 :- implementation.
 
 :- import_module check_hlds.inst_test.
-:- import_module hlds.
 :- import_module hlds.goal_util.
 :- import_module hlds.hlds_goal.
 :- import_module hlds.hlds_out.
@@ -409,7 +409,7 @@ delay_partial_inst_in_goal(InstMap0, Goal0, Goal, !ConstructMap, !DelayInfo) :-
         ;
             ShortHand0 = bi_implication(_, _),
             % These should have been expanded out by now.
-            unexpected($module, $pred, "bi_implication")
+            unexpected($pred, "bi_implication")
         )
     ).
 
@@ -667,7 +667,7 @@ get_sole_cons_id_and_canon_vars(ConstructMap, Var, ConsId, CanonVars) :-
             % This algorithm does not work if a variable could be bound to
             % multiple functors when we try to do a tag test against it.
             % XXX report a nicer error message
-            sorry($module, $pred,
+            sorry($pred,
                 "delaying partial instantiations when variable could be " ++
                 "bound to multiple functors")
         )

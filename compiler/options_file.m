@@ -17,6 +17,7 @@
 :- module make.options_file.
 :- interface.
 
+:- import_module mdbcomp.
 :- import_module mdbcomp.sym_name.
 
 :- import_module io.
@@ -83,8 +84,10 @@
 
 :- implementation.
 
+:- import_module libs.
 :- import_module libs.globals.
 :- import_module libs.options.
+:- import_module parse_tree.
 :- import_module parse_tree.error_util.
 
 :- import_module assoc_list.
@@ -145,7 +148,7 @@ read_args_file(Globals, OptionsFile, MaybeMCFlags, !IO) :-
         ;
             FlagsResult = var_result_error(ErrorSpec),
             MaybeMCFlags = no,
-            write_error_spec(ErrorSpec, Globals, 0, _, 0, _, !IO)
+            write_error_spec_ignore(ErrorSpec, Globals, !IO)
         )
     ;
         MaybeVariables = no,
@@ -296,7 +299,7 @@ read_options_file_params(Globals, ErrorIfNotExist, Search, MaybeDirName,
                     [error_msg(no, do_not_treat_as_first, 0,
                         [always([words("Error reading options file"),
                             quote(ErrorFile), suffix(".")])])]),
-                write_error_spec(ErrorSpec, Globals, 0, _, 0, _, !IO)
+                write_error_spec_ignore(ErrorSpec, Globals, !IO)
             ;
                 ErrorIfNotExist = no_error
             )
@@ -1138,7 +1141,7 @@ lookup_options_variable(Globals, Vars, OptionsVariableClass, FlagsVar, Result,
                 ErrorSpec = error_spec(severity_error, phase_read_files,
                     [error_msg(no, do_not_treat_as_first, 0,
                         [always(Pieces)])]),
-                write_error_spec(ErrorSpec, Globals, 0, _, 0, _, !IO),
+                write_error_spec_ignore(ErrorSpec, Globals, !IO),
                 Result = var_result_error(ErrorSpec)
             )
         else
@@ -1168,7 +1171,7 @@ lookup_variable_words_report_error(Globals, Vars, VarName, Result, !IO) :-
     lookup_variable_words(Vars, VarName, Result, !IO),
     (
         Result = var_result_error(ErrorSpec),
-        write_error_spec(ErrorSpec, Globals, 0, _, 0, _, !IO)
+        write_error_spec_ignore(ErrorSpec, Globals, !IO)
     ;
         Result = var_result_set(_)
     ;

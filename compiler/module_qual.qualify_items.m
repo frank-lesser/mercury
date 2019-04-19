@@ -80,7 +80,7 @@
 module_qualify_items_in_src_item_blocks([], [], !Info, !Specs).
 module_qualify_items_in_src_item_blocks([SrcItemBlock0 | SrcItemBlocks0],
         [SrcItemBlock | SrcItemBlocks], !Info, !Specs) :-
-    SrcItemBlock0 = item_block(SrcSection, Context, Incls, Avails, Items0),
+    SrcItemBlock0 = item_block(ModuleName, SrcSection, Incls, Avails, Items0),
     (
         SrcSection = sms_interface,
         InInt = mq_used_in_interface
@@ -111,7 +111,7 @@ module_qualify_items_in_src_item_blocks([SrcItemBlock0 | SrcItemBlocks0],
         )
     ),
     module_qualify_items_loop(InInt, Items0, Items, !Info, !Specs),
-    SrcItemBlock = item_block(SrcSection, Context, Incls, Avails, Items),
+    SrcItemBlock = item_block(ModuleName, SrcSection, Incls, Avails, Items),
     module_qualify_items_in_src_item_blocks(SrcItemBlocks0, SrcItemBlocks,
         !Info, !Specs).
 
@@ -135,7 +135,6 @@ module_qualify_item(InInt, Item0, Item, !Info, !Specs) :-
         ; Item0 = item_finalise(_)
         ; Item0 = item_promise(_)
         ; Item0 = item_foreign_import_module(_)
-        ; Item0 = item_nothing(_)
         ),
         Item = Item0
     ;
@@ -152,11 +151,19 @@ module_qualify_item(InInt, Item0, Item, !Info, !Specs) :-
     ;
         Item0 = item_inst_defn(ItemInstDefn0),
         ItemInstDefn0 = item_inst_defn_info(SymName, Params, MaybeForTypeCtor0,
-            InstDefn0, InstVarSet, Context, SeqNum),
+            MaybeAbstractInstDefn0, InstVarSet, Context, SeqNum),
         list.length(Params, Arity),
         ErrorContext = mqec_inst(Context, mq_id(SymName, Arity)),
-        qualify_inst_defn(InInt, ErrorContext, InstDefn0, InstDefn,
-            !Info, !Specs),
+        (
+            MaybeAbstractInstDefn0 = abstract_inst_defn,
+            MaybeAbstractInstDefn = abstract_inst_defn
+        ;
+            MaybeAbstractInstDefn0 = nonabstract_inst_defn(InstDefn0),
+            InstDefn0 = eqv_inst(Inst0),
+            qualify_inst(InInt, ErrorContext, Inst0, Inst, !Info, !Specs),
+            InstDefn = eqv_inst(Inst),
+            MaybeAbstractInstDefn = nonabstract_inst_defn(InstDefn)
+        ),
         (
             MaybeForTypeCtor0 = yes(ForTypeCtor0),
             qualify_type_ctor(InInt, ErrorContext, ForTypeCtor0, ForTypeCtor,
@@ -167,18 +174,26 @@ module_qualify_item(InInt, Item0, Item, !Info, !Specs) :-
             MaybeForTypeCtor = no
         ),
         ItemInstDefn = item_inst_defn_info(SymName, Params, MaybeForTypeCtor,
-            InstDefn, InstVarSet, Context, SeqNum),
+            MaybeAbstractInstDefn, InstVarSet, Context, SeqNum),
         Item = item_inst_defn(ItemInstDefn)
     ;
         Item0 = item_mode_defn(ItemModeDefn0),
-        ItemModeDefn0 = item_mode_defn_info(SymName, Params, ModeDefn0,
-            InstVarSet, Context, SeqNum),
-        list.length(Params, Arity),
-        ErrorContext = mqec_mode(Context, mq_id(SymName, Arity)),
-        qualify_mode_defn(InInt, ErrorContext, ModeDefn0, ModeDefn,
-            !Info, !Specs),
-        ItemModeDefn = item_mode_defn_info(SymName, Params, ModeDefn,
-            InstVarSet, Context, SeqNum),
+        ItemModeDefn0 = item_mode_defn_info(SymName, Params,
+            MaybeAbstractModeDefn0, InstVarSet, Context, SeqNum),
+        (
+            MaybeAbstractModeDefn0 = abstract_mode_defn,
+            MaybeAbstractModeDefn = abstract_mode_defn
+        ;
+            MaybeAbstractModeDefn0 = nonabstract_mode_defn(ModeDefn0),
+            list.length(Params, Arity),
+            ErrorContext = mqec_mode(Context, mq_id(SymName, Arity)),
+            ModeDefn0 = eqv_mode(Mode0),
+            qualify_mode(InInt, ErrorContext, Mode0, Mode, !Info, !Specs),
+            ModeDefn = eqv_mode(Mode),
+            MaybeAbstractModeDefn = nonabstract_mode_defn(ModeDefn)
+        ),
+        ItemModeDefn = item_mode_defn_info(SymName, Params,
+            MaybeAbstractModeDefn, InstVarSet, Context, SeqNum),
         Item = item_mode_defn(ItemModeDefn)
     ;
         Item0 = item_pred_decl(ItemPredDecl0),
@@ -255,7 +270,7 @@ module_qualify_item(InInt, Item0, Item, !Info, !Specs) :-
         ;
             Interface0 = class_interface_concrete(Methods0),
             ErrorContext = mqec_class(Context, mq_id(Name, Arity)),
-            qualify_class_methods(InInt, ErrorContext, Methods0, Methods,
+            qualify_class_decls(InInt, ErrorContext, Methods0, Methods,
                 !Info, !Specs),
             Interface = class_interface_concrete(Methods)
         ),
@@ -626,25 +641,8 @@ is_builtin_atomic_type(TypeCtor) :-
 
 %---------------------------------------------------------------------------%
 %
-% Module qualify inst definitions and insts.
+% Module qualify insts.
 %
-
-    % Qualify the inst parameters of an inst definition.
-    %
-:- pred qualify_inst_defn(mq_in_interface::in, mq_error_context::in,
-    inst_defn::in, inst_defn::out, mq_info::in, mq_info::out,
-    list(error_spec)::in, list(error_spec)::out) is det.
-
-qualify_inst_defn(InInt, ErrorContext, InstDefn0, InstDefn,
-        !Info, !Specs) :-
-    (
-        InstDefn0 = eqv_inst(Inst0),
-        qualify_inst(InInt, ErrorContext, Inst0, Inst, !Info, !Specs),
-        InstDefn = eqv_inst(Inst)
-    ;
-        InstDefn0 = abstract_inst,
-        InstDefn = abstract_inst
-    ).
 
     % Qualify a single inst.
     %
@@ -666,7 +664,7 @@ qualify_inst(InInt, ErrorContext, Inst0, Inst, !Info, !Specs) :-
         Inst = Inst0
     ;
         Inst0 = free(_),
-        unexpected($module, $pred, "compiler generated inst not expected")
+        unexpected($pred, "compiler generated inst not expected")
     ;
         Inst0 = bound(Uniq, InstResults0, BoundInsts0),
         (
@@ -675,7 +673,7 @@ qualify_inst(InInt, ErrorContext, Inst0, Inst, !Info, !Specs) :-
             )
         ;
             InstResults0 = inst_test_results(_, _, _, _, _, _),
-            unexpected($module, $pred, "compiler generated inst not expected")
+            unexpected($pred, "compiler generated inst not expected")
         ),
         % XXX We could pass a more specific error context.
         qualify_bound_insts(InInt, ErrorContext, BoundInsts0, BoundInsts,
@@ -769,7 +767,7 @@ qualify_inst_name(InInt, ErrorContext, InstName0, InstName,
         ; InstName0 = typed_ground(_, _)
         ; InstName0 = typed_inst(_, _)
         ),
-        unexpected($module, $pred, "unexpected compiler generated inst_name")
+        unexpected($pred, "unexpected compiler generated inst_name")
     ).
 
 :- pred qualify_bound_insts(mq_in_interface::in, mq_error_context::in,
@@ -833,18 +831,8 @@ qualify_bound_inst(InInt, ErrorContext, BoundInst0, BoundInst,
 
 %---------------------------------------------------------------------------%
 %
-% Module qualify mode definitions and modes.
+% Module qualify modes.
 %
-
-    % Qualify the mode parameter of an equivalence mode definition.
-    %
-:- pred qualify_mode_defn(mq_in_interface::in, mq_error_context::in,
-    mode_defn::in, mode_defn::out, mq_info::in, mq_info::out,
-    list(error_spec)::in, list(error_spec)::out) is det.
-
-qualify_mode_defn(InInt, ErrorContext, eqv_mode(Mode0), eqv_mode(Mode),
-        !Info, !Specs) :-
-    qualify_mode(InInt, ErrorContext, Mode0, Mode, !Info, !Specs).
 
 qualify_mode(InInt, ErrorContext, Mode0, Mode, !Info, !Specs) :-
     (
@@ -972,30 +960,31 @@ qualify_class_name(InInt, ErrorContext, Class0, Name, !Info, !Specs) :-
 
 %---------------------%
 
-:- pred qualify_class_methods(mq_in_interface::in, mq_error_context::in,
-    list(class_method)::in, list(class_method)::out,
+:- pred qualify_class_decls(mq_in_interface::in, mq_error_context::in,
+    list(class_decl)::in, list(class_decl)::out,
     mq_info::in, mq_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-qualify_class_methods(_InInt, _ErrorContext, [], [], !Info, !Specs).
-qualify_class_methods(InInt, ErrorContext,
-        [Method0 | Methods0], [Method | Methods], !Info, !Specs) :-
+qualify_class_decls(_InInt, _ErrorContext, [], [], !Info, !Specs).
+qualify_class_decls(InInt, ErrorContext,
+        [Decl0 | Decls0], [Decl | Decls], !Info, !Specs) :-
     % XXX We could pass a more specific error context.
-    qualify_class_method(InInt, ErrorContext, Method0, Method,
+    qualify_class_decl(InInt, ErrorContext, Decl0, Decl,
         !Info, !Specs),
-    qualify_class_methods(InInt, ErrorContext, Methods0, Methods,
+    qualify_class_decls(InInt, ErrorContext, Decls0, Decls,
         !Info, !Specs).
 
-:- pred qualify_class_method(mq_in_interface::in, mq_error_context::in,
-    class_method::in, class_method::out, mq_info::in, mq_info::out,
+:- pred qualify_class_decl(mq_in_interface::in, mq_error_context::in,
+    class_decl::in, class_decl::out, mq_info::in, mq_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-qualify_class_method(InInt, ErrorContext, Method0, Method, !Info, !Specs) :-
+qualify_class_decl(InInt, ErrorContext, Decl0, Decl, !Info, !Specs) :-
     % There is no need to qualify the method name, since that is done
     % when the item is parsed.
     (
-        Method0 = method_pred_or_func(Name, PredOrFunc, TypesAndModes0,
-            MaybeWithType0, MaybeWithInst0, MaybeDetism,
+        Decl0 = class_decl_pred_or_func(PredOrFuncInfo0),
+        PredOrFuncInfo0 = class_pred_or_func_info(Name, PredOrFunc,
+            TypesAndModes0, MaybeWithType0, MaybeWithInst0, MaybeDetism,
             TypeVarset, InstVarset, ExistQVars,
             Purity, Constraints0, Context),
         % XXX We could pass a more specific error context.
@@ -1025,12 +1014,14 @@ qualify_class_method(InInt, ErrorContext, Method0, Method, !Info, !Specs) :-
             MaybeWithInst0 = no,
             MaybeWithInst = no
         ),
-        Method = method_pred_or_func(Name, PredOrFunc, TypesAndModes,
-            MaybeWithType, MaybeWithInst, MaybeDetism,
+        PredOrFuncInfo = class_pred_or_func_info(Name, PredOrFunc,
+            TypesAndModes, MaybeWithType, MaybeWithInst, MaybeDetism,
             TypeVarset, InstVarset, ExistQVars,
-            Purity, Constraints, Context)
+            Purity, Constraints, Context),
+        Decl = class_decl_pred_or_func(PredOrFuncInfo)
     ;
-        Method0 = method_pred_or_func_mode(PredOrFunc, Name, Modes0,
+        Decl0 = class_decl_mode(ModeInfo0),
+        ModeInfo0 = class_mode_info(PredOrFunc, Name, Modes0,
             MaybeWithInst0, MaybeDetism, Varset, Context),
         qualify_mode_list(InInt, ErrorContext, Modes0, Modes, !Info, !Specs),
         (
@@ -1043,8 +1034,9 @@ qualify_class_method(InInt, ErrorContext, Method0, Method, !Info, !Specs) :-
             MaybeWithInst0 = no,
             MaybeWithInst = no
         ),
-        Method = method_pred_or_func_mode(PredOrFunc, Name, Modes,
-            MaybeWithInst, MaybeDetism, Varset, Context)
+        ModeInfo = class_mode_info(PredOrFunc, Name, Modes,
+            MaybeWithInst, MaybeDetism, Varset, Context),
+        Decl = class_decl_mode(ModeInfo)
     ).
 
 %---------------------------------------------------------------------------%

@@ -25,7 +25,6 @@
 
 :- import_module libs.
 :- import_module libs.globals.
-:- import_module libs.options.
 :- import_module mdbcomp.
 :- import_module mdbcomp.prim_data.
 :- import_module mdbcomp.sym_name.
@@ -45,7 +44,6 @@
 :- import_module multi_map.
 :- import_module pair.
 :- import_module set.
-:- import_module term.
 
 %-----------------------------------------------------------------------------%
 %
@@ -58,9 +56,9 @@
 % We use cords of items instead of lists of items where we may need to add
 % items to an already-existing partial parse tree.
 %
-% The contexts of module and section declarations below may be
-% term.context_init if the actual context isn't known, but if the recorded
-% context is not term.context_init, then it is valid.
+% The contexts of module declarations below may be term.context_init
+% if the actual context isn't known, but if the recorded context is
+% not term.context_init, then it is valid.
 
 :- type parse_tree_src
     --->    parse_tree_src(
@@ -75,6 +73,7 @@
 
 :- type module_component
     --->    mc_section(
+                mcs_module_name             :: module_name,
                 mcs_section_kind            :: module_section,
 
                 % The context of the `:- interface' or `:- implementation'
@@ -86,6 +85,9 @@
                 mcs_items                   :: cord(item)
             )
     ;       mc_nested_submodule(
+                % The name of the *including* module.
+                mcns_module_name            :: module_name,
+
                 % What kind of section is the submodule in?
                 mcns_in_section_kind        :: module_section,
 
@@ -218,8 +220,8 @@
 
 :- type item_block(MS)
     --->    item_block(
+                module_name,
                 MS,
-                prog_context,   % The context of the section marker.
                 list(item_include),
                 list(item_avail),
                 list(item)
@@ -320,7 +322,7 @@
 :- func raw_compilation_unit_project_name(raw_compilation_unit) = module_name.
 :- func aug_compilation_unit_project_name(aug_compilation_unit) = module_name.
 
-:- pred int_imp_items_to_item_blocks(prog_context::in, MS::in, MS::in,
+:- pred int_imp_items_to_item_blocks(module_name::in, MS::in, MS::in,
     list(item_include)::in, list(item_include)::in,
     list(item_avail)::in, list(item_avail)::in, list(item)::in, list(item)::in,
     list(item_block(MS))::out) is det.
@@ -393,8 +395,7 @@
     ;       item_finalise(item_finalise_info)
     ;       item_mutable(item_mutable_info)
     ;       item_foreign_import_module(item_foreign_import_module_info)
-    ;       item_type_repn(item_type_repn_info)
-    ;       item_nothing(item_nothing_info).
+    ;       item_type_repn(item_type_repn_info).
 
 :- type item_clause_info
     --->    item_clause_info(
@@ -427,11 +428,15 @@
                 id_inst_name                    :: sym_name,
                 id_inst_args                    :: list(inst_var),
                 id_maybe_for_type               :: maybe(type_ctor),
-                id_inst_defn                    :: inst_defn,
+                id_inst_defn                    :: maybe_abstract_inst_defn,
                 id_varset                       :: inst_varset,
                 id_context                      :: prog_context,
                 id_seq_num                      :: int
             ).
+
+:- type maybe_abstract_inst_defn
+    --->    abstract_inst_defn
+    ;       nonabstract_inst_defn(inst_defn).
 
 :- type item_mode_defn_info
     --->    item_mode_defn_info(
@@ -439,11 +444,15 @@
                 % a definition of a mode.
                 md_mode_name                    :: sym_name,
                 md_mode_args                    :: list(inst_var),
-                md_mode_defn                    :: mode_defn,
+                md_mode_defn                    :: maybe_abstract_mode_defn,
                 md_varset                       :: inst_varset,
                 md_context                      :: prog_context,
                 md_seq_num                      :: int
             ).
+
+:- type maybe_abstract_mode_defn
+    --->    abstract_mode_defn
+    ;       nonabstract_mode_defn(mode_defn).
 
 :- type item_pred_decl_info
     --->    item_pred_decl_info(
@@ -618,26 +627,7 @@
                 tr_seq_num                      :: int
             ).
 
-:- type item_nothing_info
-    --->    item_nothing_info(
-                % Used for items that should be ignored (for purposes of
-                % backwards compatibility etc).
-                % XXX Instead of maybe(item_warning), this should be
-                % maybe(error_spec).
-                nothing_maybe_warning           :: maybe(item_warning),
-                nothing_context                 :: prog_context,
-                nothing_seq_num                 :: int
-            ).
-
 :- func get_item_context(item) = prog_context.
-
-:- type item_warning
-    --->    item_warning(
-                maybe(option),  % Option controlling whether the
-                                % warning should be reported.
-                string,         % The warning.
-                term            % The term to which it relates.
-            ).
 
 %-----------------------------------------------------------------------------%
 %
@@ -650,6 +640,14 @@
                 % is a list of one or more item_includes, each of which
                 % declares the named module to be a submodule of the
                 % current module,
+                %
+                % If this item_include occurs in module x.y, then
+                % the module_name here is guaranteed to have the form x.y.z.
+                % In other words, the included module is guaranteed to be
+                % an immediate descendant of the including module.
+                % Any attempt to include a non-descendant module or a
+                % non-immediate descendant module will be caught and
+                % diagnosed by the parser.
 
                 incl_module                     :: module_name,
 
@@ -715,54 +713,82 @@
 % Type classes.
 %
 
-    % The name class_method is a slight misnomer; this type actually represents
-    % any declaration that occurs in the body of a type class definition.
-    % Such declarations may either declare class methods, or they may declare
-    % modes of class methods.
+    % The class_decl type represents any declaration that occurs
+    % in the body of a type class definition.
     %
-:- type class_method
-    --->    method_pred_or_func(
-                % pred_or_func(...) here represents a `pred ...' or `func ...'
-                % declaration in a type class body, which declares
-                % a predicate or function method. Such declarations
-                % specify the type of the predicate or function,
-                % and may optionally also specify the mode and determinism.
+    % Such declarations may either declare class methods, or they may declare
+    % the modes of class methods.
+    %
+:- type class_decl
+    --->    class_decl_pred_or_func(class_pred_or_func_info)
+    ;       class_decl_mode(class_mode_info).
 
-                sym_name,           % name of the pred or func
+:- type class_pred_or_func_info
+    --->    class_pred_or_func_info(
+                % This is a `pred ...' or `func ...' declaration in a
+                % type class body, which declares a predicate or function
+                % method. Such declarations specify the types of the
+                % arguments, and may optionally also specify argument modes
+                % and the determinism.
+
+                % The name of the predicate or function.
+                sym_name,
                 pred_or_func,
-                list(type_and_mode),% the arguments' types and modes
-                maybe(mer_type),    % any `with_type` annotation
-                maybe(mer_inst),    % any `with_inst` annotation
-                maybe(determinism), % any determinism declaration
-                tvarset,            % type variables
-                inst_varset,        % inst variables
-                existq_tvars,       % existentially quantified
-                                    % type variables
-                purity,             % any purity annotation
-                prog_constraints,   % the typeclass constraints on
-                                    % the declaration
-                prog_context        % the declaration's context
-            )
 
-    ;       method_pred_or_func_mode(
-                % pred_or_func_mode(...) here represents a `mode ...'
-                % declaration in a type class body. Such a declaration
-                % declares a mode for one of the type class methods.
+                % The arguments' types, and maybe modes.
+                list(type_and_mode),
 
-                sym_name,           % the method name
-                maybe(pred_or_func),% whether the method is a pred
-                                    % or a func; for declarations
-                                    % using `with_inst`, we don't
-                                    % know which until we've
-                                    % expanded the inst.
-                list(mer_mode),     % the arguments' modes
-                maybe(mer_inst),    % any `with_inst` annotation
-                maybe(determinism), % any determinism declaration
-                inst_varset,        % inst variables
-                prog_context        % the declaration's context
+                % Any `with_type` and/or `with_inst` annotation.
+                maybe(mer_type),
+                maybe(mer_inst),
+
+                % The determinism declaration, if any.
+                maybe(determinism),
+
+                % The varsets of the type and inst variables.
+                tvarset,
+                inst_varset,
+
+                % The existentially quantified type variables, if any.
+                existq_tvars,
+
+                % Any purity annotation.
+                purity,
+
+                % The typeclass constraints on the declaration.
+                prog_constraints,
+
+                prog_context
             ).
 
-:- type class_methods == list(class_method).
+:- type class_mode_info
+    --->    class_mode_info(
+                % This is a `mode ...' declaration in a type class body.
+                % Such a declaration declares a mode for one of the methods
+                % of the type class.
+
+                % The name of the predicate or function.
+                sym_name,
+
+                % Whether the method is a predicate or a function.
+                % For declarations using `with_inst`, we don't know
+                % which it is until we have expanded the inst.
+                maybe(pred_or_func),
+
+                % The arguments' modes.
+                list(mer_mode),
+
+                % Any `with_inst` annotation.
+                maybe(mer_inst),
+
+                % Any determinism declaration.
+                maybe(determinism),
+
+                % The varset of the inst variables.
+                inst_varset,
+
+                prog_context
+            ).
 
 %-----------------------------------------------------------------------------%
 %
@@ -1624,7 +1650,7 @@ raw_compilation_unit_project_name(RawCompUnit) =
 aug_compilation_unit_project_name(AugCompUnit) =
     AugCompUnit ^ aci_module_name.
 
-int_imp_items_to_item_blocks(Context, IntSection, ImpSection,
+int_imp_items_to_item_blocks(ModuleName, IntSection, ImpSection,
         IntIncls, ImpIncls, IntAvails, ImpAvails, IntItems, ImpItems,
         ItemBlocks) :-
     ( if
@@ -1634,7 +1660,7 @@ int_imp_items_to_item_blocks(Context, IntSection, ImpSection,
     then
         ItemBlocks0 = []
     else
-        ImpBlock = item_block(ImpSection, Context,
+        ImpBlock = item_block(ModuleName, ImpSection,
             ImpIncls, ImpAvails, ImpItems),
         ItemBlocks0 = [ImpBlock]
     ),
@@ -1645,7 +1671,7 @@ int_imp_items_to_item_blocks(Context, IntSection, ImpSection,
     then
         ItemBlocks = ItemBlocks0
     else
-        IntBlock = item_block(IntSection, Context,
+        IntBlock = item_block(ModuleName, IntSection,
             IntIncls, IntAvails, IntItems),
         ItemBlocks = [IntBlock | ItemBlocks0]
     ).
@@ -1698,9 +1724,6 @@ get_item_context(Item) = Context :-
     ;
         Item = item_type_repn(ItemTypeRepn),
         Context = ItemTypeRepn ^ tr_context
-    ;
-        Item = item_nothing(ItemNothing),
-        Context = ItemNothing ^ nothing_context
     ).
 
 %-----------------------------------------------------------------------------%
@@ -1933,10 +1956,10 @@ pragma_context_pieces(Pragma) = ContextPieces :-
                 words("declaration")]
         ;
             EvalMethod = eval_table_io(_, _),
-            unexpected($module, $pred, "eval_table_io")
+            unexpected($pred, "eval_table_io")
         ;
             EvalMethod = eval_normal,
-            unexpected($module, $pred, "eval_normal")
+            unexpected($pred, "eval_normal")
         )
     ;
         Pragma = pragma_promise_pure(_),
@@ -2120,7 +2143,6 @@ get_foreign_code_indicators_from_item(Globals, Item, !Info) :-
         ; Item = item_typeclass(_)
         ; Item = item_instance(_)
         ; Item = item_type_repn(_)
-        ; Item = item_nothing(_)
         )
     ).
 

@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %-----------------------------------------------------------------------------%
 % Copyright (C) 1999-2000, 2004, 2007 The University of Melbourne.
-% Copyright (C) 2018 The Mercury team.
+% Copyright (C) 2018-2019 The Mercury team.
 % This file is distributed under the terms specified in COPYING.LIB.
 %-----------------------------------------------------------------------------%
 %
@@ -76,21 +76,20 @@
 
 socket(Dom, Typ, protocol(Prot), Result, !IO) :-
     socket0(Dom, Typ, Prot, FdNo, !IO),
-    ( FdNo < 0 ->
+    ( if FdNo < 0 then
         errno(Err, !IO),
         Result = error(Err)
-    ;
+    else
         Result = ok(fd(FdNo))
     ).
 
 :- pred socket0(domain::in, socket_type::in, int::in, int::out, io::di, io::uo)
     is det.
 :- pragma foreign_proc("C",
-    socket0(Dom::in, Typ::in, Prot::in, Fd::out, IO0::di, IO::uo),
+    socket0(Dom::in, Typ::in, Prot::in, Fd::out, _IO0::di, _IO::uo),
     [promise_pure, will_not_call_mercury, thread_safe, tabled_for_io],
 "
     Fd = socket(Dom, Typ, Prot);
-    IO = IO0;
 ").
 
 :- pragma foreign_enum("C", domain/0, [
@@ -115,9 +114,9 @@ socket(Dom, Typ, protocol(Prot), Result, !IO) :-
 bind(Fd, SockAddr, Result, !IO) :-
     mksockaddr_struct(SockAddr, Ptr, Len),
     bind0(Fd, Ptr, Len, Res0, !IO),
-    ( Res0 = 0 ->
+    ( if Res0 = 0 then
         Result = ok
-    ;
+    else
         errno(Errno, !IO),
         Result = error(Errno)
     ).
@@ -125,11 +124,10 @@ bind(Fd, SockAddr, Result, !IO) :-
 :- pred bind0(fd::in, sockaddr_ptr::in, int::in, int::out,
     io::di, io::uo) is det.
 :- pragma foreign_proc("C",
-    bind0(Fd::in, Addr::in, Len::in, Res::out, IO0::di, IO::uo),
+    bind0(Fd::in, Addr::in, Len::in, Res::out, _IO0::di, _IO::uo),
     [promise_pure, will_not_call_mercury, thread_safe, tabled_for_io],
 "
     Res = bind(Fd, Addr, Len);
-    IO = IO0;
 ").
 
 :- pred mksockaddr_struct(sockaddr::in, sockaddr_ptr::out, int::out) is det.
@@ -141,14 +139,14 @@ mksockaddr_struct(inet(Port, Addr), Ptr, Len) :-
     is det.
 
 :- pragma foreign_proc("C",
-    mkinet_addr(A::in, P::in, Ptr::out, Len::out), 
+    mkinet_addr(A::in, P::in, Ptr::out, Len::out),
     [promise_pure, will_not_call_mercury, thread_safe],
 "
     MR_Word Ptr0;
     struct sockaddr_in *ptr;
 
     MR_incr_hp(Ptr0, (1 + sizeof(struct sockaddr_in)/sizeof(MR_Word)));
-    Ptr = (struct sockaddr *) Ptr0;      
+    Ptr = (struct sockaddr *) Ptr0;
     ptr = (struct sockaddr_in *) Ptr;
 
     MR_memset(ptr, 0, sizeof(struct sockaddr_in));
@@ -164,9 +162,9 @@ mksockaddr_struct(inet(Port, Addr), Ptr, Len) :-
 connect(Fd, SockAddr, Result, !IO) :-
     mksockaddr_struct(SockAddr, Ptr, Len),
     connect0(Fd, Ptr, Len, Res, !IO),
-    ( Res = 0 ->
+    ( if Res = 0 then
         Result = ok
-    ;
+    else
         errno(Err, !IO),
         Result = error(Err)
     ).
@@ -174,45 +172,41 @@ connect(Fd, SockAddr, Result, !IO) :-
 :- pred connect0(fd::in, sockaddr_ptr::in, int::in, int::out,
     io::di, io::uo) is det.
 :- pragma foreign_proc("C",
-    connect0(Fd::in, Addr::in, Len::in, Res::out, IO0::di, IO::uo),
+    connect0(Fd::in, Addr::in, Len::in, Res::out, _IO0::di, _IO::uo),
     [promise_pure, will_not_call_mercury, thread_safe, tabled_for_io],
 "
     do {
         Res = connect(Fd, Addr, Len);
     } while (Res == -1 && MR_is_eintr(errno));
-    IO = IO0;
 ").
 
 %-----------------------------------------------------------------------------%
 
 listen(Fd, N, Result, !IO) :-
     listen0(Fd, N, Res0, !IO),
-    ( Res0 = 0 ->
+    ( if Res0 = 0 then
         Result = ok
-    ;
+    else
         errno(Errno, !IO),
         Result = error(Errno)
     ).
 
 :- pred listen0(fd::in, int::in, int::out, io::di, io::uo) is det.
 :- pragma foreign_proc("C",
-    listen0(Fd::in, N::in, Res::out, IO0::di, IO::uo),
+    listen0(Fd::in, N::in, Res::out, _IO0::di, _IO::uo),
     [promise_pure, will_not_call_mercury, thread_safe, tabled_for_io],
 "
     Res = listen(Fd, N);
-    IO = IO0;
 ").
 
 %-----------------------------------------------------------------------------%
 
 accept(Fd, Result, !IO) :-
     accept0(Fd, _Ptr, NewFd, !IO),
-    ( NewFd < 0 ->
+    ( if NewFd < 0 then
         errno(Errno, !IO),
         Result = error(Errno)
-    ;
-        % cons_sockaddr(Ptr, SockAddr),
-        % Result = ok(SockAddr - fd(NewFd))
+    else
         Result = ok(fd(NewFd))
     ).
 
@@ -220,40 +214,16 @@ accept(Fd, Result, !IO) :-
     is det.
 
 :- pragma foreign_proc("C",
-    accept0(Fd::in, Ptr::out, NewFd::out, IO0::di, IO::uo), 
+    accept0(Fd::in, Ptr::out, NewFd::out, _IO0::di, _IO::uo),
     [promise_pure, will_not_call_mercury, thread_safe, tabled_for_io],
 "
-    MR_Word Ptr0;
-    struct sockaddr_in *ptr;
-    int len = sizeof(struct sockaddr_in);
+    socklen_t addrlen;
 
-    MR_incr_hp(Ptr0, (1 + sizeof(struct sockaddr_in)/sizeof(MR_Word)));
-    Ptr = (struct sockaddr *) Ptr0;
-    ptr = (struct sockaddr_in *) Ptr;
+    Ptr = (struct sockaddr *) MR_GC_NEW_ATTRIB(struct sockaddr_in, MR_ALLOC_ID);
     do {
-        NewFd = accept(Fd, ptr, &len);
+        addrlen = sizeof(struct sockaddr_in);
+        NewFd = accept(Fd, Ptr, &addrlen);
     } while (NewFd == -1 && MR_is_eintr(errno));
-    IO = IO0;
-").
-
-:- pred cons_sockaddr(sockaddr_ptr::in, sockaddr::out) is det.
-:- pragma foreign_proc("C",
-    cons_sockaddr(Ptr::in, Sok::out),
-    [promise_pure, will_not_call_mercury, thread_safe],
-"
-    struct sockaddr_in *ptr;
-
-    ptr = (struct sockaddr_in *) Ptr;
-
-    if (ptr->sin_family == AF_INET) {
-        MR_incr_hp(Ptr, 2);
-        MR_field(MR_mktag(0), Ptr, 0) = ntohs(ptr->sin_port);
-        MR_field(MR_mktag(0), Ptr, 1) = ptr->sin_addr.s_addr;
-    } else {
-        MR_fatal_error(""cons_sockaddr: unknown type"");
-    }
-
-    Sok = ptr;
 ").
 
 %-----------------------------------------------------------------------------%

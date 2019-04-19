@@ -14,6 +14,7 @@
 :- module hlds.make_hlds.make_hlds_passes.make_hlds_separate_items.
 :- interface.
 
+:- import_module parse_tree.
 :- import_module parse_tree.prog_item.
 
 :- import_module list.
@@ -309,7 +310,7 @@ separate_items_in_blocks([ItemBlock | ItemBlocks], MakeSectionInfo,
         !RevItemFIMs, !RevItemTypeRepns,
         !RevItemForeignEnums, !RevItemForeignExportEnums,
         !RevItemPragmas2, !RevItemPragmas3, !RevItemClauses) :-
-    ItemBlock = item_block(Section, _, _Incls, Avails, Items),
+    ItemBlock = item_block(_, Section, _Incls, Avails, Items),
     MakeSectionInfo(Section, SectionInfo),
     SectionInfo = sec_info(ItemMercuryStatus, _NeedQual),
     AvailSectionItem = ims_item(ItemMercuryStatus, Avails),
@@ -539,8 +540,6 @@ separate_items([Item | Items], SectionInfo,
             Pragma3StatusItem = ims_item(ItemMercuryStatus, ItemPragmaInfo),
             !:RevItemPragmas3 = [Pragma3StatusItem | !.RevItemPragmas3]
         )
-    ;
-        Item = item_nothing(_ItemNothingInfo)
     ),
     separate_items(Items, SectionInfo,
         !RevItemTypeDefnsAbstract, !RevItemTypeDefnsMercury,

@@ -17,6 +17,7 @@
 :- module make.dependencies.
 :- interface.
 
+:- import_module libs.
 :- import_module libs.file_util.
 :- import_module libs.globals.
 :- import_module make.util.
@@ -186,6 +187,7 @@
 
 :- implementation.
 
+:- import_module parse_tree.
 :- import_module parse_tree.file_names.
 :- import_module parse_tree.prog_data_foreign.
 
@@ -193,7 +195,6 @@
 :- import_module cord.
 :- import_module dir.
 :- import_module int.
-:- import_module multi_map.
 
 %-----------------------------------------------------------------------------%
 %
@@ -406,93 +407,104 @@ deps_set_foldl3_maybe_stop_at_error(KeepGoing, P, Globals, Ts,
 
 %-----------------------------------------------------------------------------%
 
-target_dependencies(_, module_target_source) = no_deps.
-target_dependencies(Globals, module_target_errors) =
-        compiled_code_dependencies(Globals).
-target_dependencies(_, module_target_private_interface) =
-        interface_file_dependencies.
-target_dependencies(_, module_target_long_interface) =
-        interface_file_dependencies.
-target_dependencies(_, module_target_short_interface) =
-        interface_file_dependencies.
-target_dependencies(_, module_target_unqualified_short_interface) =
-        module_target_source `of` self.
-target_dependencies(_, module_target_track_flags) = no_deps.
-target_dependencies(Globals, module_target_c_header(_)) =
-        target_dependencies(Globals, module_target_c_code).
-target_dependencies(Globals, module_target_c_code) =
-        compiled_code_dependencies(Globals).
-target_dependencies(Globals, module_target_csharp_code) =
-        compiled_code_dependencies(Globals).
-target_dependencies(Globals, module_target_java_code) =
-        compiled_code_dependencies(Globals).
-target_dependencies(_, module_target_java_class_code) =
-        module_target_java_code `of` self.
-target_dependencies(Globals, module_target_erlang_header) =
-        target_dependencies(Globals, module_target_erlang_code).
-target_dependencies(Globals, module_target_erlang_code) =
-        compiled_code_dependencies(Globals).
-target_dependencies(_, module_target_erlang_beam_code) =
-    combine_deps_list([
-        module_target_erlang_code `of` self,
-        % The `.erl' file will -include the header files of imported modules.
-        module_target_erlang_header `of` direct_imports,
-        module_target_erlang_header `of` indirect_imports,
-        module_target_erlang_header `of` intermod_imports
-    ]).
-target_dependencies(Globals, module_target_object_code(PIC)) = Deps :-
-    globals.get_target(Globals, CompilationTarget),
-    TargetCode = target_to_module_target_code(CompilationTarget, PIC),
-    globals.lookup_bool_option(Globals, highlevel_code, HighLevelCode),
-
-    % For --highlevel-code, the `.c' file will #include the header
-    % file for all imported modules.
-    ( if
-        CompilationTarget = target_c,
-        HighLevelCode = yes
-    then
-        HeaderDeps = combine_deps_list([
-            module_target_c_header(header_mih) `of` direct_imports,
-            module_target_c_header(header_mih) `of` indirect_imports,
-            module_target_c_header(header_mih) `of` parents,
-            module_target_c_header(header_mih) `of` intermod_imports
+target_dependencies(Globals, Target) = FindDeps :-
+    (
+        ( Target = module_target_source
+        ; Target = module_target_track_flags
+        ),
+        FindDeps = no_deps
+    ;
+        Target = module_target_errors,
+        FindDeps = compiled_code_dependencies(Globals)
+    ;
+        ( Target = module_target_int0
+        ; Target = module_target_int1
+        ; Target = module_target_int2
+        ),
+        FindDeps = interface_file_dependencies
+    ;
+        Target = module_target_int3,
+        FindDeps = module_target_source `of` self
+    ;
+        ( Target = module_target_c_code
+        ; Target = module_target_csharp_code
+        ; Target = module_target_java_code
+        ; Target = module_target_erlang_code
+        ),
+        FindDeps = compiled_code_dependencies(Globals)
+    ;
+        Target = module_target_c_header(_),
+        FindDeps = target_dependencies(Globals, module_target_c_code)
+    ;
+        Target = module_target_java_class_code,
+        FindDeps = module_target_java_code `of` self
+    ;
+        Target = module_target_erlang_header,
+        FindDeps = target_dependencies(Globals, module_target_erlang_code)
+    ;
+        Target = module_target_erlang_beam_code,
+        FindDeps =
+        combine_deps_list([
+            module_target_erlang_code `of` self,
+            % The `.erl' file will -include the header files
+            % of imported modules.
+            module_target_erlang_header `of` direct_imports,
+            module_target_erlang_header `of` indirect_imports,
+            module_target_erlang_header `of` intermod_imports
         ])
-    else
-        HeaderDeps = no_deps
-    ),
-    Deps = combine_deps_list([
-        TargetCode `of` self,
-        module_target_c_header(header_mh) `of` foreign_imports,
-        HeaderDeps
-    ]).
-target_dependencies(_, module_target_intermodule_interface) =
-    combine_deps_list([
-        module_target_source `of` self,
-        module_target_private_interface `of` parents,
-        module_target_long_interface `of` non_intermod_direct_imports,
-        module_target_short_interface `of` non_intermod_indirect_imports
-    ]).
-target_dependencies(_, module_target_analysis_registry) =
-    combine_deps_list([
-        module_target_source `of` self,
-        module_target_private_interface `of` parents,
-        module_target_long_interface `of` non_intermod_direct_imports,
-        module_target_short_interface `of` non_intermod_indirect_imports,
-        module_target_intermodule_interface `of` direct_imports,
-        module_target_intermodule_interface `of` indirect_imports,
-        module_target_intermodule_interface `of` intermod_imports
-    ]).
-target_dependencies(Globals, module_target_foreign_object(PIC, _)) =
-    get_foreign_deps(Globals, PIC).
-target_dependencies(Globals, module_target_fact_table_object(PIC, _)) =
-    get_foreign_deps(Globals, PIC).
-target_dependencies(_, module_target_xml_doc) =
-    combine_deps_list([
-        module_target_source `of` self,
-        module_target_private_interface `of` parents,
-        module_target_long_interface `of` non_intermod_direct_imports,
-        module_target_short_interface `of` non_intermod_indirect_imports
-    ]).
+    ;
+        ( Target = module_target_foreign_object(PIC, _)
+        ; Target = module_target_fact_table_object(PIC, _)
+        ),
+        FindDeps = get_foreign_deps(Globals, PIC)
+    ;
+        Target = module_target_object_code(PIC),
+        globals.get_target(Globals, CompilationTarget),
+        TargetCode = target_to_module_target_code(CompilationTarget, PIC),
+        globals.lookup_bool_option(Globals, highlevel_code, HighLevelCode),
+
+        % For --highlevel-code, the `.c' file will #include the header
+        % file for all imported modules.
+        ( if
+            CompilationTarget = target_c,
+            HighLevelCode = yes
+        then
+            HeaderDeps = combine_deps_list([
+                module_target_c_header(header_mih) `of` direct_imports,
+                module_target_c_header(header_mih) `of` indirect_imports,
+                module_target_c_header(header_mih) `of` parents,
+                module_target_c_header(header_mih) `of` intermod_imports
+            ])
+        else
+            HeaderDeps = no_deps
+        ),
+        FindDeps = combine_deps_list([
+            TargetCode `of` self,
+            module_target_c_header(header_mh) `of` foreign_imports,
+            HeaderDeps
+        ])
+    ;
+        ( Target = module_target_opt
+        ; Target = module_target_xml_doc
+        ),
+        FindDeps = combine_deps_list([
+            module_target_source `of` self,
+            module_target_int0 `of` parents,
+            module_target_int1 `of` non_intermod_direct_imports,
+            module_target_int2 `of` non_intermod_indirect_imports
+        ])
+    ;
+        Target = module_target_analysis_registry,
+        FindDeps = combine_deps_list([
+            module_target_source `of` self,
+            module_target_int0 `of` parents,
+            module_target_int1 `of` non_intermod_direct_imports,
+            module_target_int2 `of` non_intermod_indirect_imports,
+            module_target_opt `of` direct_imports,
+            module_target_opt `of` indirect_imports,
+            module_target_opt `of` intermod_imports
+        ])
+    ).
 
 :- func get_foreign_deps(globals::in, pic::in) =
     (find_module_deps(dependency_file_index)::out(find_module_deps)) is det.
@@ -518,9 +530,9 @@ target_to_module_target_code(_CompilationTarget, _PIC) = TargetCode :-
 interface_file_dependencies =
     combine_deps_list([
         module_target_source `of` self,
-        module_target_private_interface `of` parents,
-        module_target_unqualified_short_interface `of` direct_imports,
-        module_target_unqualified_short_interface `of` indirect_imports
+        module_target_int0 `of` parents,
+        module_target_int3 `of` direct_imports,
+        module_target_int3 `of` indirect_imports
     ]).
 
 :- func compiled_code_dependencies(globals::in) =
@@ -535,8 +547,8 @@ compiled_code_dependencies(Globals) = Deps :-
     (
         AnyIntermod = yes,
         Deps0 = combine_deps_list([
-            module_target_intermodule_interface `of` self,
-            module_target_intermodule_interface `of` intermod_imports,
+            module_target_opt `of` self,
+            module_target_opt `of` intermod_imports,
             map_find_module_deps(imports,
                 map_find_module_deps(parents, intermod_imports)),
             base_compiled_code_dependencies(TrackFlags)
@@ -580,9 +592,9 @@ base_compiled_code_dependencies(TrackFlags) = Deps :-
     (find_module_deps(dependency_file_index)::out(find_module_deps)) is det.
 
 imports = combine_deps_list([
-        module_target_private_interface `of` parents,
-        module_target_long_interface `of` direct_imports,
-        module_target_short_interface `of` indirect_imports
+        module_target_int0 `of` parents,
+        module_target_int1 `of` direct_imports,
+        module_target_int2 `of` indirect_imports
     ]).
 
 :- func of(module_target_type, find_module_deps(module_index)) =
@@ -782,8 +794,8 @@ non_intermod_direct_imports_2(Globals, ModuleIndex, Success, Modules,
         % is a submodule, then it may depend on things imported only by its
         % ancestors.
         %
-        multi_map.keys(ModuleAndImports ^ mai_int_deps, IntDeps),
-        multi_map.keys(ModuleAndImports ^ mai_imp_deps, ImpDeps),
+        module_and_imports_get_int_deps(ModuleAndImports, IntDeps),
+        module_and_imports_get_imp_deps(ModuleAndImports, ImpDeps),
         module_names_to_index_set(IntDeps, DepsInt, !Info),
         module_names_to_index_set(ImpDeps, DepsImp, !Info),
         Modules0 = union(DepsInt, DepsImp),
@@ -955,10 +967,12 @@ find_module_foreign_imports_2(Languages, Globals, ModuleIndex, Success,
 find_module_foreign_imports_3(Languages, Globals, ModuleIndex,
         Success, ForeignModules, !Info, !IO) :-
     module_index_to_name(!.Info, ModuleIndex, ModuleName),
-    get_module_dependencies(Globals, ModuleName, MaybeImports, !Info, !IO),
+    get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
+        !Info, !IO),
     (
-        MaybeImports = yes(Imports),
-        ForeignModuleInfos = Imports ^ mai_foreign_import_modules,
+        MaybeModuleAndImports = yes(ModuleAndImports),
+        module_and_imports_get_foreign_import_modules(ModuleAndImports,
+            ForeignModuleInfos),
         LangForeignModuleNameSets =
             set.map(get_lang_foreign_import_modules(ForeignModuleInfos),
                 Languages),
@@ -967,7 +981,7 @@ find_module_foreign_imports_3(Languages, Globals, ModuleIndex,
             ForeignModules, !Info),
         Success = yes
     ;
-        MaybeImports = no,
+        MaybeModuleAndImports = no,
         ForeignModules = init,
         Success = no
     ).
@@ -980,15 +994,16 @@ find_module_foreign_imports_3(Languages, Globals, ModuleIndex,
 
 fact_table_files(Globals, ModuleIndex, Success, Files, !Info, !IO) :-
     module_index_to_name(!.Info, ModuleIndex, ModuleName),
-    get_module_dependencies(Globals, ModuleName, MaybeImports, !Info, !IO),
+    get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
+        !Info, !IO),
     (
-        MaybeImports = yes(Imports),
+        MaybeModuleAndImports = yes(ModuleAndImports),
         Success = yes,
-        FilesList = map((func(File) = dep_file(File, no)),
-            Imports ^ mai_fact_table_deps),
+        module_and_imports_get_fact_table_deps(ModuleAndImports, FactDeps),
+        FilesList = list.map((func(File) = dep_file(File, no)), FactDeps),
         Files = set.list_to_set(FilesList)
     ;
-        MaybeImports = no,
+        MaybeModuleAndImports = no,
         Success = no,
         Files = init
     ).
@@ -1002,17 +1017,20 @@ fact_table_files(Globals, ModuleIndex, Success, Files, !Info, !IO) :-
 foreign_include_files(Globals, ModuleIndex, Success, Files, !Info, !IO) :-
     globals.get_backend_foreign_languages(Globals, Languages),
     module_index_to_name(!.Info, ModuleIndex, ModuleName),
-    get_module_dependencies(Globals, ModuleName, MaybeImports, !Info, !IO),
+    get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
+        !Info, !IO),
     (
-        MaybeImports = yes(Imports),
+        MaybeModuleAndImports = yes(ModuleAndImports),
         Success = yes,
-        SourceFileName = Imports ^ mai_source_file_name,
-        ForeignIncludeFilesCord = Imports ^ mai_foreign_include_files,
+        module_and_imports_get_source_file_name(ModuleAndImports,
+            SourceFileName),
+        module_and_imports_get_foreign_include_files(ModuleAndImports,
+            ForeignIncludeFilesCord),
         FilesList = get_foreign_include_files(set.from_list(Languages),
             SourceFileName, cord.list(ForeignIncludeFilesCord)),
         Files = set.from_list(FilesList)
     ;
-        MaybeImports = no,
+        MaybeModuleAndImports = no,
         Success = no,
         Files = set.init
     ).
@@ -1118,50 +1136,47 @@ find_transitive_module_dependencies_2(KeepGoing, DependenciesType, ModuleLocn,
         Modules = union(Modules0, Modules1)
     else
         module_index_to_name(!.Info, ModuleIndex, ModuleName),
-        get_module_dependencies(Globals, ModuleName, MaybeImports, !Info, !IO),
+        get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
+            !Info, !IO),
         (
-            MaybeImports = yes(Imports),
+            MaybeModuleAndImports = yes(ModuleAndImports),
+            module_and_imports_get_source_file_dir(ModuleAndImports,
+                ModuleDir),
             ( if
                 (
                     ModuleLocn = any_module
                 ;
                     ModuleLocn = local_module,
-                    Imports ^ mai_module_dir = dir.this_directory
+                    ModuleDir = dir.this_directory
                 )
             then
+                module_and_imports_get_foreign_import_modules(
+                    ModuleAndImports, ForeignImportModules),
+                module_and_imports_get_ancestors(ModuleAndImports,
+                    Ancestors),
+                module_and_imports_get_children_set(ModuleAndImports,
+                    Children),
+                module_and_imports_get_int_deps_set(ModuleAndImports,
+                    IntDeps),
+                module_and_imports_get_imp_deps_set(ModuleAndImports,
+                    ImpDeps),
                 (
-                    % Parents don't need to be considered here.
+                    % Ancestors don't need to be considered here.
                     % Anywhere the interface of the child module is needed,
-                    % the parent must also have been imported.
+                    % the ancestors must also have been imported.
                     DependenciesType = interface_imports,
-                    set.sorted_list_to_set(multi_map.keys(
-                        Imports ^ mai_int_deps), IntDeps),
                     ImportsToCheck = IntDeps
                 ;
                     DependenciesType = all_dependencies,
-                    set.sorted_list_to_set(multi_map.keys(
-                        Imports ^ mai_int_deps), IntDeps),
-                    set.sorted_list_to_set(multi_map.keys(
-                        Imports ^ mai_imp_deps), ImpDeps),
-                    set.sorted_list_to_set(multi_map.keys(
-                        Imports ^ mai_children), Children),
                     ImportsToCheck = set.union_list([
-                        IntDeps, ImpDeps, Children,
-                        Imports ^ mai_parent_deps,
-                        get_all_foreign_import_modules(
-                            Imports ^ mai_foreign_import_modules)
+                        Ancestors, Children, IntDeps, ImpDeps,
+                        get_all_foreign_import_modules(ForeignImportModules)
                     ])
                 ;
                     DependenciesType = all_imports,
-                    set.sorted_list_to_set(multi_map.keys(
-                        Imports ^ mai_int_deps), IntDeps),
-                    set.sorted_list_to_set(multi_map.keys(
-                        Imports ^ mai_imp_deps), ImpDeps),
                     ImportsToCheck = set.union_list([
-                        IntDeps, ImpDeps,
-                        Imports ^ mai_parent_deps,
-                        get_all_foreign_import_modules(
-                            Imports ^ mai_foreign_import_modules)
+                        Ancestors, IntDeps, ImpDeps,
+                        get_all_foreign_import_modules(ForeignImportModules)
                     ])
                 ),
                 module_names_to_index_set(set.to_sorted_list(ImportsToCheck),
@@ -1180,7 +1195,7 @@ find_transitive_module_dependencies_2(KeepGoing, DependenciesType, ModuleLocn,
                 Modules = Modules0
             )
         ;
-            MaybeImports = no,
+            MaybeModuleAndImports = no,
             Success = no,
             Modules = Modules0
         )
@@ -1198,12 +1213,15 @@ remove_nested_modules(Globals, Modules0, Modules, !Info, !IO) :-
     io::di, io::uo) is det.
 
 collect_nested_modules(Globals, ModuleName, !NestedModules, !Info, !IO) :-
-    get_module_dependencies(Globals, ModuleName, MaybeImports, !Info, !IO),
+    get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
+        !Info, !IO),
     (
-        MaybeImports = yes(Imports),
-        set.union(Imports ^ mai_nested_children, !NestedModules)
+        MaybeModuleAndImports = yes(ModuleAndImports),
+        module_and_imports_get_nested_children(ModuleAndImports,
+            NestedChildren),
+        set.union(NestedChildren, !NestedModules)
     ;
-        MaybeImports = no
+        MaybeModuleAndImports = no
     ).
 
 %-----------------------------------------------------------------------------%
@@ -1466,14 +1484,16 @@ dependency_status(Globals, Dep, Status, !Info, !IO) :-
         then
             Status = StatusPrime
         else
-            get_module_dependencies(Globals, ModuleName, MaybeImports,
+            get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
                 !Info, !IO),
             (
-                MaybeImports = no,
+                MaybeModuleAndImports = no,
                 Status = deps_status_error
             ;
-                MaybeImports = yes(Imports),
-                ( if Imports ^ mai_module_dir = dir.this_directory then
+                MaybeModuleAndImports = yes(ModuleAndImports),
+                module_and_imports_get_source_file_dir(ModuleAndImports,
+                    ModuleDir),
+                ( if ModuleDir = dir.this_directory then
                     Status = deps_status_not_considered
                 else
                     % Targets from libraries are always considered to be

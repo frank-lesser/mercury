@@ -218,7 +218,7 @@ mercury_output_parse_tree_src(Info, ParseTree, !IO) :-
     io.write_string(".\n", !IO).
 
 mercury_output_parse_tree_int(Info, ParseTree, !IO) :-
-    ParseTree = parse_tree_int(ModuleName, _IntFileKind, ModuleContext,
+    ParseTree = parse_tree_int(ModuleName, _IntFileKind, _ModuleContext,
         MaybeVersionNumbers, IntIncls, ImpIncls, IntAvails, ImpAvails,
         IntItems, ImpItems),
     io.write_string(":- module ", !IO),
@@ -237,7 +237,7 @@ mercury_output_parse_tree_int(Info, ParseTree, !IO) :-
     then
         true
     else
-        IntItemBlock = item_block(ms_interface, ModuleContext,
+        IntItemBlock = item_block(ModuleName, ms_interface,
             IntIncls, IntAvails, IntItems),
         mercury_output_raw_item_block(Info, IntItemBlock, !IO)
     ),
@@ -248,7 +248,7 @@ mercury_output_parse_tree_int(Info, ParseTree, !IO) :-
     then
         true
     else
-        ImpItemBlock = item_block(ms_implementation, ModuleContext,
+        ImpItemBlock = item_block(ModuleName, ms_implementation,
             ImpIncls, ImpAvails, ImpItems),
         mercury_output_raw_item_block(Info, ImpItemBlock, !IO)
     ).
@@ -313,7 +313,7 @@ mercury_output_module_components(_, _, [], !IO).
 mercury_output_module_components(Info, MaybePrevSectionKind,
         [Component | Components], !IO) :-
     (
-        Component = mc_section(SectionKind, _Context,
+        Component = mc_section(_, SectionKind, _SectionContext,
             InclsCord, AvailsCord, ItemsCord),
         mercury_output_section_marker(SectionKind, !IO),
         list.foldl(mercury_output_item_include(Info),
@@ -323,8 +323,7 @@ mercury_output_module_components(Info, MaybePrevSectionKind,
         mercury_output_items(Info, cord.list(ItemsCord), !IO),
         MaybeCurSectionKind = yes(SectionKind)
     ;
-        Component = mc_nested_submodule(SectionKind, _SectionContext,
-            SubParseTree),
+        Component = mc_nested_submodule(_, SectionKind, _, SubParseTree),
         Lang = get_output_lang(Info),
         (
             Lang = output_mercury,
@@ -361,7 +360,7 @@ mercury_output_raw_item_blocks(Info, [RawItemBlock | RawItemBlocks], !IO) :-
     mercury_output_raw_item_blocks(Info, RawItemBlocks, !IO).
 
 mercury_output_raw_item_block(Info, RawItemBlock, !IO) :-
-    RawItemBlock = item_block(SectionKind, _Context, Incls, Avails, Items),
+    RawItemBlock = item_block(_, SectionKind, Incls, Avails, Items),
     mercury_output_section_marker(SectionKind, !IO),
     list.foldl(mercury_output_item_include(Info), Incls, !IO),
     list.foldl(mercury_output_item_avail(Info), Avails, !IO),
@@ -375,7 +374,7 @@ mercury_output_src_item_blocks(Info, [SrcItemBlock | SrcItemBlocks], !IO) :-
     mercury_output_src_item_blocks(Info, SrcItemBlocks, !IO).
 
 mercury_output_src_item_block(Info, SrcItemBlock, !IO) :-
-    SrcItemBlock = item_block(SrcSectionKind, _Context, Incls, Avails, Items),
+    SrcItemBlock = item_block(_, SrcSectionKind, Incls, Avails, Items),
     mercury_output_src_section_marker(SrcSectionKind, !IO),
     list.foldl(mercury_output_item_include(Info), Incls, !IO),
     list.foldl(mercury_output_item_avail(Info), Avails, !IO),
@@ -387,7 +386,7 @@ mercury_output_int_item_blocks(Info, [IntItemBlock | IntItemBlocks], !IO) :-
     mercury_output_int_item_blocks(Info, IntItemBlocks, !IO).
 
 mercury_output_int_item_block(Info, IntItemBlock, !IO) :-
-    IntItemBlock = item_block(IntSectionKind, _Context, Incls, Avails, Items),
+    IntItemBlock = item_block(_, IntSectionKind, Incls, Avails, Items),
     list.foldl(mercury_output_item_include(Info), Incls, !IO),
     list.foldl(mercury_output_item_avail(Info), Avails, !IO),
     mercury_output_int_section_marker(IntSectionKind, !IO),
@@ -399,8 +398,8 @@ mercury_output_opt_item_blocks(Info, [OptItemBlock | OptItemBlocks], !IO) :-
     mercury_output_opt_item_blocks(Info, OptItemBlocks, !IO).
 
 mercury_output_opt_item_block(Info, OptItemBlock, !IO) :-
-    OptItemBlock = item_block(OptSectionKind, _Context, Incls, Avails, Items),
-    expect(unify(Incls, []), $module, $pred, "Incls != []"),
+    OptItemBlock = item_block(_, OptSectionKind, Incls, Avails, Items),
+    expect(unify(Incls, []), $pred, "Incls != []"),
     list.foldl(mercury_output_item_avail(Info), Avails, !IO),
     mercury_output_opt_section_marker(OptSectionKind, !IO),
     mercury_output_items(Info, Items, !IO).
@@ -412,7 +411,7 @@ mercury_output_int_for_opt_item_blocks(Info,
     mercury_output_int_for_opt_item_blocks(Info, IntForOptItemBlocks, !IO).
 
 mercury_output_int_for_opt_item_block(Info, IntForOptItemBlock, !IO) :-
-    IntForOptItemBlock = item_block(IntForOptSectionKind, _Context,
+    IntForOptItemBlock = item_block(_, IntForOptSectionKind,
         Incls, Avails, Items),
     list.foldl(mercury_output_item_include(Info), Incls, !IO),
     list.foldl(mercury_output_item_avail(Info), Avails, !IO),
@@ -605,8 +604,6 @@ mercury_output_item(Info, Item, !IO) :-
     ;
         Item = item_type_repn(ItemTypeRepn),
         mercury_output_item_type_repn(Info, ItemTypeRepn, !IO)
-    ;
-        Item = item_nothing(_ItemNothing)
     ).
 
 %---------------------------------------------------------------------------%
@@ -1020,7 +1017,7 @@ mercury_output_foreign_type_assertion(Assertion, !IO) :-
 
 mercury_output_item_inst_defn(Info, ItemInstDefn, !IO) :-
     ItemInstDefn = item_inst_defn_info(SymName0, InstParams, MaybeForTypeCtor,
-        InstDefn, InstVarSet, Context, _SeqNum),
+        MaybeAbstractInstDefn, InstVarSet, Context, _SeqNum),
     % If the unqualified name is a builtin inst, then output the qualified
     % name. This prevents the compiler giving an error about redefining
     % builtin insts when an interface file is read back in.
@@ -1032,20 +1029,17 @@ mercury_output_item_inst_defn(Info, ItemInstDefn, !IO) :-
     ),
     maybe_output_line_number(Info, Context, !IO),
     Lang = get_output_lang(Info),
+    ArgTerms = list.map(func(V) = variable(V, Context), InstParams),
+    construct_qualified_term_with_context(SymName, ArgTerms, Context,
+        InstTerm),
     (
-        InstDefn = abstract_inst,
-        io.write_string(":- inst (", !IO),
-        ArgTerms = list.map(func(V) = variable(V, Context), InstParams),
-        construct_qualified_term_with_context(SymName, ArgTerms, Context,
-            InstTerm),
+        MaybeAbstractInstDefn = abstract_inst_defn,
+        io.write_string(":- abstract_inst((", !IO),
         mercury_output_term(InstVarSet, print_name_only, InstTerm, !IO),
-        io.write_string(").\n", !IO)
+        io.write_string(")).\n", !IO)
     ;
-        InstDefn = eqv_inst(Body),
+        MaybeAbstractInstDefn = nonabstract_inst_defn(eqv_inst(Inst)),
         io.write_string(":- inst (", !IO),
-        ArgTerms = list.map(func(V) = variable(V, Context), InstParams),
-        construct_qualified_term_with_context(SymName, ArgTerms, Context,
-            InstTerm),
         mercury_output_term(InstVarSet, print_name_only, InstTerm, !IO),
         io.write_string(") ", !IO),
         (
@@ -1060,7 +1054,7 @@ mercury_output_item_inst_defn(Info, ItemInstDefn, !IO) :-
             io.write_string(" ", !IO)
         ),
         io.write_string("== ", !IO),
-        mercury_output_inst(Lang, InstVarSet, Body, !IO),
+        mercury_output_inst(Lang, InstVarSet, Inst, !IO),
         io.write_string(".\n", !IO)
     ).
 
@@ -1085,31 +1079,44 @@ is_builtin_inst_name(InstVarSet, unqualified(Name), Args0) :-
     item_mode_defn_info::in, io::di, io::uo) is det.
 
 mercury_output_item_mode_defn(Info, ItemModeDefn, !IO) :-
-    ItemModeDefn = item_mode_defn_info(SymName, InstParams, ModeDefn, VarSet,
-        Context, _SeqNum),
+    ItemModeDefn = item_mode_defn_info(SymName, InstParams,
+        MaybeAbstractModeDefn, VarSet, Context, _SeqNum),
     maybe_unqualify_sym_name(Info, SymName, UnQualSymName),
     maybe_output_line_number(Info, Context, !IO),
     Lang = get_output_lang(Info),
-    mercury_format_mode_defn(Lang, VarSet, UnQualSymName, InstParams,
-        ModeDefn, Context, !IO).
+    mercury_format_mode_defn(Lang, VarSet, Context, UnQualSymName, InstParams,
+        MaybeAbstractModeDefn, !IO).
 
     % This is defined to work on !U instead of !IO so that we can call
-    % mercury_format_mode with simple_inst_info. The mercury_output_mode
-    % predicate is NOT polymorphic in its second argument.
+    % mercury_format_mode with simple_inst_info.
     %
 :- pred mercury_format_mode_defn(output_lang::in, inst_varset::in,
-    sym_name::in, list(inst_var)::in, mode_defn::in, prog_context::in,
-    U::di, U::uo) is det <= output(U).
+    prog_context::in, sym_name::in, list(inst_var)::in,
+    maybe_abstract_mode_defn::in, U::di, U::uo) is det <= output(U).
 
-mercury_format_mode_defn(Lang, InstVarSet, Name, Args, eqv_mode(Mode), Context,
-        !U) :-
-    add_string(":- mode (", !U),
+mercury_format_mode_defn(Lang, InstVarSet, Context, Name, Args,
+        MaybeAbstractModeDefn, !U) :-
+    (
+        MaybeAbstractModeDefn = abstract_mode_defn,
+        add_string(":- abstract_mode((", !U),
+        mercury_format_mode_defn_head(InstVarSet, Context, Name, Args, !U),
+        add_string(")).\n", !U)
+    ;
+        MaybeAbstractModeDefn = nonabstract_mode_defn(eqv_mode(Mode)), 
+        add_string(":- mode (", !U),
+        mercury_format_mode_defn_head(InstVarSet, Context, Name, Args, !U),
+        add_string(") == ", !U),
+        mercury_format_mode(Lang, InstVarSet, Mode, !U),
+        add_string(".\n", !U)
+    ).
+
+:- pred mercury_format_mode_defn_head(inst_varset::in, prog_context::in,
+    sym_name::in, list(inst_var)::in, U::di, U::uo) is det <= output(U).
+
+mercury_format_mode_defn_head(InstVarSet, Context, Name, Args, !U) :-
     ArgTerms = list.map(func(V) = variable(V, Context), Args),
     construct_qualified_term_with_context(Name, ArgTerms, Context, ModeTerm),
-    mercury_format_term(InstVarSet, print_name_only, ModeTerm, !U),
-    add_string(") == ", !U),
-    mercury_format_mode(Lang, InstVarSet, Mode, !U),
-    add_string(".\n", !U).
+    mercury_format_term(InstVarSet, print_name_only, ModeTerm, !U).
 
 %---------------------------------------------------------------------------%
 
@@ -1241,10 +1248,10 @@ mercury_output_item_typeclass(Info, ItemTypeClass, !IO) :-
         Interface = class_interface_abstract,
         io.write_string(".\n", !IO)
     ;
-        Interface = class_interface_concrete(Methods),
+        Interface = class_interface_concrete(ClassDecls),
         io.write_string(" where [\n", !IO),
         Lang = get_output_lang(Info),
-        output_class_methods(Lang, Methods, !IO),
+        output_class_decls(Lang, ClassDecls, !IO),
         io.write_string("\n].\n", !IO)
     ).
 
@@ -1290,21 +1297,23 @@ mercury_format_fundep(TypeVarSet, VarNamePrint, fundep(Domain, Range), !U) :-
     add_list(Range, ", ", mercury_format_var(TypeVarSet, VarNamePrint), !U),
     add_string(")", !U).
 
-:- pred output_class_methods(output_lang::in, list(class_method)::in,
+:- pred output_class_decls(output_lang::in, list(class_decl)::in,
     io::di, io::uo) is det.
 
-output_class_methods(Lang, Methods, !IO) :-
-    io.write_list(Methods, ",\n", output_class_method(Lang), !IO).
+output_class_decls(Lang, ClassDecls, !IO) :-
+    io.write_list(ClassDecls, ",\n", output_class_decl(Lang), !IO).
 
-:- pred output_class_method(output_lang::in, class_method::in,
+:- pred output_class_decl(output_lang::in, class_decl::in,
     io::di, io::uo) is det.
 
-output_class_method(Lang, Method, !IO) :-
+output_class_decl(Lang, Decl, !IO) :-
     io.write_string("\t", !IO),
     (
-        Method = method_pred_or_func(SymName, PredOrFunc, TypesAndModes,
-            WithType, WithInst, MaybeDetism, TypeVarSet, InstVarSet,
-            ExistQVars, Purity, ClassContext, _Context),
+        Decl = class_decl_pred_or_func(PredOrFuncInfo),
+        PredOrFuncInfo = class_pred_or_func_info(SymName, PredOrFunc,
+            TypesAndModes, WithType, WithInst, MaybeDetism,
+            TypeVarSet, InstVarSet, ExistQVars, Purity,
+            Constraints, _Context),
 
         % The module name is implied by the qualifier of the
         % `:- typeclass declaration'.
@@ -1319,15 +1328,16 @@ output_class_method(Lang, Method, !IO) :-
                 FuncTypesAndModes, RetTypeAndMode),
             mercury_format_func_decl(Lang, TypeVarSet, InstVarSet, ExistQVars,
                 unqualified(Name), FuncTypesAndModes, RetTypeAndMode,
-                MaybeDetism, Purity, ClassContext, "", ",\n\t", "", !IO)
+                MaybeDetism, Purity, Constraints, "", ",\n\t", "", !IO)
         else
             mercury_format_pred_or_func_decl(Lang, TypeVarSet, InstVarSet,
                 PredOrFunc, ExistQVars, unqualified(Name), TypesAndModes,
                 WithType, WithInst, MaybeDetism, Purity,
-                ClassContext, "", ",\n\t", "", !IO)
+                Constraints, "", ",\n\t", "", !IO)
         )
     ;
-        Method = method_pred_or_func_mode(SymName, PredOrFunc, Modes,
+        Decl = class_decl_mode(ModeInfo),
+        ModeInfo = class_mode_info(SymName, PredOrFunc, Modes,
             WithInst, MaybeDetism, InstVarSet, _Context),
 
         % The module name is implied by the qualifier of the

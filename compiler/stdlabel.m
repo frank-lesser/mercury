@@ -41,6 +41,7 @@
 :- implementation.
 
 :- import_module ll_backend.opt_util.
+:- import_module mdbcomp.
 :- import_module mdbcomp.prim_data.
 
 :- import_module bool.
@@ -60,7 +61,7 @@ standardize_labels(Instrs0, Instrs, _, !:ProcCounter) :-
         replace_labels_instruction_list(Instrs1, Instrs2, Map, yes, yes),
         Instrs = [LabelInstr | Comments] ++ Instrs2
     else
-        unexpected($module, $pred, "no proc_label")
+        unexpected($pred, "no proc_label")
     ).
 
 %-----------------------------------------------------------------------------%

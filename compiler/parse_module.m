@@ -619,7 +619,7 @@ separate_int_imp_items([ItemBlock | ItemBlocks], IntIncls, ImpIncls,
         IntAvails, ImpAvails, IntItems, ImpItems) :-
     separate_int_imp_items(ItemBlocks, IntIncls0, ImpIncls0,
         IntAvails0, ImpAvails0, IntItems0, ImpItems0),
-    ItemBlock = item_block(Section, _Context, Incls, Avails, Items),
+    ItemBlock = item_block(_, Section, Incls, Avails, Items),
     (
         Section = ms_interface,
         IntIncls = Incls ++ IntIncls0,
@@ -735,13 +735,13 @@ read_parse_tree_int_section(Stream, Globals, CurModuleName,
                 !VNInfo, MaybeRawItemBlock,
                 !SourceFileName, !SeqNumCounter, !Specs, !Errors, !IO)
         ;
-            IOM = iom_marker_section(SectionKind, SectionContext,
+            IOM = iom_marker_section(SectionKind, _SectionContext,
                 _SectionSeqNum),
             read_item_sequence(Stream, Globals, CurModuleName,
                 no_lookahead, FinalLookAhead, !VNInfo, cord.init, InclsCord,
                 cord.init, AvailsCord, cord.init, ItemsCord,
                 !SourceFileName, !SeqNumCounter, !Specs, !Errors, !IO),
-            RawItemBlock = item_block(SectionKind, SectionContext,
+            RawItemBlock = item_block(CurModuleName, SectionKind,
                 cord.list(InclsCord), cord.list(AvailsCord),
                 cord.list(ItemsCord)),
             MaybeRawItemBlock = yes(RawItemBlock)
@@ -753,9 +753,10 @@ read_parse_tree_int_section(Stream, Globals, CurModuleName,
                 !VNInfo, MaybeRawItemBlock,
                 !SourceFileName, !SeqNumCounter, !Specs, !Errors, !IO)
         ;
-            ( IOM = iom_item(_)
-            ; IOM = iom_marker_include(_)
+            ( IOM = iom_marker_include(_)
             ; IOM = iom_marker_avail(_)
+            ; IOM = iom_item(_)
+            ; IOM = iom_handled(_)
             ),
             Context = get_term_context(IOMTerm),
             % Generate an error for the missing section marker.
@@ -809,7 +810,6 @@ generate_missing_start_section_warning_int(CurModuleName,
             words("The following assumes that"),
             words("the missing declaration is an"),
             decl("interface"), words("declaration."), nl],
-
         Spec = error_spec(severity_error, phase_term_to_parse_tree,
             [simple_msg(Context, [always(Pieces)])]),
         !:Specs = [Spec | !.Specs],
@@ -833,13 +833,12 @@ read_item_sequence_in_hdr_file_without_section_marker(Stream, Globals,
         !VNInfo, MaybeRawItemBlock, !SourceFileName, !SeqNumCounter,
         !Specs, !Errors, !IO) :-
     SectionKind = ms_interface,
-    SectionContext = term.context_init,
     ItemSeqInitLookAhead = lookahead(IOMVarSet, IOMTerm),
     read_item_sequence(Stream, Globals, CurModuleName,
         ItemSeqInitLookAhead, FinalLookAhead, !VNInfo,
         cord.init, InclsCord, cord.init, AvailsCord, cord.init, ItemsCord,
         !SourceFileName, !SeqNumCounter, !Specs, !Errors, !IO),
-    RawItemBlock = item_block(SectionKind, SectionContext,
+    RawItemBlock = item_block(CurModuleName, SectionKind,
         cord.list(InclsCord), cord.list(AvailsCord), cord.list(ItemsCord)),
     MaybeRawItemBlock = yes(RawItemBlock).
 
@@ -985,7 +984,7 @@ read_parse_tree_src_components(Stream, Globals,
             dont_allow_version_numbers, _, cord.init, InclsCord,
             cord.init, AvailsCord, cord.init, ItemsCord,
             !SourceFileName, !SeqNumCounter, !Specs, !Errors, !IO),
-        add_section_component(SectionKind, SectionContext,
+        add_section_component(CurModuleName, SectionKind, SectionContext,
             InclsCord, AvailsCord, ItemsCord, !ModuleComponents),
         % We have read in one component; recurse to read in other components.
         read_parse_tree_src_components(Stream, Globals, CurModuleName,
@@ -1046,7 +1045,7 @@ read_parse_tree_src_components(Stream, Globals,
                 )
             ),
             read_parse_tree_src_submodule(Stream, Globals, ContainingModules,
-                MaybePrevSection, StartModuleName, StartContext,
+                MaybePrevSection, CurModuleName, StartModuleName, StartContext,
                 no_lookahead, SubModuleFinalLookAhead, !ModuleComponents,
                 !SourceFileName, !SeqNumCounter, !Specs, !Errors, !IO),
             % We have read in one component; recurse to read in others.
@@ -1061,15 +1060,17 @@ read_parse_tree_src_components(Stream, Globals,
             ; IOM = iom_marker_include(_)
             ; IOM = iom_marker_avail(_)
             ; IOM = iom_item(_)
+            ; IOM = iom_handled(_)
             ),
             (
-                IOM = iom_marker_section(SectionKind,
-                    SectionContext, _SectionSeqNum),
+                IOM = iom_marker_section(SectionKind, SectionContext,
+                    _SectionSeqNum),
                 ItemSeqInitLookAhead = no_lookahead
             ;
                 ( IOM = iom_marker_include(_)
                 ; IOM = iom_marker_avail(_)
                 ; IOM = iom_item(_)
+                ; IOM = iom_handled(_)
                 ),
                 (
                     MaybePrevSection = yes(SectionKind - SectionContext)
@@ -1096,7 +1097,7 @@ read_parse_tree_src_components(Stream, Globals,
                 dont_allow_version_numbers, _, cord.init, InclsCord,
                 cord.init, AvailsCord, cord.init, ItemsCord,
                 !SourceFileName, !SeqNumCounter, !Specs, !Errors, !IO),
-            add_section_component(SectionKind, SectionContext,
+            add_section_component(CurModuleName, SectionKind, SectionContext,
                 InclsCord, AvailsCord, ItemsCord, !ModuleComponents),
             % We have read in one component; recurse to read in other
             % components.
@@ -1114,11 +1115,12 @@ read_parse_tree_src_components(Stream, Globals,
         )
     ).
 
-:- pred add_section_component(module_section::in, prog_context::in,
+:- pred add_section_component(module_name::in, module_section::in,
+    prog_context::in,
     cord(item_include)::in, cord(item_avail)::in, cord(item)::in,
     cord(module_component)::in, cord(module_component)::out) is det.
 
-add_section_component(SectionKind, SectionContext,
+add_section_component(ModuleName, SectionKind, SectionContext,
         InclsCord, AvailsCord, ItemsCord, !ModuleComponents) :-
     ( if
         cord.is_empty(InclsCord),
@@ -1127,7 +1129,7 @@ add_section_component(SectionKind, SectionContext,
     then
         true
     else
-        Component = mc_section(SectionKind, SectionContext,
+        Component = mc_section(ModuleName, SectionKind, SectionContext,
             InclsCord, AvailsCord, ItemsCord),
         !:ModuleComponents = cord.snoc(!.ModuleComponents, Component)
     ).
@@ -1155,8 +1157,7 @@ generate_missing_start_section_warning_src(CurModuleName,
             decl("implementation"), words("declaration."), nl],
         MissingSectionSpec =
             error_spec(severity_error, phase_term_to_parse_tree,
-                [simple_msg(Context,
-                    [always(MissingSectionPieces)])]),
+                [simple_msg(Context, [always(MissingSectionPieces)])]),
         !:Specs = [MissingSectionSpec | !.Specs],
         set.insert(rme_no_section_decl_at_start, !Errors)
     ;
@@ -1167,7 +1168,7 @@ generate_missing_start_section_warning_src(CurModuleName,
 
 :- pred read_parse_tree_src_submodule(io.text_input_stream::in, globals::in,
     list(module_name)::in, maybe(pair(module_section, prog_context))::in,
-    module_name::in, prog_context::in,
+    module_name::in, module_name::in, prog_context::in,
     maybe_lookahead::in, maybe_lookahead::out,
     cord(module_component)::in, cord(module_component)::out,
     file_name::in, file_name::out,
@@ -1175,7 +1176,7 @@ generate_missing_start_section_warning_src(CurModuleName,
     read_module_errors::in, read_module_errors::out, io::di, io::uo) is det.
 
 read_parse_tree_src_submodule(Stream, Globals, ContainingModules,
-        MaybePrevSection, StartModuleName, StartContext,
+        MaybePrevSection, ContainingModuleName, StartModuleName, StartContext,
         InitLookAhead, FinalLookAhead, !ModuleComponents,
         !SourceFileName, !SeqNumCounter, !Specs, !Errors, !IO) :-
     (
@@ -1207,8 +1208,8 @@ read_parse_tree_src_submodule(Stream, Globals, ContainingModules,
         !SourceFileName, !SeqNumCounter, !Specs, !Errors, !IO),
     SubModuleParseTreeSrc = parse_tree_src(StartModuleName, StartContext,
         NestedModuleComponents),
-    Component = mc_nested_submodule(SectionKind, SectionContext,
-        SubModuleParseTreeSrc),
+    Component = mc_nested_submodule(ContainingModuleName, SectionKind,
+        SectionContext, SubModuleParseTreeSrc),
     !:ModuleComponents = cord.snoc(!.ModuleComponents, Component).
 
 :- pred handle_module_end_marker(module_name::in, list(module_name)::in,
@@ -1357,6 +1358,7 @@ read_first_module_decl(Stream, RequireModuleDecl,
             ; FirstIOM = iom_marker_include(_)
             ; FirstIOM = iom_marker_avail(_)
             ; FirstIOM = iom_item(_)
+            ; FirstIOM = iom_handled(_)
             ),
             FirstContext = get_term_context(FirstTerm),
             report_missing_module_start(FirstContext, !Specs, !Errors),
@@ -1490,14 +1492,11 @@ read_item_sequence_inner(Stream, Globals, ModuleName, !NumItemsLeft,
                     !:AvailsCord = !.AvailsCord ++
                         cord.from_list([HeadAvail | TailAvails])
                 ;
-                    IOM = iom_item(Item0),
-                    ( if Item0 = item_nothing(ItemNothingInfo) then
-                        process_item_nothing_warning(Globals,
-                            ItemNothingInfo, Item, !Specs, !Errors)
-                    else
-                        Item = Item0
-                    ),
+                    IOM = iom_item(Item),
                     !:ItemsCord = cord.snoc(!.ItemsCord, Item)
+                ;
+                    IOM = iom_handled(HandledSpecs),
+                    !:Specs = HandledSpecs ++ !.Specs
                 ),
                 read_item_sequence_inner(Stream, Globals, ModuleName,
                     !NumItemsLeft, no_lookahead, FinalLookAhead, !VNInfo,
@@ -1535,59 +1534,6 @@ record_version_numbers(MVN, IOMTerm, !VNInfo, !Specs) :-
             [always(Pieces)]),
         Spec = error_spec(severity_error, phase_read_files, [Msg]),
         !:Specs = [Spec | !.Specs]
-    ).
-
-    % process_item_nothing_warning(Globals, ItemNothingInfo, !ItemsCord,
-    %     !Specs, !Errors):
-    %
-    % If the given item_nothing_info has a (possibly conditional) warning
-    % embedded inside it, and if the condition (if present) is true,
-    % then put that warning into !Specs and (if asked for) into !Errors.
-    %
-    % In any case, return the item_nothing, stripped of any warnings,
-    % in NoWarnItem.
-    %
-:- pred process_item_nothing_warning(globals::in,
-    item_nothing_info::in, item::out,
-    list(error_spec)::in, list(error_spec)::out,
-    read_module_errors::in, read_module_errors::out) is det.
-
-process_item_nothing_warning(Globals, ItemNothingInfo, NoWarnItem,
-        !Specs, !Errors) :-
-    ItemNothingInfo = item_nothing_info(MaybeWarning, Context, NothingSeqNum),
-    (
-        MaybeWarning = no,
-        % There is no warning to strip away.
-        NoWarnItem = item_nothing(ItemNothingInfo)
-    ;
-        MaybeWarning = yes(Warning),
-        Warning = item_warning(MaybeOption, Msg, Term),
-        (
-            MaybeOption = yes(Option),
-            globals.lookup_bool_option(Globals, Option, Warn)
-        ;
-            MaybeOption = no,
-            Warn = yes
-        ),
-        (
-            Warn = yes,
-            Pieces = [words("Warning: "), words(Msg), nl],
-            Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                [simple_msg(get_term_context(Term), [always(Pieces)])]),
-            !:Specs = [Spec | !.Specs],
-
-            globals.lookup_bool_option(Globals, halt_at_warn, Halt),
-            (
-                Halt = yes,
-                set.insert(rme_warn_item_nothing, !Errors)
-            ;
-                Halt = no
-            )
-        ;
-            Warn = no
-        ),
-        NoWarnItemNothingInfo = item_nothing_info(no, Context, NothingSeqNum),
-        NoWarnItem = item_nothing(NoWarnItemNothingInfo)
     ).
 
 %---------------------------------------------------------------------------%

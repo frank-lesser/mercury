@@ -100,6 +100,7 @@
 
 :- implementation.
 
+:- import_module mdbcomp.
 :- import_module mdbcomp.prim_data.
 :- import_module mdbcomp.sym_name.
 :- import_module parse_tree.prog_data_foreign.
@@ -208,7 +209,7 @@ expand_eqv_types_insts(AugCompUnit0, AugCompUnit, EventSpecMap0, EventSpecMap,
     item_block(int_module_section)::in) is semidet.
 
 non_abstract_imported_int_item_block(ItemBlock) :-
-    ItemBlock = item_block(Section, _, _, _, _),
+    ItemBlock = item_block(_, Section, _, _, _),
     require_complete_switch [Section]
     (
         Section = ims_imported_or_used(_, _, _, _)
@@ -224,7 +225,7 @@ non_abstract_imported_int_item_block(ItemBlock) :-
 build_eqv_maps_in_item_blocks([], !TypeEqvMap, !InstEqvMap).
 build_eqv_maps_in_item_blocks([ItemBlock | ItemBlocks],
         !TypeEqvMap, !InstEqvMap) :-
-    ItemBlock = item_block(_Section, _, _, _, Items),
+    ItemBlock = item_block(_, _, _, _, Items),
     build_eqv_maps_in_items(Items, !TypeEqvMap, !InstEqvMap),
     build_eqv_maps_in_item_blocks(ItemBlocks, !TypeEqvMap, !InstEqvMap).
 
@@ -254,8 +255,9 @@ build_eqv_maps_in_item(Item, !TypeEqvMap, !InstEqvMap) :-
             !TypeEqvMap)
     else if
         Item = item_inst_defn(ItemInstDefn),
+        InstDefn = nonabstract_inst_defn(eqv_inst(EqvInst)),
         ItemInstDefn = item_inst_defn_info(Name, InstParams, _IFTC,
-            eqv_inst(EqvInst), VarSet, _Context, _SeqNum)
+            InstDefn, VarSet, _Context, _SeqNum)
     then
         list.length(InstParams, Arity),
         InstId = inst_id(Name, Arity),
@@ -314,13 +316,14 @@ replace_in_item_blocks(_, _, _, _, [],
 replace_in_item_blocks(ModuleName, TypeEqvMap, InstEqvMap, SectionVisibility,
         [ItemBlock0 | ItemBlocks0],
         !RevReplItemBlocks, !RecompInfo, !UsedModules, !Specs) :-
-    ItemBlock0 = item_block(Section, SectionContext, Incls, Avails, Items0),
+    ItemBlock0 = item_block(BlockModuleName, Section,
+        Incls, Avails, Items0),
     MaybeRecord = SectionVisibility(Section),
     replace_in_items(ModuleName, TypeEqvMap, InstEqvMap, MaybeRecord,
         Items0, [], RevReplItems, !RecompInfo, !UsedModules, !Specs),
     list.reverse(RevReplItems, ReplItems),
-    ReplItemBlock = item_block(Section, SectionContext, Incls, Avails,
-        ReplItems),
+    ReplItemBlock = item_block(BlockModuleName, Section,
+        Incls, Avails, ReplItems),
     !:RevReplItemBlocks = [ReplItemBlock | !.RevReplItemBlocks],
     replace_in_item_blocks(ModuleName, TypeEqvMap, InstEqvMap,
         SectionVisibility, ItemBlocks0,
@@ -438,7 +441,6 @@ replace_in_item(ModuleName, TypeEqvMap, InstEqvMap, MaybeRecord,
         ; Item0 = item_initialise(_)
         ; Item0 = item_finalise(_)
         ; Item0 = item_foreign_import_module(_)
-        ; Item0 = item_nothing(_)
         ),
         Item = Item0,
         Specs = []
@@ -476,7 +478,7 @@ replace_in_type_defn_info(ModuleName, MaybeRecord, TypeEqvMap, InstEqvMap,
             Spec = error_spec(severity_error, phase_expand_types, [Msg]),
             Specs = [Spec]
         else
-            unexpected($module, $pred, "invalid item")
+            unexpected($pred, "invalid item")
         )
     ;
         ContainsCirc = no,
@@ -937,7 +939,8 @@ replace_in_prog_constraint_location(MaybeRecord, TypeEqvMap,
 %---------------------------------------------------------------------------%
 
 :- pred replace_in_class_interface(maybe_record_sym_name_use::in,
-    type_eqv_map::in, inst_eqv_map::in, class_methods::in, class_methods::out,
+    type_eqv_map::in, inst_eqv_map::in,
+    list(class_decl)::in, list(class_decl)::out,
     eqv_expanded_info::in, eqv_expanded_info::out,
     used_modules::in, used_modules::out,
     list(error_spec)::in, list(error_spec)::out) is det.
@@ -946,32 +949,37 @@ replace_in_class_interface(MaybeRecord, TypeEqvMap, InstEqvMap,
         ClassInterface0, ClassInterface, !EquivTypeInfo, !UsedModules,
         !Specs) :-
     list.map_foldl3(
-        replace_in_class_method(MaybeRecord, TypeEqvMap, InstEqvMap),
+        replace_in_class_decl(MaybeRecord, TypeEqvMap, InstEqvMap),
         ClassInterface0, ClassInterface, !EquivTypeInfo, !UsedModules, !Specs).
 
-:- pred replace_in_class_method(maybe_record_sym_name_use::in,
-    type_eqv_map::in, inst_eqv_map::in, class_method::in, class_method::out,
+:- pred replace_in_class_decl(maybe_record_sym_name_use::in,
+    type_eqv_map::in, inst_eqv_map::in, class_decl::in, class_decl::out,
     eqv_expanded_info::in, eqv_expanded_info::out,
     used_modules::in, used_modules::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-replace_in_class_method(MaybeRecord, TypeEqvMap, InstEqvMap, Method0, Method,
+replace_in_class_decl(MaybeRecord, TypeEqvMap, InstEqvMap, Decl0, Decl,
         !EquivTypeInfo, !UsedModules, !Specs) :-
     (
-        Method0 = method_pred_or_func(PredName, PredOrFunc, TypesAndModes0,
-            WithType0, WithInst0, MaybeDetism0, TypeVarSet0, InstVarSet,
-            ExistQVars, Purity, ClassContext0, Context),
+        Decl0 = class_decl_pred_or_func(PredOrFuncInfo0),
+        PredOrFuncInfo0 = class_pred_or_func_info(PredName, PredOrFunc,
+            TypesAndModes0, WithType0, WithInst0, MaybeDetism0,
+            TypeVarSet0, InstVarSet, ExistQVars, Purity,
+            ClassContext0, Context),
         replace_in_pred_type(MaybeRecord, PredName, PredOrFunc, Context,
             TypeEqvMap, InstEqvMap, ClassContext0, ClassContext,
             TypesAndModes0, TypesAndModes, TypeVarSet0, TypeVarSet,
             WithType0, WithType, WithInst0, WithInst,
             MaybeDetism0, MaybeDetism, !EquivTypeInfo, !UsedModules, NewSpecs),
         !:Specs = NewSpecs ++ !.Specs,
-        Method = method_pred_or_func(PredName, PredOrFunc, TypesAndModes,
-            WithType, WithInst, MaybeDetism, TypeVarSet, InstVarSet,
-            ExistQVars, Purity, ClassContext, Context)
+        PredOrFuncInfo = class_pred_or_func_info(PredName, PredOrFunc,
+            TypesAndModes, WithType, WithInst, MaybeDetism,
+            TypeVarSet, InstVarSet, ExistQVars, Purity,
+            ClassContext, Context),
+        Decl = class_decl_pred_or_func(PredOrFuncInfo)
     ;
-        Method0 = method_pred_or_func_mode(PredName, MaybePredOrFunc0, Modes0,
+        Decl0 = class_decl_mode(ModeInfo0),
+        ModeInfo0 = class_mode_info(PredName, MaybePredOrFunc0, Modes0,
             WithInst0, MaybeDetism0, InstVarSet, Context),
         replace_in_pred_mode(MaybeRecord, InstEqvMap,
             PredName, list.length(Modes0), Context, mode_decl, ExtraModes,
@@ -985,8 +993,9 @@ replace_in_class_method(MaybeRecord, TypeEqvMap, InstEqvMap, Method0, Method,
             Modes = Modes0 ++ ExtraModes
         ),
         !:Specs = NewSpecs ++ !.Specs,
-        Method = method_pred_or_func_mode(PredName, MaybePredOrFunc, Modes,
-            WithInst, MaybeDetism, InstVarSet, Context)
+        ModeInfo = class_mode_info(PredName, MaybePredOrFunc, Modes,
+            WithInst, MaybeDetism, InstVarSet, Context),
+        Decl = class_decl_mode(ModeInfo)
     ).
 
 %---------------------------------------------------------------------------%
@@ -1446,7 +1455,7 @@ replace_in_pred_type(MaybeRecord, PredName, PredOrFunc, Context,
                 LeftOverExtraTypes = [_ | _],
                 LeftOverExtraModes = [_ | _],
                 % pair_extra_types_and_modes should have paired these up.
-                unexpected($module, $pred, "both types and modes left over")
+                unexpected($pred, "both types and modes left over")
             )
         )
     ),

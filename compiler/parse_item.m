@@ -42,24 +42,25 @@
 :- pred parse_item_or_marker(module_name::in, varset::in, term::in, int::in,
     maybe1(item_or_marker)::out) is det.
 
-    % parse_class_method_decl(ModuleName, VarSet, Term, MaybeClassMethod):
+    % parse_class_decl(ModuleName, VarSet, Term, MaybeClassDecl):
     %
-    % Parse Term as a declaration. If successful, bind MaybeItem to the
-    % parsed item, otherwise it is bound to an appropriate error message.
-    % Qualify appropriate parts of the item, with ModuleName as the module
-    % name. Use SeqNum as the item's sequence number.
+    % Parse Term as a declaration that may appear in the body of a
+    % typeclass declaration. If successful, bind MaybeClassDecl to the
+    % parsed item, otherwise bind it to an appropriate error message.
+    % Qualify appropriate parts of the declaration with ModuleName
+    % as the module name.
     %
-    % Exported for use by parse_class.m, for parsing type class method
-    % declarations.
+    % Exported for use by parse_class.m.
     %
-:- pred parse_class_method_decl(module_name::in, varset::in, term::in,
-    maybe1(class_method)::out) is det.
+:- pred parse_class_decl(module_name::in, varset::in, term::in,
+    maybe1(class_decl)::out) is det.
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
 
 :- implementation.
 
+:- import_module libs.
 :- import_module libs.options.
 :- import_module mdbcomp.prim_data.
 :- import_module parse_tree.error_util.
@@ -82,6 +83,7 @@
 :- import_module recompilation.
 :- import_module recompilation.version.
 
+:- import_module bool.
 :- import_module cord.
 :- import_module int.
 :- import_module list.
@@ -200,9 +202,17 @@ parse_decl_item_or_marker(ModuleName, VarSet, Functor, ArgTerms,
         parse_inst_defn_item(ModuleName, VarSet, ArgTerms, Context, SeqNum,
             MaybeIOM)
     ;
+        Functor = "abstract_inst",
+        parse_abstract_inst_defn_item(ModuleName, VarSet, ArgTerms, Context,
+            SeqNum, MaybeIOM)
+    ;
         Functor = "mode",
         parse_mode_defn_or_decl_item(ModuleName, VarSet, ArgTerms,
             IsInClass, Context, SeqNum, allow_mode_decl_and_defn, [], MaybeIOM)
+    ;
+        Functor = "abstract_mode",
+        parse_abstract_mode_defn_item(ModuleName, VarSet, ArgTerms, Context,
+            SeqNum, MaybeIOM)
     ;
         ( Functor = "pred", PredOrFunc = pf_predicate
         ; Functor = "func", PredOrFunc = pf_function
@@ -286,7 +296,7 @@ parse_attr_decl_item_or_marker(ModuleName, VarSet, Functor, ArgTerms,
     % A variant of the commented-out code below should help implement
     % quantification for these kinds of promise declarations, but enabling it
     % would break the above coincidence, requiring extra checks in
-    % parse_class_method_decl.
+    % parse_class_decl.
 
     require_switch_arms_det [Functor]
     (
@@ -382,7 +392,7 @@ parse_clause_term_item_or_marker(ModuleName, VarSet, Term, SeqNum, MaybeIOM) :-
             ClauseContext, SeqNum, MaybeIOM)
     ).
 
-parse_class_method_decl(ModuleName, VarSet, Term, MaybeClassMethod) :-
+parse_class_decl(ModuleName, VarSet, Term, MaybeClassMethod) :-
     TermContext = get_term_context(Term),
     parse_attributed_decl(ModuleName, VarSet, Term, decl_is_in_class,
         TermContext, -1, cord.init, cord.init, MaybeIOM),
@@ -396,16 +406,18 @@ parse_class_method_decl(ModuleName, VarSet, Term, MaybeClassMethod) :-
                 WithType, WithInst, MaybeDetism, _Origin,
                 TypeVarSet, InstVarSet, ExistQVars, Purity,
                 Constraints, Context, _SeqNum),
-            ClassMethod = method_pred_or_func(Name, PorF, ArgDecls,
+            PredOrFuncInfo = class_pred_or_func_info(Name, PorF, ArgDecls,
                 WithType, WithInst, MaybeDetism, TypeVarSet, InstVarSet,
                 ExistQVars, Purity, Constraints, Context),
-            MaybeClassMethod = ok1(ClassMethod)
+            ClassDecl = class_decl_pred_or_func(PredOrFuncInfo),
+            MaybeClassMethod = ok1(ClassDecl)
         else if IOM = iom_item(item_mode_decl(ItemModeDecl)) then
             ItemModeDecl = item_mode_decl_info(Name, MaybePorF, ArgModes,
                 WithInst, MaybeDetism, InstVarSet, Context, _SeqNum),
-            ClassMethod = method_pred_or_func_mode(Name, MaybePorF, ArgModes,
+            ModeInfo = class_mode_info(Name, MaybePorF, ArgModes,
                 WithInst, MaybeDetism, InstVarSet, Context),
-            MaybeClassMethod = ok1(ClassMethod)
+            ClassDecl = class_decl_mode(ModeInfo),
+            MaybeClassMethod = ok1(ClassDecl)
         else
             Pieces = [words("Error: only pred, func and mode declarations"),
                 words("are allowed in class interfaces."), nl],
@@ -716,53 +728,50 @@ parse_mode_defn_or_decl_item(ModuleName, VarSet, ArgTerms, IsInClass, Context,
     maybe1(item_or_marker)::out) is det.
 
 parse_version_numbers_marker(ModuleName, Functor, ArgTerms,
-        Context, SeqNum, MaybeIOM) :-
+        Context, _SeqNum, MaybeIOM) :-
     ( if
         ArgTerms = [VersionNumberTerm, ModuleNameTerm, VersionNumbersTerm]
     then
-        ( if
-            decimal_term_to_int(VersionNumberTerm, VersionNumber),
-            VersionNumber = version_numbers_version_number
-        then
-            ( if try_parse_symbol_name(ModuleNameTerm, ModuleName) then
-                recompilation.version.parse_version_numbers(
-                    VersionNumbersTerm, MaybeVersionNumbers),
-                (
-                    MaybeVersionNumbers = ok1(VersionNumbers),
-                    IOM = iom_marker_version_numbers(VersionNumbers),
-                    MaybeIOM = ok1(IOM)
-                ;
-                    MaybeVersionNumbers = error1(Specs),
-                    MaybeIOM = error1(Specs)
+        ( if decimal_term_to_int(VersionNumberTerm, VersionNumber) then
+            ( if VersionNumber = version_numbers_version_number then
+                ( if try_parse_symbol_name(ModuleNameTerm, ModuleName) then
+                    recompilation.version.parse_version_numbers(
+                        VersionNumbersTerm, MaybeVersionNumbers),
+                    (
+                        MaybeVersionNumbers = ok1(VersionNumbers),
+                        IOM = iom_marker_version_numbers(VersionNumbers),
+                        MaybeIOM = ok1(IOM)
+                    ;
+                        MaybeVersionNumbers = error1(Specs),
+                        MaybeIOM = error1(Specs)
+                    )
+                else
+                    Pieces = [words("Error: invalid module name in"),
+                        decl("version_numbers"), suffix("."), nl],
+                    Spec = error_spec(severity_error, phase_term_to_parse_tree,
+                        [simple_msg(get_term_context(ModuleNameTerm),
+                            [always(Pieces)])]),
+                    MaybeIOM = error1([Spec])
                 )
             else
-                Pieces = [words("Error: invalid module name in"),
-                    decl("version_numbers"), suffix("."), nl],
-                Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(get_term_context(ModuleNameTerm),
-                        [always(Pieces)])]),
-                MaybeIOM = error1([Spec])
+                Pieces = [words("Error: the interface file"),
+                    words("was created by an obsolete compiler,"),
+                    words("so it must be rebuilt."), nl],
+                Severity = severity_conditional(warn_smart_recompilation,
+                    yes, severity_error, no),
+                Spec = error_spec(Severity, phase_term_to_parse_tree,
+                    [simple_msg(Context,
+                        [option_is_set(warn_smart_recompilation, yes,
+                            [always(Pieces)])])]),
+                MaybeIOM = ok1(iom_handled([Spec]))
             )
         else
-            (
-                VersionNumberTerm = term.functor(_, _, _VersionNumberContext),
-                Msg = "interface file needs to be recreated, " ++
-                    "the version numbers are out of date",
-                dummy_term_with_context(Context, DummyTerm),
-                Warning = item_warning(yes(warn_smart_recompilation),
-                    Msg, DummyTerm),
-                ItemNothing = item_nothing_info(yes(Warning), Context, SeqNum),
-                Item = item_nothing(ItemNothing),
-                IOM = iom_item(Item),
-                MaybeIOM = ok1(IOM)
-            ;
-                VersionNumberTerm = term.variable(_, VersionNumberContext),
-                Pieces = [words("Error: invalid version number in"),
-                    decl("version_numbers"), suffix("."), nl],
-                Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(VersionNumberContext, [always(Pieces)])]),
-                MaybeIOM = error1([Spec])
-            )
+            Pieces = [words("Error: invalid version number in"),
+                decl("version_numbers"), suffix("."), nl],
+            VersionNumberContext = get_term_context(VersionNumbersTerm),
+            Spec = error_spec(severity_error, phase_term_to_parse_tree,
+                [simple_msg(VersionNumberContext, [always(Pieces)])]),
+            MaybeIOM = error1([Spec])
         )
     else
         Pieces = [words("Error: a"), decl(Functor), words("declaration"),

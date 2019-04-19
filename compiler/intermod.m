@@ -705,7 +705,7 @@ gather_entities_to_opt_export_in_goal_expr(GoalExpr0, GoalExpr,
         ;
             ShortHand0 = bi_implication(_, _),
             % These should have been expanded out by now.
-            unexpected($module, $pred, "bi_implication")
+            unexpected($pred, "bi_implication")
         ),
         GoalExpr = shorthand(ShortHand)
     ).
@@ -886,7 +886,7 @@ intermod_do_add_proc(PredId, DoWrite, !IntermodInfo) :-
         set.insert(PredModule, Modules0, Modules),
         intermod_info_set_modules(Modules, !IntermodInfo)
     else
-        unexpected($module, $pred, "unexpected status")
+        unexpected($pred, "unexpected status")
     ).
 
     % Resolve overloading and module qualify everything in a unify_rhs.
@@ -985,8 +985,7 @@ gather_opt_export_instance_in_instance_defn(ModuleInfo, ClassId, InstanceDefn,
                     MethodAL)
             ;
                 MaybePredProcIds = no,
-                unexpected($module, $pred,
-                    "method pred_proc_ids not filled in")
+                unexpected($pred, "method pred_proc_ids not filled in")
             ),
             list.map_foldl(qualify_instance_method(ModuleInfo),
                 MethodAL, Methods, [], PredIds),
@@ -1162,7 +1161,7 @@ find_func_matching_instance_method(ModuleInfo, InstanceMethodName0,
             UnqualMethodName = unqualify_name(InstanceMethodName0),
             InstanceMethodName = qualified(TypeModule, UnqualMethodName)
         else
-            unexpected($module, $pred, "unqualified type_ctor in " ++
+            unexpected($pred, "unqualified type_ctor in " ++
                 "hlds_cons_defn or hlds_ctor_field_defn")
         )
     ).
@@ -1704,19 +1703,12 @@ intermod_write_insts(OutInfo, ModuleInfo, !IO) :-
 
 intermod_write_inst(OutInfo, ModuleName, InstId, InstDefn, !First, !IO) :-
     InstId = inst_id(SymName, _Arity),
-    InstDefn = hlds_inst_defn(Varset, Args, Body, IFTC, Context, InstStatus),
+    InstDefn = hlds_inst_defn(Varset, Args, Inst, IFTC, Context, InstStatus),
     ( if
         SymName = qualified(ModuleName, _),
         inst_status_to_write(InstStatus) = yes
     then
         maybe_write_nl(!First, !IO),
-        (
-            Body = eqv_inst(Inst2),
-            InstBody = eqv_inst(Inst2)
-        ;
-            Body = abstract_inst,
-            InstBody = abstract_inst
-        ),
         (
             IFTC = iftc_applicable_declared(ForTypeCtor),
             MaybeForTypeCtor = yes(ForTypeCtor)
@@ -1729,7 +1721,7 @@ intermod_write_inst(OutInfo, ModuleName, InstId, InstDefn, !First, !IO) :-
             MaybeForTypeCtor = no
         ),
         ItemInstDefn = item_inst_defn_info(SymName, Args, MaybeForTypeCtor,
-            InstBody, Varset, Context, -1),
+            nonabstract_inst_defn(Inst), Varset, Context, -1),
         Item = item_inst_defn(ItemInstDefn),
         MercInfo = OutInfo ^ hoi_mercury_to_mercury,
         mercury_output_item(MercInfo, Item, !IO)
@@ -1762,8 +1754,9 @@ intermod_write_mode(OutInfo, ModuleName, ModeId, ModeDefn, !First, !IO) :-
         mode_status_to_write(ModeStatus) = yes
     then
         maybe_write_nl(!First, !IO),
-        ItemModeDefn = item_mode_defn_info(SymName, Args, eqv_mode(Mode),
-            Varset, Context, -1),
+        MaybeAbstractModeDefn = nonabstract_mode_defn(eqv_mode(Mode)),
+        ItemModeDefn = item_mode_defn_info(SymName, Args,
+            MaybeAbstractModeDefn, Varset, Context, -1),
         Item = item_mode_defn(ItemModeDefn),
         MercInfo = OutInfo ^ hoi_mercury_to_mercury,
         mercury_output_item(MercInfo, Item, !IO)
@@ -1971,7 +1964,7 @@ intermod_write_pred_mode(PredOrFunc, PredSymName, ProcInfo, !IO) :-
         ArgModes = ArgModesPrime,
         Detism = DetismPrime
     else
-        unexpected($module, $pred, "attempt to write undeclared mode")
+        unexpected($pred, "attempt to write undeclared mode")
     ),
     varset.init(Varset),
     (
@@ -2117,7 +2110,7 @@ intermod_write_pred(OutInfo, ModuleInfo, OrderPredInfo, !IO) :-
             ( Clauses = []
             ; Clauses = [_, _ | _]
             ),
-            unexpected($module, $pred, "assertion not a single clause.")
+            unexpected($pred, "assertion not a single clause.")
         )
     ;
         ( GoalType = goal_type_clause
@@ -2186,7 +2179,7 @@ intermod_write_clause(OutInfo, ModuleInfo, PredId, SymName, PredOrFunc,
         then
             (
                 ApplicableProcIds = all_modes,
-                unexpected($module, $pred, "all_modes foreign_proc")
+                unexpected($pred, "all_modes foreign_proc")
             ;
                 ApplicableProcIds = selected_modes(ProcIds),
                 list.foldl(
@@ -2197,10 +2190,10 @@ intermod_write_clause(OutInfo, ModuleInfo, PredId, SymName, PredOrFunc,
                 ( ApplicableProcIds = unify_in_in_modes
                 ; ApplicableProcIds = unify_non_in_in_modes
                 ),
-                unexpected($module, $pred, "unify modes foreign_proc")
+                unexpected($pred, "unify modes foreign_proc")
             )
         else
-            unexpected($module, $pred, "did not find foreign_proc")
+            unexpected($pred, "did not find foreign_proc")
         )
     ).
 
@@ -2363,7 +2356,7 @@ intermod_write_foreign_clause(Procs, PredOrFunc, PragmaImpl,
         mercury_output_pragma_foreign_proc(output_mercury, FPInfo, !IO)
     ;
         MaybeArgModes = no,
-        unexpected($module, $pred, "no mode declaration")
+        unexpected($pred, "no mode declaration")
     ).
 
 :- pred get_pragma_foreign_code_vars(list(foreign_arg)::in, list(mer_mode)::in,
@@ -2392,11 +2385,11 @@ get_pragma_foreign_code_vars(Args, Modes, !VarSet, PragmaVars) :-
     ;
         Args = [],
         Modes = [_ | _],
-        unexpected($module, $pred, "list length mismatch")
+        unexpected($pred, "list length mismatch")
     ;
         Args = [_ | _],
         Modes = [],
-        unexpected($module, $pred, "list length mismatch")
+        unexpected($pred, "list length mismatch")
     ).
 
 %---------------------------------------------------------------------------%

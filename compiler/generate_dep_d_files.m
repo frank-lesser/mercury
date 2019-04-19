@@ -124,8 +124,7 @@ build_deps_map(Globals, FileName, ModuleName, DepsMap, !IO) :-
     split_into_compilation_units_perform_checks(ParseTreeSrc, RawCompUnits,
         Specs0, Specs),
     ParseTreeSrc = parse_tree_src(ModuleName, _, _),
-    % XXX _NumErrors
-    write_error_specs(Specs, Globals, 0, _NumWarnings, 0, _NumErrors, !IO),
+    write_error_specs_ignore(Specs, Globals, !IO),
     NestedModuleNames = set.list_to_set(
         list.map(raw_compilation_unit_project_name, RawCompUnits)),
     SourceFileName = FileName ++ ".m",
@@ -152,7 +151,7 @@ generate_dependencies(Globals, Mode, Search, ModuleName, DepsMap0, !IO) :-
     % Check whether we could read the main `.m' file.
     map.lookup(DepsMap, ModuleName, ModuleDep),
     ModuleDep = deps(_, ModuleAndImports),
-    Errors = ModuleAndImports ^ mai_errors,
+    module_and_imports_get_errors(ModuleAndImports, Errors),
     set.intersect(Errors, fatal_read_module_errors, FatalErrors),
     ( if set.is_non_empty(FatalErrors) then
         ModuleString = sym_name_to_string(ModuleName),
@@ -270,7 +269,7 @@ deps_list_to_deps_graph([], _, !IntDepsGraph, !ImplDepsGraph).
 deps_list_to_deps_graph([Deps | DepsList], DepsMap,
         !IntDepsGraph, !ImplDepsGraph) :-
     Deps = deps(_, ModuleAndImports),
-    ModuleErrors = ModuleAndImports ^ mai_errors,
+    module_and_imports_get_errors(ModuleAndImports, ModuleErrors),
     set.intersect(ModuleErrors, fatal_read_module_errors, FatalModuleErrors),
     ( if set.is_empty(FatalModuleErrors) then
         add_module_and_imports_to_deps_graph(ModuleAndImports,

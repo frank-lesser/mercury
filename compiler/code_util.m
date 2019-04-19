@@ -15,13 +15,16 @@
 :- module ll_backend.code_util.
 :- interface.
 
+:- import_module hlds.
 :- import_module hlds.hlds_goal.
 :- import_module hlds.hlds_llds.
 :- import_module hlds.hlds_module.
 :- import_module hlds.hlds_pred.
 :- import_module hlds.hlds_rtti.
 :- import_module ll_backend.llds.
+:- import_module mdbcomp.
 :- import_module mdbcomp.prim_data.
+:- import_module parse_tree.
 :- import_module parse_tree.prog_data.
 
 :- import_module assoc_list.
@@ -109,6 +112,7 @@
 
 :- implementation.
 
+:- import_module backend_libs.
 :- import_module backend_libs.builtin_ops.
 :- import_module backend_libs.proc_label.
 :- import_module hlds.code_model.
@@ -198,7 +202,7 @@ extract_proc_label_from_code_addr(CodeAddr) = ProcLabel :-
     else if CodeAddr = code_imported_proc(ProcLabelPrime) then
         ProcLabel = ProcLabelPrime
     else
-        unexpected($module, $pred, "failed")
+        unexpected($pred, "failed")
     ).
 
 %-----------------------------------------------------------------------------%
@@ -306,7 +310,7 @@ goal_expr_may_alloc_temp_frame(GoalExpr, May) :-
     ;
         GoalExpr = shorthand(_),
         % These should have been expanded out by now.
-        unexpected($module, $pred, "shorthand")
+        unexpected($pred, "shorthand")
     ).
 
 :- pred goal_list_may_alloc_temp_frame(list(hlds_goal)::in, bool::out) is det.
@@ -374,7 +378,7 @@ neg_op(float_gt, float_le).
 neg_op(float_ge, float_lt).
 
 negate_the_test([], _) :-
-    unexpected($module, $pred, "empty list").
+    unexpected($pred, "empty list").
 negate_the_test([Instr0 | Instrs0], Instrs) :-
     ( if Instr0 = llds_instr(if_val(Test, Target), Comment) then
         neg_rval(Test, NewTest),

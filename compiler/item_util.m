@@ -15,6 +15,7 @@
 :- module parse_tree.item_util.
 :- interface.
 
+:- import_module libs.
 :- import_module libs.globals.
 :- import_module parse_tree.prog_item.
 
@@ -182,9 +183,7 @@ item_needs_imports(Item) = NeedsImports :-
         ),
         NeedsImports = yes
     ;
-        ( Item = item_foreign_import_module(_)
-        ; Item = item_nothing(_)
-        ),
+        Item = item_foreign_import_module(_),
         NeedsImports = no
     ;
         Item = item_type_repn(_),
@@ -224,7 +223,6 @@ item_needs_foreign_imports(Item) = Langs :-
         ; Item = item_initialise(_)
         ; Item = item_finalise(_)
         ; Item = item_foreign_import_module(_)
-        ; Item = item_nothing(_)
         ),
         Langs = []
     ;

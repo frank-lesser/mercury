@@ -87,6 +87,7 @@
 :- import_module ll_backend.unify_gen_construct.
 :- import_module mdbcomp.prim_data.
 :- import_module mdbcomp.program_representation.
+:- import_module parse_tree.
 :- import_module parse_tree.error_util.
 :- import_module parse_tree.file_names.
 :- import_module parse_tree.module_cmds.
@@ -152,8 +153,7 @@ llds_backend_pass(!HLDS, !:GlobalData, LLDS, !DumpInfo, !IO) :-
         TradPasses = yes,
         llds_backend_pass_by_preds(!HLDS, LLDS, !GlobalData, [], Specs)
     ),
-    % XXX _NumErrors
-    write_error_specs(Specs, Globals, 0, _NumWarnings, 0, _NumErrors, !IO).
+    write_error_specs_ignore(Specs, Globals, !IO).
 
 %---------------------------------------------------------------------------%
 
