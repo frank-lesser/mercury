@@ -137,7 +137,17 @@ real_main(!IO) :-
         io.write_string(io.error_message(E), !IO),
         io.nl(!IO)
     ),
-    write_translations_record_if_any(!IO).
+    write_translations_record_if_any(!IO),
+    trace [compile_time(flag("mai-stats")), io(!TIO)] (
+        io.open_append("/tmp/MODULE_AND_IMPORTS", Result, !TIO),
+        (
+            Result = ok(Stream),
+            write_mai_stats(Stream, !TIO),
+            io.close_output(Stream, !TIO)
+        ;
+            Result = error(_)
+        )
+    ).
 
     % Expand @File arguments.
     % Each argument in the above form is replaced with a list of arguments
@@ -583,8 +593,17 @@ do_op_mode(Globals, OpMode, DetectedGradeFlags, OptionVariables,
         do_op_mode_query(Globals, OpModeQuery, !IO)
     ;
         OpMode = opm_top_args(OpModeArgs),
-        do_op_mode_args(Globals, OpModeArgs, DetectedGradeFlags,
-            OptionVariables, OptionArgs, Args, !IO)
+        globals.lookup_bool_option(Globals, filenames_from_stdin,
+            FileNamesFromStdin),
+        ( if
+            Args = [],
+            FileNamesFromStdin = no
+        then
+            usage(!IO)
+        else
+            do_op_mode_args(Globals, OpModeArgs, FileNamesFromStdin,
+                DetectedGradeFlags, OptionVariables, OptionArgs, Args, !IO)
+        )
     ).
 
 :- pred do_op_mode_standalone_interface(globals::in, string::in,
@@ -708,108 +727,99 @@ do_op_mode_query(Globals, OpModeQuery, !IO) :-
 % Do the modes of operation that process the argument list.
 %
 
-:- pred do_op_mode_args(globals::in, op_mode_args::in,
+:- pred do_op_mode_args(globals::in, op_mode_args::in, bool::in,
     list(string)::in, options_variables::in,
     list(string)::in, list(string)::in, io::di, io::uo) is det.
 
-do_op_mode_args(Globals, OpModeArgs, DetectedGradeFlags,
+do_op_mode_args(Globals, OpModeArgs, FileNamesFromStdin, DetectedGradeFlags,
         OptionVariables, OptionArgs, Args, !IO) :-
-    globals.lookup_bool_option(Globals, filenames_from_stdin,
-        FileNamesFromStdin),
-    ( if
-        Args = [],
-        FileNamesFromStdin = no
-    then
-        usage(!IO)
-    else
-        (
-            FileNamesFromStdin = yes,
-            process_compiler_stdin_args(Globals, OpModeArgs,
-                DetectedGradeFlags, OptionVariables, OptionArgs,
-                cord.empty, ModulesToLinkCord,
-                cord.empty, ExtraObjFilesCord, !IO)
-        ;
-            FileNamesFromStdin = no,
-            process_compiler_cmd_line_args(Globals, OpModeArgs,
-                DetectedGradeFlags, OptionVariables, OptionArgs, Args,
-                cord.empty, ModulesToLinkCord,
-                cord.empty, ExtraObjFilesCord, !IO)
-        ),
-        ModulesToLink = cord.list(ModulesToLinkCord),
-        ExtraObjFiles = cord.list(ExtraObjFilesCord),
+    (
+        FileNamesFromStdin = yes,
+        process_compiler_stdin_args(Globals, OpModeArgs,
+            DetectedGradeFlags, OptionVariables, OptionArgs,
+            cord.empty, ModulesToLinkCord,
+            cord.empty, ExtraObjFilesCord, !IO)
+    ;
+        FileNamesFromStdin = no,
+        process_compiler_cmd_line_args(Globals, OpModeArgs,
+            DetectedGradeFlags, OptionVariables, OptionArgs, Args,
+            cord.empty, ModulesToLinkCord,
+            cord.empty, ExtraObjFilesCord, !IO)
+    ),
+    ModulesToLink = cord.list(ModulesToLinkCord),
+    ExtraObjFiles = cord.list(ExtraObjFilesCord),
 
-        io.get_exit_status(ExitStatus, !IO),
-        ( if ExitStatus = 0 then
-            ( if
-                OpModeArgs = opma_augment(opmau_generate_code(
-                    opmcg_target_object_and_executable)),
-                ModulesToLink = [FirstModule | _]
-            then
-                file_name_to_module_name(FirstModule, MainModuleName),
-                globals.get_target(Globals, Target),
-                (
-                    Target = target_java,
-                    % For Java, at the "link" step we just generate a shell
-                    % script; the actual linking will be done at runtime by
-                    % the Java interpreter.
-                    create_java_shell_script(Globals, MainModuleName,
-                        Succeeded, !IO)
-                ;
-                    ( Target = target_c
-                    ; Target = target_csharp
-                    ; Target = target_erlang
-                    ),
-                    compile_with_module_options(Globals, MainModuleName,
-                        DetectedGradeFlags, OptionVariables, OptionArgs,
-                        link_module_list(ModulesToLink, ExtraObjFiles),
-                        Succeeded, !IO)
+    io.get_exit_status(ExitStatus, !IO),
+    ( if ExitStatus = 0 then
+        ( if
+            OpModeArgs = opma_augment(opmau_generate_code(
+                opmcg_target_object_and_executable)),
+            ModulesToLink = [FirstModule | _]
+        then
+            file_name_to_module_name(FirstModule, MainModuleName),
+            globals.get_target(Globals, Target),
+            (
+                Target = target_java,
+                % For Java, at the "link" step we just generate a shell
+                % script; the actual linking will be done at runtime by
+                % the Java interpreter.
+                create_java_shell_script(Globals, MainModuleName,
+                    Succeeded, !IO)
+            ;
+                ( Target = target_c
+                ; Target = target_csharp
+                ; Target = target_erlang
                 ),
-                maybe_set_exit_status(Succeeded, !IO)
-            else
-                true
-            )
-        else
-            % If we suppressed the printing of some errors, then tell the user
-            % about this fact, because the absence of any errors being printed
-            % during a failing compilation would otherwise be likely to be
-            % baffling.
-            globals.io_get_some_errors_were_context_limited(Limited, !IO),
-            (
-                Limited = no
-            ;
-                Limited = yes,
-                io.write_string("Some error messages were suppressed " ++
-                    "by `--limit-error-contexts' options.\n", !IO),
-                io.write_string("You can see the suppressed messages " ++
-                    "if you recompile without these options.\n", !IO)
+                compile_with_module_options(Globals, MainModuleName,
+                    DetectedGradeFlags, OptionVariables, OptionArgs,
+                    link_module_list(ModulesToLink, ExtraObjFiles),
+                    Succeeded, !IO)
             ),
-
-            % If we found some errors, but the user didn't enable the `-E'
-            % (`--verbose-errors') option, give them a hint about it.
-            % Of course, we should only output the hint when we have further
-            % information to give the user.
-            globals.lookup_bool_option(Globals, verbose_errors, VerboseErrors),
-            globals.io_get_extra_error_info(ExtraErrorInfo, !IO),
-            (
-                VerboseErrors = no,
-                (
-                    ExtraErrorInfo = yes,
-                    io.write_string("For more information, " ++
-                        "recompile with `-E'.\n", !IO)
-                ;
-                    ExtraErrorInfo = no
-                )
-            ;
-                VerboseErrors = yes
-            )
-        ),
-        globals.lookup_bool_option(Globals, statistics, Statistics),
-        (
-            Statistics = yes,
-            io.report_stats("full_memory_stats", !IO)
-        ;
-            Statistics = no
+            maybe_set_exit_status(Succeeded, !IO)
+        else
+            true
         )
+    else
+        % If we suppressed the printing of some errors, then tell the user
+        % about this fact, because the absence of any errors being printed
+        % during a failing compilation would otherwise be likely to be
+        % baffling.
+        globals.io_get_some_errors_were_context_limited(Limited, !IO),
+        (
+            Limited = no
+        ;
+            Limited = yes,
+            io.write_string("Some error messages were suppressed " ++
+                "by `--limit-error-contexts' options.\n", !IO),
+            io.write_string("You can see the suppressed messages " ++
+                "if you recompile without these options.\n", !IO)
+        ),
+
+        % If we found some errors, but the user didn't enable the `-E'
+        % (`--verbose-errors') option, give them a hint about it.
+        % Of course, we should only output the hint when we have further
+        % information to give the user.
+        globals.lookup_bool_option(Globals, verbose_errors, VerboseErrors),
+        globals.io_get_extra_error_info(ExtraErrorInfo, !IO),
+        (
+            VerboseErrors = no,
+            (
+                ExtraErrorInfo = yes,
+                io.write_string("For more information, " ++
+                    "recompile with `-E'.\n", !IO)
+            ;
+                ExtraErrorInfo = no
+            )
+        ;
+            VerboseErrors = yes
+        )
+    ),
+    globals.lookup_bool_option(Globals, statistics, Statistics),
+    (
+        Statistics = yes,
+        io.report_stats("full_memory_stats", !IO)
+    ;
+        Statistics = no
     ).
 
 :- type compile == pred(globals, bool, io, io).
@@ -1330,7 +1340,7 @@ file_or_module_to_module_name(fm_module(ModuleName)) = ModuleName.
     io::di, io::uo) is det.
 
 read_module_or_file(Globals0, Globals, FileOrModuleName,
-        ModuleName, SourceFileName, ReturnTimestamp, MaybeTimestamp,
+        ModuleName, FileNameDotM, ReturnTimestamp, MaybeTimestamp,
         ParseTreeSrc, Specs, Errors, !HaveReadModuleMaps, !IO) :-
     (
         FileOrModuleName = fm_module(ModuleName),
@@ -1343,7 +1353,7 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
             % Avoid rereading the module if it was already read
             % by recompilation_version.m.
             find_read_module_src(!.HaveReadModuleMaps ^ hrmm_src, ModuleName,
-                ReturnTimestamp, SourceFileNamePrime, MaybeTimestampPrime,
+                ReturnTimestamp, FileNameDotMPrime, MaybeTimestampPrime,
                 ParseTreeSrcPrime, SpecsPrime, ErrorsPrime)
         then
             Globals = Globals0,
@@ -1353,7 +1363,7 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
             map.delete(have_read_module_key(ModuleName, sfk_src),
                 HaveReadModuleMapSrc0, HaveReadModuleMapSrc),
             !HaveReadModuleMaps ^ hrmm_src := HaveReadModuleMapSrc,
-            SourceFileName = SourceFileNamePrime,
+            FileNameDotM = FileNameDotMPrime,
             MaybeTimestamp = MaybeTimestampPrime,
             ParseTreeSrc = ParseTreeSrcPrime,
             Specs = SpecsPrime,
@@ -1364,7 +1374,7 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
             % being created in the wrong directory.
             read_module_src(Globals0, "Reading module",
                 do_not_ignore_errors, do_not_search,
-                ModuleName, [], SourceFileName,
+                ModuleName, [], FileNameDotM,
                 always_read_module(ReturnTimestamp), MaybeTimestamp,
                 ParseTreeSrc, Specs, Errors, !IO),
             io_get_disable_smart_recompilation(DisableSmart, !IO),
@@ -1381,9 +1391,10 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
         maybe_report_stats(Stats, !IO)
     ;
         FileOrModuleName = fm_file(FileName),
+        FileNameDotM = FileName ++ ".m",
         globals.lookup_bool_option(Globals0, verbose, Verbose),
         maybe_write_string(Verbose, "% Parsing file `", !IO),
-        maybe_write_string(Verbose, FileName, !IO),
+        maybe_write_string(Verbose, FileNameDotM, !IO),
         maybe_write_string(Verbose, "' and imported interfaces...\n", !IO),
 
         file_name_to_module_name(FileName, DefaultModuleName),
@@ -1410,8 +1421,8 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
             % We don't search `--search-directories' for source files
             % because that can result in the generated interface files
             % being created in the wrong directory.
-            read_module_src_from_file(Globals0, FileName, "Reading file",
-                do_not_search,
+            read_module_src_from_file(Globals0, FileName, FileNameDotM,
+                "Reading file", do_not_search,
                 always_read_module(ReturnTimestamp), MaybeTimestamp,
                 ParseTreeSrc, Specs, Errors, !IO),
             io_get_disable_smart_recompilation(DisableSmart, !IO),
@@ -1444,7 +1455,7 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
                     Warn = yes,
                     Pieces = [words("Warning:"),
                         words("module name does not match file name: "), nl,
-                        fixed(FileName), words("contains module"),
+                        fixed(FileNameDotM), words("contains module"),
                         qual_sym_name(ModuleName), suffix("."), nl,
                         words("Smart recompilation will not work unless"),
                         words("a module name to file name mapping is created"),
@@ -1460,8 +1471,7 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
             )
         ),
         globals.lookup_bool_option(Globals, detailed_statistics, Stats),
-        maybe_report_stats(Stats, !IO),
-        SourceFileName = FileName ++ ".m"
+        maybe_report_stats(Stats, !IO)
     ).
 
 %---------------------------------------------------------------------------%
@@ -1559,23 +1569,28 @@ augment_and_process_module(Globals, OpModeAugment,
     list(string)::out, dump_info::in, dump_info::out,
     list(error_spec)::in, list(error_spec)::out, io::di, io::uo) is det.
 
-process_augmented_module(Globals, OpModeAugment, ModuleAndImports,
+process_augmented_module(Globals0, OpModeAugment, ModuleAndImports,
         NestedSubModules, FindTimestampFiles, ExtraObjFiles,
         !DumpInfo, !Specs, !IO) :-
     (
         ( OpModeAugment = opmau_typecheck_only
         ; OpModeAugment = opmau_errorcheck_only
         ),
+        Globals = Globals0,
         % If we are only typechecking or error checking, then we should not
         % modify any files; this includes writing to .d files.
         WriteDFile = do_not_write_d_file
     ;
-        ( OpModeAugment = opmau_make_trans_opt_int
-        ; OpModeAugment = opmau_generate_code(_)
-        ),
+        OpModeAugment = opmau_make_trans_opt_int,
+        disable_warning_options(Globals0, Globals),
+        WriteDFile = write_d_file
+    ;
+        OpModeAugment = opmau_generate_code(_),
+        Globals = Globals0,
         WriteDFile = write_d_file
     ;
         OpModeAugment = opmau_make_opt_int,
+        disable_warning_options(Globals0, Globals),
         % Don't write the `.d' file when making the `.opt' file because
         % we can't work out the full transitive implementation dependencies.
         WriteDFile = do_not_write_d_file
@@ -1583,6 +1598,7 @@ process_augmented_module(Globals, OpModeAugment, ModuleAndImports,
         ( OpModeAugment = opmau_make_analysis_registry
         ; OpModeAugment = opmau_make_xml_documentation
         ),
+        Globals = Globals0,
         % XXX I (zs) think we should assign do_not_write_d_file for these.
         WriteDFile = write_d_file
     ),
@@ -1656,6 +1672,16 @@ process_augmented_module(Globals, OpModeAugment, ModuleAndImports,
         ),
         ExtraObjFiles = []
     ).
+
+:- pred disable_warning_options(globals::in, globals::out) is det.
+
+disable_warning_options(Globals0, Globals) :-
+    globals.get_options(Globals0, OptionTable0),
+    set_all_options_to(style_warning_options, bool(no),
+        OptionTable0, OptionTable1),
+    set_all_options_to(non_style_warning_options, bool(no),
+        OptionTable1, OptionTable),
+    globals.set_options(OptionTable, Globals0, Globals).
 
 %---------------------------------------------------------------------------%
 

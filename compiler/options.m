@@ -66,6 +66,7 @@
 :- import_module char.
 :- import_module getopt_io.
 :- import_module io.
+:- import_module list.
 :- import_module set.
 
 %---------------------------------------------------------------------------%
@@ -89,6 +90,11 @@
     %
 :- pred special_handler(option::in, special_data::in, option_table::in,
     maybe_option_table::out) is semidet.
+
+    % Return the style and non-style warning options.
+    %
+:- func style_warning_options = list(option).
+:- func non_style_warning_options = list(option).
 
     % Return the set of options which are inconsequential as far as the
     % `--track-flags' option is concerned. That is, adding or removing such
@@ -116,6 +122,11 @@
     % options.
     %
 :- pred option_table_add_search_library_files_directory(string::in,
+    option_table::in, option_table::out) is det.
+
+    % Set all of the given options to the given value.
+    %
+:- pred set_all_options_to(list(option)::in, option_data::in,
     option_table::in, option_table::out) is det.
 
     % Quote an argument to a shell command.
@@ -170,6 +181,7 @@
     ;       warn_wrong_module_name
     ;       warn_smart_recompilation
     ;       warn_undefined_options_variables
+    ;       warn_suspicious_recursion
     ;       warn_non_tail_recursion_self
     ;       warn_non_tail_recursion_mutual
     ;       warn_non_tail_recursion
@@ -1112,7 +1124,6 @@
 :- import_module bool.
 :- import_module dir.
 :- import_module int.
-:- import_module list.
 :- import_module map.
 :- import_module maybe.
 :- import_module pair.
@@ -1186,6 +1197,7 @@ option_defaults_2(warning_option, [
     warn_wrong_module_name              -   bool(yes),
     warn_smart_recompilation            -   bool(yes),
     warn_undefined_options_variables    -   bool(yes),
+    warn_suspicious_recursion           -   bool(no),
     warn_non_tail_recursion_self        -   bool(no),
     warn_non_tail_recursion_mutual      -   bool(no),
     warn_non_tail_recursion             -   maybe_string_special,
@@ -2095,16 +2107,17 @@ long_option("warn-missing-module-name", warn_missing_module_name).
 long_option("warn-wrong-module-name",   warn_wrong_module_name).
 long_option("warn-smart-recompilation", warn_smart_recompilation).
 long_option("warn-undefined-options-variables",
-                    warn_undefined_options_variables).
+                                        warn_undefined_options_variables).
 long_option("warn-undefined-options-vars",
-                    warn_undefined_options_variables).
+                                        warn_undefined_options_variables).
+long_option("warn-suspicious-recursion", warn_suspicious_recursion).
 long_option("warn-non-tail-recursion-self",
-                    warn_non_tail_recursion_self).
+                                        warn_non_tail_recursion_self).
 long_option("warn-non-tail-recursion-mutual",
-                    warn_non_tail_recursion_mutual).
+                                        warn_non_tail_recursion_mutual).
 long_option("warn-non-tail-recursion",  warn_non_tail_recursion).
 long_option("warn-obvious-non-tail-recursion",
-                    warn_obvious_non_tail_recursion).
+                                        warn_obvious_non_tail_recursion).
 long_option("warn-target-code",         warn_target_code).
 long_option("warn-up-to-date",          warn_up_to_date).
 long_option("warn-stubs",               warn_stubs).
@@ -3365,8 +3378,6 @@ special_handler(Option, SpecialData, !.OptionTable, Result) :-
         Result = ok(!.OptionTable)
     ).
 
-:- func style_warning_options = list(option).
-
 style_warning_options = [
     warn_inconsistent_pred_order_clauses,
     warn_inconsistent_pred_order_foreign_procs,
@@ -3391,8 +3402,6 @@ style_warning_options = [
     warn_state_var_shadowing,
     inform_suboptimal_packing
 ].
-
-:- func non_style_warning_options = list(option).
 
 non_style_warning_options = [
     warn_accumulator_swaps,
@@ -3483,9 +3492,6 @@ override_options([], !OptionTable).
 override_options([Option - Value | OptionsValues], !OptionTable) :-
     map.set(Option, Value, !OptionTable),
     override_options(OptionsValues, !OptionTable).
-
-:- pred set_all_options_to(list(option)::in, option_data::in,
-    option_table::in, option_table::out) is det.
 
 set_all_options_to([], _Value, !OptionTable).
 set_all_options_to([Option | Options], Value, !OptionTable) :-
@@ -3894,6 +3900,9 @@ options_help_warning -->
         "--no-warn-undefined-options-variables",
         "\tDo not warn about references to undefined variables in",
         "\toptions files with `--make'.",
+%       "--warn-suspicious-recursion",
+%       "\tWarn about recursive calls which are likely to have problems,",
+%       "\tsuch as leading to infinite recursion.",
 % These are the internal options that implement --warn-non-tail-recursion.
 %       "--warn-non-tail-recursion-self",
 %       "\tWarn about any self recursive calls that are not tail recursive.",

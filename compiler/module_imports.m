@@ -33,6 +33,7 @@
 :- import_module recompilation.
 
 :- import_module cord.
+:- import_module io.
 :- import_module list.
 :- import_module map.
 :- import_module maybe.
@@ -90,10 +91,6 @@
 
 %---------------------------------------------------------------------------%
 
-:- type module_names_contexts == multi_map(module_name, prog_context).
-
-%---------------------------------------------------------------------------%
-
     % The `module_and_imports' structure holds information about
     % a module and the modules that it imports. We build this structure up
     % as we go along.
@@ -105,23 +102,31 @@
 % The predicates that create module_and_imports structures.
 %
 
-    % init_module_and_imports(Globals, FileName, SourceFileModuleName,
-    %   NestedModuleNames, Specs, Errors, RawCompUnit, ModuleAndImports):
+    % This predicate is used by
     %
-    % Initialize a module_and_imports structure.
+    %   deps_map.m
+    %   generate_dep_d_files.m
+    %   make.module_dep_file.m
     %
-    % We do this just after we have read in a raw compulation unit.
-    % Later code, mostly in modules.m but in some other modules as well,
-    % then calls the module_and_imports_{add,set}_* predicates above
-    % to record more information (mostly from read-in interface files)
-    % to the module_and_imports structure. When all such modifications
-    % are done, the module_and_imports_get_aug_comp_unit predicate
-    % will extract the augmented compilation unit from the updated
-    % module_and_imports structure.
+    % for building dependency maps between modules. The module_and_imports
+    % structures it builds are not fully complete; only the fields
+    % needed for that task are filled in.
     %
-:- pred init_module_and_imports(globals::in, file_name::in, module_name::in,
-    set(module_name)::in, list(error_spec)::in, read_module_errors::in,
-    raw_compilation_unit::in, module_and_imports::out) is det.
+:- pred parse_tree_src_to_module_and_imports_list(globals::in, file_name::in,
+    parse_tree_src::in, read_module_errors::in,
+    list(error_spec)::in, list(error_spec)::out,
+    list(raw_compilation_unit)::out, list(module_and_imports)::out) is det.
+
+    % This predicate is used by deps_map.m for building dependency maps
+    % between modules, in case the reading of a module's source file
+    % encounters a fatal error.
+    %
+:- pred parse_tree_int_to_module_and_imports(globals::in, file_name::in,
+    parse_tree_int::in, read_module_errors::in,
+    module_and_imports::out) is det.
+
+:- pred rebuild_module_and_imports_for_dep_file(globals::in,
+    module_and_imports::in, module_and_imports::out) is det.
 
     % make_module_and_imports(SourceFileName, SourceFileModuleName,
     %  ModuleName, ModuleNameContext, SrcItemBlocks0,
@@ -138,9 +143,7 @@
     %
     % XXX ITEM_LIST This predicate is used by code in modules.m to create
     % a module_and_imports structure in what seems (to me, zs) to be
-    % a partially filled in state. If that perception is correct,
-    % then that code should be fixed to follow the standard method
-    % of construcing module_and_imports structures.
+    % a partially filled in state.
     %
 :- pred make_module_and_imports(file_name::in,
     module_name::in, module_name::in, prog_context::in,
@@ -325,6 +328,10 @@
     is det.
 
 %---------------------------------------------------------------------------%
+
+:- pred write_mai_stats(io.output_stream::in, io::di, io::uo) is det.
+
+%---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
 
 :- implementation.
@@ -332,9 +339,13 @@
 :- import_module mdbcomp.prim_data.
 :- import_module parse_tree.comp_unit_interface.
 :- import_module parse_tree.get_dependencies.
+:- import_module parse_tree.split_parse_tree_src.
 
+:- import_module assoc_list.
 :- import_module dir.
 :- import_module pair.
+:- import_module require.
+:- import_module string.
 :- import_module term.
 
 %---------------------------------------------------------------------------%
@@ -459,59 +470,233 @@
                 % Whether an error has been encountered when reading in
                 % this module.
                 mai_specs                       :: list(error_spec),
-                mai_errors                      :: read_module_errors
+                mai_errors                      :: read_module_errors,
+
+                mai_construction_method         :: mai_construction_method
             ).
 
+:- type mai_construction_method
+    --->    mcm_init
+    ;       mcm_make
+    ;       mcm_read.
+
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
+
+parse_tree_src_to_module_and_imports_list(Globals, SourceFileName,
+        ParseTreeSrc, ReadModuleErrors, !Specs,
+        RawCompUnits, ModuleAndImportsList) :-
+    split_into_compilation_units_perform_checks(ParseTreeSrc, RawCompUnits,
+        !Specs),
+    ParseTreeSrc = parse_tree_src(TopModuleName, _, _),
+    CompUnitModuleNames = set.list_to_set(
+        list.map(raw_compilation_unit_project_name, RawCompUnits)),
+    MAISpecs0 = [],
+    list.map(
+        init_module_and_imports(Globals, SourceFileName, TopModuleName,
+            CompUnitModuleNames, MAISpecs0, ReadModuleErrors),
+        RawCompUnits, ModuleAndImportsList).
+
+parse_tree_int_to_module_and_imports(Globals, IntFileName,
+        ParseTreeInt, ReadModuleErrors, ModuleAndImports) :-
+    ParseTreeInt = parse_tree_int(ModuleName, _, ModuleContext,
+        _MaybeVersionNumbers, IntIncl, ImpIncls, IntAvails, ImpAvails,
+        IntItems, ImpItems),
+    int_imp_items_to_item_blocks(ModuleName,
+        ms_interface, ms_implementation, IntIncl, ImpIncls,
+        IntAvails, ImpAvails, IntItems, ImpItems, RawItemBlocks),
+    RawCompUnit =
+        raw_compilation_unit(ModuleName, ModuleContext, RawItemBlocks),
+
+    CompUnitModuleNames = set.make_singleton_set(ModuleName),
+    MAISpecs0 = [],
+    init_module_and_imports(Globals, IntFileName, ModuleName,
+        CompUnitModuleNames, MAISpecs0, ReadModuleErrors,
+        RawCompUnit, ModuleAndImports).
+
+rebuild_module_and_imports_for_dep_file(Globals,
+        ModuleAndImports0, ModuleAndImports) :-
+    % Make sure all the required fields are filled in.
+    % XXX ITEM_LIST Why build a NEW ModuleAndImports? Wouldn't modifying
+    % ModuleAndImports0 be easier and clearer?
+    module_and_imports_get_aug_comp_unit(ModuleAndImports0, AugCompUnit,
+        Specs, _Errors),
+    AugCompUnit = aug_compilation_unit(ModuleName, ModuleNameContext,
+        _ModuleVersionNumbers, SrcItemBlocks,
+        _DirectIntItemBlocksCord, _IndirectIntItemBlocksCord,
+        _OptItemBlocksCord, _IntForOptItemBlocksCord),
+    convert_back_to_raw_item_blocks(SrcItemBlocks, RawItemBlocks),
+    RawCompUnit = raw_compilation_unit(ModuleName, ModuleNameContext,
+        RawItemBlocks),
+    module_and_imports_get_source_file_name(ModuleAndImports0,
+        SourceFileName),
+    module_and_imports_get_source_file_module_name(ModuleAndImports0,
+        SourceFileModuleName),
+    module_and_imports_get_nested_children(ModuleAndImports0,
+        NestedChildren),
+    set.init(ReadModuleErrors0),
+    init_module_and_imports(Globals, SourceFileName, SourceFileModuleName,
+        NestedChildren, Specs, ReadModuleErrors0, RawCompUnit,
+        ModuleAndImports).
+
+:- pred convert_back_to_raw_item_blocks(list(src_item_block)::in,
+    list(raw_item_block)::out) is det.
+
+convert_back_to_raw_item_blocks([], []).
+convert_back_to_raw_item_blocks([SrcItemBlock | SrcItemBlocks],
+        [RawItemBlock | RawItemBlocks]) :-
+    SrcItemBlock = item_block(ModuleName, SrcSection, Incls, Avails, Items),
+    (
+        SrcSection = sms_interface,
+        RawSection = ms_interface
+    ;
+        ( SrcSection = sms_implementation
+        ; SrcSection = sms_impl_but_exported_to_submodules
+        ),
+        RawSection = ms_implementation
+    ),
+    RawItemBlock = item_block(ModuleName, RawSection, Incls, Avails, Items),
+    convert_back_to_raw_item_blocks(SrcItemBlocks, RawItemBlocks).
+
+%---------------------------------------------------------------------------%
+
+    % init_module_and_imports(Globals, FileName, SourceFileModuleName,
+    %   NestedModuleNames, Specs, Errors, RawCompUnit, ModuleAndImports):
+    %
+    % Initialize a module_and_imports structure.
+    %
+    % We do this just after we have read in a raw compulation unit.
+    % Later code, mostly in modules.m but in some other modules as well,
+    % then calls the module_and_imports_{add,set}_* predicates above
+    % to record more information (mostly from read-in interface files)
+    % to the module_and_imports structure. When all such modifications
+    % are done, the module_and_imports_get_aug_comp_unit predicate
+    % will extract the augmented compilation unit from the updated
+    % module_and_imports structure.
+    %
+:- pred init_module_and_imports(globals::in, file_name::in, module_name::in,
+    set(module_name)::in, list(error_spec)::in, read_module_errors::in,
+    raw_compilation_unit::in, module_and_imports::out) is det.
 
 init_module_and_imports(Globals, FileName, SourceFileModuleName,
-        NestedModuleNames, Specs, Errors, RawCompUnit0, ModuleImports) :-
-    RawCompUnit0 = raw_compilation_unit(ModuleName, ModuleNameContext,
+        NestedModuleNames, Specs, Errors, RawCompUnit, ModuleAndImports) :-
+    get_interface(RawCompUnit, InterfaceRawCompUnit),
+    RawCompUnit = raw_compilation_unit(ModuleName, ModuleNameContext,
         RawItemBlocks),
+    InterfaceRawCompUnit = raw_compilation_unit(_, _, InterfaceItemBlocks),
+
     Ancestors = get_ancestors(ModuleName),
 
-    get_dependencies_in_item_blocks(RawItemBlocks,
-        ImpImportDeps0, ImpUseDeps0),
-    get_implicit_dependencies_in_item_blocks(Globals, RawItemBlocks,
-        ImplicitImpImportDeps, ImplicitImpUseDeps),
-    multi_map.merge(ImplicitImpImportDeps, ImpImportDeps0, ImpImportDeps),
-    multi_map.merge(ImplicitImpUseDeps, ImpUseDeps0, ImpUseDeps),
-    multi_map.merge(ImpImportDeps, ImpUseDeps, ImpDeps),
-
-    get_interface(RawCompUnit0, RawCompUnit),
-    RawCompUnit = raw_compilation_unit(_, _, InterfaceItemBlocks),
-    get_dependencies_in_item_blocks(InterfaceItemBlocks,
-        IntImportDeps0, IntUseDeps0),
-    get_implicit_dependencies_in_item_blocks(Globals, InterfaceItemBlocks,
-        ImplicitIntImportDeps, ImplicitIntUseDeps),
-    multi_map.merge(ImplicitIntImportDeps, IntImportDeps0, IntImportDeps),
-    multi_map.merge(ImplicitIntUseDeps, IntUseDeps0, IntUseDeps),
-    multi_map.merge(IntImportDeps, IntUseDeps, IntDeps),
-
-    % We don't fill in the indirect dependencies yet.
-    set.init(IndirectDeps),
-
-    get_included_modules_in_item_blocks(RawItemBlocks, Children),
-    get_included_modules_in_item_blocks(InterfaceItemBlocks, PublicChildren),
-
-    % XXX ITEM_LIST Document why we do this.
+    % NOTE This if-then-else looks strange, but it works. It works for
+    % two different reasons in our callers' two different use cases.
+    %
+    % Use case 1: our callers parse_tree_src_to_module_and_imports_list
+    % and parse_tree_int_to_module_and_imports pass to us in the
+    % NestedModuleNames argument the set of the names of all the modules
+    % that are nested within a single source file.
+    % If the module we are currently processing is the top module in that
+    % source file, then all the other modules in NestedModuleNames are
+    % its (direct or indirect) submodules. If it is not the top module,
+    % then this field is *supposed* to be empty.
+    %
+    % Use case 2: our caller rebuild_module_and_imports_for_dep_file
+    % passes to as NestedModuleNames the value of the same field
+    % of the original module_and_imports structure being rebuilt.
+    % This works because the operation of this if-then-else
+    % is idempotent.
     ( if ModuleName = SourceFileModuleName then
         set.delete(ModuleName, NestedModuleNames, NestedDeps)
     else
         set.init(NestedDeps)
     ),
 
+    % We don't fill in the indirect dependencies yet.
+    set.init(IndirectDeps),
+
+    % NOTE There are two predicates that build an initial module_and_imports
+    % structure. One is this predicate, init_module_and_imports, which is
+    % called by compiler invocations that want to find out the dependencies
+    % between modules.  The other is make_module_and_imports, which is
+    % called by compiler invocations that want to generate target language
+    % code.
+    %
+    % These two predicates fill in the module_and_imports structure
+    % differently. Some fields, such as HasMain, are not needed during
+    % code generation, and thus are not filled in meaningfully
+    % by make_module_and_imports; some, such as SrcItemBlocks, are needed
+    % *only* during code generation, and are thus not filled in
+    % meaningfully by init_module_and_imports. This should be OK,
+    % though there should be a mechanism to catch accesses to
+    % not-meaningfully-filled-in fields.
+    %
+    % XXX However, the two predicates use different algorithms to fill in
+    % some of the remaining fields as well. These differences are
+    % almost certainly bugs, caused by the opacity of this code.
+    % We want to move towards filling in these fields using the *same* code.
+    % Unless there is a specific reason against it, the code we want to base
+    % the common code on is the code used by (the callers of)
+    % make_module_and_imports. This is because the code used by the
+    % make_module_and_imports approach is more likely to be correct.
+    % The reason for that is that errors during code generation are
+    % much more likely to be noticed than errors in the computation
+    % of dependencies (even mmc does not *force* e.g. an interface file to be
+    % up to date, that interface file may *happen* be up-to-date anyway).
+    %
+    % As a first step, we compute the values of most fields of
+    % module_and_imports using both approaches, and require them
+    % to yield the same results. XXX However, we exempt the values of
+    % the LangSet, ForeignImports, and ContainsForeignExport fields
+    % from this. For them, we keep using only the old code in
+    % init_module_and_imports, because the new code, which uses
+    % the infrastructure used by grab_*modules_* in modules.m,
+    % the main callers of make_module_and_imports, fills them
+    % quite differently. These differences, which should be looked at
+    % one by one, include the following, and maybe others:
+    % for items involving foreign languages:
+    %   get_foreign_code_indicators_from_item_blocks gathers
+    %       two sets of languages
+    %   get_implicits_foreigns_fact_tables_acc gathers one set
+    % for some kinds of items involving foreign languages:
+    %   get_foreign_code_indicators_from_item_blocks cares about
+    %       the set of languages supported on the current backend
+    %   get_implicits_foreigns_fact_tables_acc does not care
+    % for foreign_import_module:
+    %   get_foreign_code_indicators_from_item_blocks does something
+    %   get_implicits_foreigns_fact_tables_acc does nothing
+    % for pragma/foreign_export_enum,
+    %   get_foreign_code_indicators_from_item_blocks records presence
+    %   get_implicits_foreigns_fact_tables_acc does not
+
+    % XXX START OF THE OLD CODE
+    get_included_modules_in_item_blocks(RawItemBlocks, ChildrenMap),
+    get_included_modules_in_item_blocks(InterfaceItemBlocks, PublicChildrenMap),
+
+    get_dependencies_in_item_blocks(RawItemBlocks,
+        ImpImportDeps0, ImpUseDeps0),
+    get_implicit_dependencies_in_item_blocks(Globals, RawItemBlocks,
+        ImplicitImpImportDeps, ImplicitImpUseDeps),
+    set.fold(multi_map.reverse_set(term.context_init),
+        ImplicitImpImportDeps, ImpImportDeps0, ImpImportDeps),
+    set.fold(multi_map.reverse_set(term.context_init),
+        ImplicitImpUseDeps, ImpUseDeps0, ImpUseDeps),
+    multi_map.merge(ImpImportDeps, ImpUseDeps, ImpDeps),
+
+    get_dependencies_in_item_blocks(InterfaceItemBlocks,
+        IntImportDeps0, IntUseDeps0),
+    get_implicit_dependencies_in_item_blocks(Globals, InterfaceItemBlocks,
+        ImplicitIntImportDeps, ImplicitIntUseDeps),
+    set.fold(multi_map.reverse_set(term.context_init),
+        ImplicitIntImportDeps, IntImportDeps0, IntImportDeps),
+    set.fold(multi_map.reverse_set(term.context_init),
+        ImplicitIntUseDeps, IntUseDeps0, IntUseDeps),
+    multi_map.merge(IntImportDeps, IntUseDeps, IntDeps),
+
     get_fact_table_dependencies_in_item_blocks(RawItemBlocks, FactTableDeps),
 
     % Figure out whether the items contain foreign code.
     get_foreign_code_indicators_from_item_blocks(Globals, RawItemBlocks,
-        LangSet, ForeignImports0, ForeignIncludeFiles, ContainsForeignExport),
-    ( if set.is_empty(LangSet) then
-        ContainsForeignCode = contains_no_foreign_code
-    else
-        ContainsForeignCode = contains_foreign_code(LangSet)
-    ),
+        LangSet, ForeignImports0, ForeignIncludeFilesCord,
+        ContainsForeignExport),
 
     % If this module contains `:- pragma foreign_export' or
     % `:- pragma foreign_type' declarations, importing modules may need
@@ -525,18 +710,105 @@ init_module_and_imports(Globals, FileName, SourceFileModuleName,
     % Work out whether the items contain main/2.
     look_for_main_pred_in_item_blocks(RawItemBlocks, no_main, HasMain),
 
+    % XXX START OF THE NEW CODE
+    get_raw_components(RawItemBlocks, NewIntIncls, NewImpIncls,
+        NewIntAvails, NewImpAvails, NewIntItems, NewImpItems),
+    list.foldl(get_included_modules_in_item_include_acc, NewIntIncls,
+        multi_map.init, NewPublicChildrenMap),
+    list.foldl(get_included_modules_in_item_include_acc, NewImpIncls,
+        NewPublicChildrenMap, NewChildrenMap),
+    get_imports_uses_maps(NewIntAvails, NewIntImportsMap0, NewIntUsesMap0),
+    get_imports_uses_maps(NewImpAvails, NewImpImportsMap0, NewImpUsesMap0),
+
+    get_implicits_foreigns_fact_tables(NewIntItems, NewImpItems,
+        NewIntImplicitImportNeeds, NewIntImpImplicitImportNeeds,
+        NewForeignInclFilesCord, _NewLangs, NewFactTables),
+
+    compute_implicit_import_needs(Globals, NewIntImplicitImportNeeds,
+        NewImplicitIntImports, NewImplicitIntUses),
+    compute_implicit_import_needs(Globals, NewIntImpImplicitImportNeeds,
+        NewImplicitIntImpImports, NewImplicitIntImpUses),
+    set.difference(NewImplicitIntImpImports, NewImplicitIntImports,
+        NewImplicitImpImports),
+    set.difference(NewImplicitIntImpUses, NewImplicitIntUses,
+        NewImplicitImpUses),
+
+    set.fold(multi_map.reverse_set(term.context_init),
+        NewImplicitIntImports, NewIntImportsMap0, NewIntImportsMap),
+    set.fold(multi_map.reverse_set(term.context_init),
+        NewImplicitIntUses, NewIntUsesMap0, NewIntUsesMap),
+    set.fold(multi_map.reverse_set(term.context_init),
+        NewImplicitImpImports, NewImpImportsMap0, NewImpImportsMap),
+    set.fold(multi_map.reverse_set(term.context_init),
+        NewImplicitImpUses, NewImpUsesMap0, NewImpUsesMap),
+
+    multi_map.merge(NewIntImportsMap, NewIntUsesMap, NewIntDepsMap),
+    multi_map.merge(NewImpImportsMap, NewImpUsesMap, NewImpDepsMap),
+    multi_map.merge(NewIntDepsMap, NewImpDepsMap, NewIntImpDepsMap),
+
+    % XXX START OF THE COMPARISON CODE
+    map.to_assoc_list(ChildrenMap, OldChildrenAL),
+    map.to_assoc_list(PublicChildrenMap, OldPublicChildrenAL),
+    map.to_assoc_list(NewChildrenMap, NewChildrenAL),
+    map.to_assoc_list(NewPublicChildrenMap, NewPublicChildrenAL),
+    expect(unify(OldChildrenAL, NewChildrenAL), $pred,
+        "bad ChildrenMap"),
+    expect(unify(OldPublicChildrenAL, NewPublicChildrenAL), $pred,
+        "bad PublicChildrenMap"),
+
+    map.to_assoc_list(IntDeps, IntDepsAL),
+    map.to_assoc_list(ImpDeps, ImpDepsAL),
+    map.to_assoc_list(NewIntDepsMap, NewIntDepsAL),
+    map.to_assoc_list(NewIntImpDepsMap, NewIntImpDepsAL),
+    assoc_list.map_values_only(list.sort_and_remove_dups,
+        IntDepsAL, StdIntDepsAL),
+    assoc_list.map_values_only(list.sort_and_remove_dups,
+        ImpDepsAL, StdImpDepsAL),
+    assoc_list.map_values_only(list.sort_and_remove_dups,
+        NewIntDepsAL, StdNewIntDepsAL),
+    assoc_list.map_values_only(list.sort_and_remove_dups,
+        NewIntImpDepsAL, StdNewIntImpDepsAL),
+
+    expect(unify(StdIntDepsAL, StdNewIntDepsAL), $pred,
+        "bad IntDeps"),
+    expect(unify(StdImpDepsAL, StdNewIntImpDepsAL), $pred,
+        "bad ImpDeps"),
+
+    ForeignIncludeFiles = cord.list(ForeignIncludeFilesCord),
+    NewForeignInclFiles = cord.list(NewForeignInclFilesCord),
+    expect(unify(ForeignIncludeFiles, NewForeignInclFiles), $pred,
+        "bad ForeignIncludeFiles"),
+    list.sort_and_remove_dups(FactTableDeps, OldSortedFactTables),
+    set.to_sorted_list(NewFactTables, NewSortedFactTables),
+    expect(unify(OldSortedFactTables, NewSortedFactTables), $pred,
+        "bad FactTables"),
+    % XXX END OF THE COMPARISON CODE
+
+    ( if set.is_empty(LangSet) then
+        ContainsForeignCode = contains_no_foreign_code
+    else
+        ContainsForeignCode = contains_foreign_code(LangSet)
+    ),
+
+    % XXX ITEM_LIST SrcItemBlocks and the item block fields are NOT
+    % stored here, per the documentation above.
+    SrcItemBlocks = [],
+    DirectIntBlocksCord = cord.init,
+    IndirectIntBlocksCord = cord.init,
+    OptBlocksCords = cord.init,
+    IntForOptBlocksCords = cord.init,
+
     map.init(VersionNumbers),
     MaybeTimestampMap = no,
-    % XXX ITEM_LIST SrcItemBlocks and the item block fields are NOT
-    % stored here, per the documentation above. Maybe they should be.
-    ModuleImports = module_and_imports(FileName, dir.this_directory,
+    ModuleAndImports = module_and_imports(FileName, dir.this_directory,
         SourceFileModuleName, ModuleName, ModuleNameContext,
-        set.list_to_set(Ancestors), Children, PublicChildren, NestedDeps,
-        IntDeps, ImpDeps, IndirectDeps, FactTableDeps,
-        ForeignImports, ForeignIncludeFiles,
+        set.list_to_set(Ancestors), ChildrenMap, PublicChildrenMap,
+        NestedDeps, IntDeps, ImpDeps, IndirectDeps, FactTableDeps,
+        ForeignImports, ForeignIncludeFilesCord,
         ContainsForeignCode, ContainsForeignExport, HasMain,
-        [], cord.init, cord.init, cord.init, cord.init,
-        VersionNumbers, MaybeTimestampMap, Specs, Errors).
+        SrcItemBlocks, DirectIntBlocksCord, IndirectIntBlocksCord,
+        OptBlocksCords, IntForOptBlocksCords,
+        VersionNumbers, MaybeTimestampMap, Specs, Errors, mcm_init).
 
 :- pred look_for_main_pred_in_item_blocks(list(item_block(MS))::in,
     has_main::in, has_main::out) is det.
@@ -581,27 +853,27 @@ look_for_main_pred_in_items([Item | Items], !HasMain) :-
 
 make_module_and_imports(SourceFileName, SourceFileModuleName,
         ModuleName, ModuleNameContext, SrcItemBlocks,
-        PublicChildren, NestedChildren, FactDeps, ForeignIncludeFiles,
+        PublicChildrenMap, NestedChildren, FactDeps, ForeignIncludeFiles,
         MaybeTimestampMap, ModuleAndImports) :-
     set.init(Ancestors),
     map.init(IntDeps),
     map.init(ImpDeps),
     set.init(IndirectDeps),
-    % XXX Since PublicChildren should be a subset of Children,
+    % XXX Since PublicChildrenMap should be a subset of ChildrenMap,
     % this looks like bug.
-    map.init(Children),
+    map.init(ChildrenMap),
     ForeignImports = init_foreign_import_modules,
     map.init(VersionNumbers),
     Specs = [],
     set.init(Errors),
     ModuleAndImports = module_and_imports(SourceFileName, dir.this_directory,
         SourceFileModuleName, ModuleName, ModuleNameContext,
-        Ancestors, Children, PublicChildren, NestedChildren,
+        Ancestors, ChildrenMap, PublicChildrenMap, NestedChildren,
         IntDeps, ImpDeps, IndirectDeps, FactDeps,
         ForeignImports, ForeignIncludeFiles,
         contains_foreign_code_unknown, contains_no_foreign_export, no_main,
         SrcItemBlocks, cord.init, cord.init, cord.init, cord.init,
-        VersionNumbers, MaybeTimestampMap, Specs, Errors).
+        VersionNumbers, MaybeTimestampMap, Specs, Errors, mcm_make).
 
 %---------------------------------------------------------------------------%
 
@@ -644,7 +916,7 @@ make_module_dep_module_and_imports(SourceFileName, ModuleDir,
         ContainsForeignCode, ContainsForeignExport, HasMain,
         SrcItemBlocks, DirectIntItemBlocksCord, IndirectIntItemBlocksCord,
         OptItemBlocksCord, IntForOptItemBlocksCord,
-        ModuleVersionNumbers, MaybeTimestamps, Specs, Errors).
+        ModuleVersionNumbers, MaybeTimestamps, Specs, Errors, mcm_read).
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
@@ -655,59 +927,680 @@ make_module_dep_module_and_imports(SourceFileName, ModuleDir,
     list(error_spec)::out) is det.
 
 module_and_imports_get_source_file_name(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_source_file_name.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_source_file_name := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_source_file_name := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_source_file_name := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_source_file_name
+    ).
 module_and_imports_get_source_file_dir(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_module_dir.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_module_dir := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_module_dir := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_module_dir := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_module_dir
+    ).
 module_and_imports_get_source_file_module_name(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_source_file_module_name.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_source_file_module_name := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_source_file_module_name := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_source_file_module_name := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_source_file_module_name
+    ).
 module_and_imports_get_module_name(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_module_name.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_module_name := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_module_name := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_module_name := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_module_name
+    ).
 module_and_imports_get_module_name_context(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_module_name_context.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_module_name_context := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_module_name_context := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_module_name_context := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_module_name_context
+    ).
 module_and_imports_get_ancestors(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_ancestors.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_ancestors := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_ancestors := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_ancestors := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_ancestors
+    ).
 module_and_imports_get_children_map(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_children.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_children := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_children := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_children := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_children
+    ).
 module_and_imports_get_public_children_map(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_public_children.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_public_children := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_public_children := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_public_children := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_public_children
+    ).
 module_and_imports_get_nested_children(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_nested_children.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_nested_children := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_nested_children := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_nested_children := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_nested_children
+    ).
 module_and_imports_get_int_deps_map(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_int_deps_map.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_int_deps_map := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_int_deps_map := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_int_deps_map := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_int_deps_map
+    ).
 module_and_imports_get_imp_deps_map(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_imp_deps_map.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_imp_deps_map := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_imp_deps_map := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_imp_deps_map := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_imp_deps_map
+    ).
 module_and_imports_get_indirect_deps(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_indirect_deps.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_indirect_deps := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_indirect_deps := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_indirect_deps := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_indirect_deps
+    ).
 module_and_imports_get_fact_table_deps(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_fact_table_deps.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_fact_table_deps := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_fact_table_deps := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_fact_table_deps := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_fact_table_deps
+    ).
 module_and_imports_get_foreign_import_modules(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_foreign_import_modules.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_foreign_import_modules := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_foreign_import_modules := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_foreign_import_modules := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_foreign_import_modules
+    ).
 module_and_imports_get_foreign_include_files(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_foreign_include_files.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_foreign_include_files := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_foreign_include_files := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_foreign_include_files := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_foreign_include_files
+    ).
 module_and_imports_get_contains_foreign_code(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_contains_foreign_code.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_contains_foreign_code := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_contains_foreign_code := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_contains_foreign_code := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_contains_foreign_code
+    ).
 module_and_imports_get_contains_foreign_export(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_contains_foreign_export.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_contains_foreign_export := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_contains_foreign_export := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_contains_foreign_export := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_contains_foreign_export
+    ).
 module_and_imports_get_has_main(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_has_main.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_has_main := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_has_main := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_has_main := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_has_main
+    ).
 module_and_imports_get_src_blocks(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_src_blocks.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_src_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_src_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_src_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_src_blocks
+    ).
 module_and_imports_get_direct_int_blocks_cord(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_direct_int_blocks_cord.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_direct_int_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_direct_int_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_direct_int_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_direct_int_blocks_cord
+    ).
 module_and_imports_get_indirect_int_blocks_cord(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_indirect_int_blocks_cord.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_indirect_int_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_indirect_int_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_indirect_int_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_indirect_int_blocks_cord
+    ).
 module_and_imports_get_opt_blocks_cord(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_opt_blocks_cord.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_opt_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_opt_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_opt_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_opt_blocks_cord
+    ).
 module_and_imports_get_int_for_opt_blocks_cord(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_int_for_opt_blocks_cord.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_int_for_opt_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_int_for_opt_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_int_for_opt_blocks := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_int_for_opt_blocks_cord
+    ).
 module_and_imports_get_version_numbers_map(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_version_numbers_map.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_version_numbers_map := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_version_numbers_map := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_version_numbers_map := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_version_numbers_map
+    ).
 module_and_imports_get_maybe_timestamp_map(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_maybe_timestamp_map.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_maybe_timestamp_map := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_maybe_timestamp_map := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_maybe_timestamp_map := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_maybe_timestamp_map
+    ).
 module_and_imports_get_specs(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_specs.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_specs := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_specs := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_specs := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_specs
+    ).
 module_and_imports_get_errors(ModuleAndImports, X) :-
-    X = ModuleAndImports ^ mai_errors.
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_errors := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_errors := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_errors := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_errors
+    ).
 
 :- pred module_and_imports_set_direct_int_blocks_cord(
     cord(int_item_block)::in,
@@ -929,6 +1822,135 @@ module_and_imports_get_aug_comp_unit(ModuleAndImports, AugCompUnit,
         cord.list(IntForOptItemBlocksCord)),
     module_and_imports_get_specs(ModuleAndImports, Specs),
     module_and_imports_get_errors(ModuleAndImports, Errors).
+
+%---------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
+
+:- type maybe_accessed
+    --->    not_accessed
+    ;       accessed.
+
+:- type mai_fields
+    --->    mai_fields(
+                mf_source_file_name             :: maybe_accessed,
+                mf_module_dir                   :: maybe_accessed,
+                mf_source_file_module_name      :: maybe_accessed,
+                mf_module_name                  :: maybe_accessed,
+                mf_module_name_context          :: maybe_accessed,
+
+                mf_ancestors                    :: maybe_accessed,
+                mf_children                     :: maybe_accessed,
+                mf_public_children              :: maybe_accessed,
+                mf_nested_children              :: maybe_accessed,
+
+                mf_int_deps_map                 :: maybe_accessed,
+                mf_imp_deps_map                 :: maybe_accessed,
+                mf_indirect_deps                :: maybe_accessed,
+                mf_fact_table_deps              :: maybe_accessed,
+
+                mf_foreign_import_modules       :: maybe_accessed,
+                mf_foreign_include_files        :: maybe_accessed,
+                mf_contains_foreign_code        :: maybe_accessed,
+                mf_contains_foreign_export      :: maybe_accessed,
+                mf_has_main                     :: maybe_accessed,
+
+                mf_src_blocks                   :: maybe_accessed,
+                mf_direct_int_blocks            :: maybe_accessed,
+                mf_indirect_int_blocks          :: maybe_accessed,
+                mf_opt_blocks                   :: maybe_accessed,
+                mf_int_for_opt_blocks           :: maybe_accessed,
+
+                mf_version_numbers_map          :: maybe_accessed,
+                mf_maybe_timestamp_map          :: maybe_accessed,
+
+                mf_specs                        :: maybe_accessed,
+                mf_errors                       :: maybe_accessed
+            ).
+
+:- type mai_fields_kinds
+    --->    mai_fields_kinds(
+                mfk_init                        :: mai_fields,
+                mfk_make                        :: mai_fields,
+                mfk_read                        :: mai_fields
+            ).
+
+:- func init_mai_fields = mai_fields.
+
+init_mai_fields =
+    mai_fields(not_accessed, not_accessed,
+        not_accessed, not_accessed, not_accessed,
+        not_accessed, not_accessed, not_accessed, not_accessed,
+        not_accessed, not_accessed, not_accessed, not_accessed,
+        not_accessed, not_accessed, not_accessed, not_accessed, not_accessed,
+        not_accessed, not_accessed, not_accessed, not_accessed, not_accessed,
+        not_accessed, not_accessed, not_accessed, not_accessed).
+
+:- func init_mai_fields_kinds = mai_fields_kinds.
+
+init_mai_fields_kinds =
+    mai_fields_kinds(init_mai_fields, init_mai_fields, init_mai_fields).
+
+:- mutable(accesses, mai_fields_kinds, init_mai_fields_kinds, ground,
+    [untrailed]).
+
+write_mai_stats(Stream, !IO) :-
+    promise_pure (
+        semipure get_accesses(Accesses),
+        Accesses = mai_fields_kinds(Init, Make, Read),
+        write_mai_fields_stats(Stream, "INIT", Init, !IO),
+        write_mai_fields_stats(Stream, "MAKE", Make, !IO),
+        write_mai_fields_stats(Stream, "READ", Read, !IO)
+    ).
+
+:- pred write_mai_fields_stats(io.output_stream::in, string::in,
+    mai_fields::in, io::di, io::uo) is det.
+
+write_mai_fields_stats(Stream, Kind, Fields, !IO) :-
+    Fields = mai_fields(SrcFileName, ModuleDir,
+        SrcFileModuleName, ModuleName, ModuleNameContext,
+        Ancestors, Children, PublicChildren, NestedChildren,
+        IntDepsMap, ImpDepsMap, IndirectDeps, FactTableDeps,
+        FIMs, ForeignIncludeFiles, HasForeignCode, HasForeignExport, HasMain,
+        SrcBlocks, DirectIntBlocks, IndirectIntBlocks,
+        OptBlocks, IntForOptBlocks,
+        VersionNumbersMap, MaybeTimestamMap, Specs, Errors),
+    io.format(Stream,
+        "%s %s %s %s %s %s %s %s %s %s %s %s %s %s " ++
+        "%s %s %s %s %s %s %s %s %s %s %s %s %s %s\n",
+        [s(Kind),
+        s(acc_str(SrcFileName)),
+        s(acc_str(ModuleDir)),
+        s(acc_str(SrcFileModuleName)),
+        s(acc_str(ModuleName)),
+        s(acc_str(ModuleNameContext)),
+        s(acc_str(Ancestors)),
+        s(acc_str(Children)),
+        s(acc_str(PublicChildren)),
+        s(acc_str(NestedChildren)),
+        s(acc_str(IntDepsMap)),
+        s(acc_str(ImpDepsMap)),
+        s(acc_str(IndirectDeps)),
+        s(acc_str(FactTableDeps)),
+        s(acc_str(FIMs)),
+        s(acc_str(ForeignIncludeFiles)),
+        s(acc_str(HasForeignCode)),
+        s(acc_str(HasForeignExport)),
+        s(acc_str(HasMain)),
+        s(acc_str(SrcBlocks)),
+        s(acc_str(DirectIntBlocks)),
+        s(acc_str(IndirectIntBlocks)),
+        s(acc_str(OptBlocks)),
+        s(acc_str(IntForOptBlocks)),
+        s(acc_str(VersionNumbersMap)),
+        s(acc_str(MaybeTimestamMap)),
+        s(acc_str(Specs)),
+        s(acc_str(Errors))],
+        !IO).
+
+:- func acc_str(maybe_accessed) = string.
+
+acc_str(not_accessed) = "n".
+acc_str(accessed) = "a".
 
 %---------------------------------------------------------------------------%
 :- end_module parse_tree.module_imports.

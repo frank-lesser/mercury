@@ -15,6 +15,15 @@
 % - files containing fact tables, or
 % - foreign language source or header files.
 %
+% XXX ITEM_LIST Most of the work done in this module is now done
+% more directly and simply in modules.m. When we switch over to using
+% the new code in modules.m exclusively, most or even all of this module
+% shouldn't be needed anymore.
+%
+% XXX If some parts of this module survive this transition period,
+% we should either factor out (if possible) or at least document
+% the commonalities between the code here and in modules.m.
+%
 %-----------------------------------------------------------------------------%
 
 :- module parse_tree.get_dependencies.
@@ -28,12 +37,13 @@
 :- import_module parse_tree.prog_data_foreign.
 :- import_module parse_tree.prog_item.
 
+:- import_module cord.
 :- import_module list.
 :- import_module multi_map.
+:- import_module set.
 
 %-----------------------------------------------------------------------------%
 
-    % get_dependencies_in_avails(Avails, ImportDeps, UseDeps):
     % get_dependencies_in_item_blocks(ItemBlocks, ImportDeps, UseDeps):
     %
     % Get the list of modules that a list of things (explicitly) depends on.
@@ -45,324 +55,9 @@
     % (see get_children/2). You may also need to consider indirect
     % dependencies.
     %
-:- pred get_dependencies_in_avails(list(item_avail)::in,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::out) is det.
 :- pred get_dependencies_in_item_blocks(list(item_block(MS))::in,
     multi_map(module_name, prog_context)::out,
     multi_map(module_name, prog_context)::out) is det.
-
-    % get_dependencies_int_imp_in_raw_item_blocks(RawItemBlocs,
-    %   IntImportDeps, IntUseDeps, ImpImportDeps, ImpUseDeps):
-    %
-    % Get the list of modules that a list of items (explicitly) depends on.
-    %
-    % IntImportDeps is the set of modules imported using `:- import_module'
-    % in the interface, and ImpImportDeps those modules imported in the
-    % implementation. IntUseDeps is the set of modules imported using
-    % `:- use_module' in the interface, and ImpUseDeps those modules imported
-    % in the implementation.
-    %
-    % N.B. Typically you also need to consider the module's implicit
-    % dependencies (see get_implicit_dependencies/3), its parent modules
-    % (see get_ancestors/1) and possibly also the module's child modules
-    % (see get_children/2). You may also need to consider indirect
-    % dependencies.
-    %
-:- pred get_dependencies_int_imp_in_raw_item_blocks(list(raw_item_block)::in,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::out) is det.
-
-    % get_implicit_dependencies_in_*(Globals, Items/ItemBlocks,
-    %   ImportDeps, UseDeps):
-    %
-    % Get the list of builtin modules (e.g. "public_builtin",
-    % "private_builtin" etc) that the given items may implicitly depend on.
-    % ImportDeps is the list of modules which should be automatically
-    % implicitly imported as if via `:- import_module', and UseDeps is
-    % the list which should be automatically implicitly imported as if via
-    % `:- use_module'.
-    %
-:- pred get_implicit_dependencies_in_item_blocks(globals::in,
-    list(item_block(MS))::in,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::out) is det.
-:- pred get_implicit_dependencies_in_items(globals::in,
-    list(item)::in,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::out) is det.
-
-    % Get the fact table dependencies for the given list of items.
-    %
-:- pred get_fact_table_dependencies_in_item_blocks(list(item_block(MS))::in,
-    list(string)::out) is det.
-
-    % Get foreign include_file dependencies for a module.
-    % This replicates part of get_item_list_foreign_code.
-    %
-:- pred get_foreign_include_files_in_item_blocks(list(item_block(MS))::in,
-    foreign_include_file_infos::out) is det.
-
-%-----------------------------------------------------------------------------%
-%-----------------------------------------------------------------------------%
-
-:- implementation.
-
-:- import_module libs.options.
-:- import_module mdbcomp.builtin_modules.
-:- import_module parse_tree.prog_data_pragma.
-:- import_module parse_tree.maybe_error.
-
-:- import_module bool.
-:- import_module cord.
-:- import_module maybe.
-:- import_module require.
-:- import_module term.
-
-%-----------------------------------------------------------------------------%
-
-% XXX ITEM_LIST: consider reordering these predicates.
-
-get_dependencies_in_item_blocks(ItemBlocks, ImportDeps, UseDeps) :-
-    get_dependencies_in_item_blocks_acc(ItemBlocks,
-        multi_map.init, ImportDeps, multi_map.init, UseDeps).
-
-:- pred get_dependencies_in_item_blocks_acc(list(item_block(MS))::in,
-    multi_map(module_name, prog_context)::in,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::in,
-    multi_map(module_name, prog_context)::out) is det.
-
-get_dependencies_in_item_blocks_acc([], !ImportDeps, !UseDeps).
-get_dependencies_in_item_blocks_acc([ItemBlock | ItemBlocks],
-        !ImportDeps, !UseDeps) :-
-    ItemBlock = item_block(_, _, _, Imports, _),
-    get_dependencies_in_avails_acc(Imports, !ImportDeps, !UseDeps),
-    get_dependencies_in_item_blocks_acc(ItemBlocks,
-        !ImportDeps, !UseDeps).
-
-%-----------------------------------------------------------------------------%
-
-get_dependencies_int_imp_in_raw_item_blocks(RawItemBlocks,
-        IntImportDeps, IntUseDeps, ImpImportDeps, ImpUseDeps) :-
-    get_dependencies_in_int_imp_in_raw_item_blocks_acc(RawItemBlocks,
-        multi_map.init, IntImportDeps, multi_map.init, IntUseDeps,
-        multi_map.init, ImpImportDeps, multi_map.init, ImpUseDeps).
-
-:- pred get_dependencies_in_int_imp_in_raw_item_blocks_acc(
-    list(raw_item_block)::in,
-    multi_map(module_name, prog_context)::in,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::in,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::in,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::in,
-    multi_map(module_name, prog_context)::out) is det.
-
-get_dependencies_in_int_imp_in_raw_item_blocks_acc([],
-        !IntImportDeps, !IntUseDeps, !ImpImportDeps, !ImpUseDeps).
-get_dependencies_in_int_imp_in_raw_item_blocks_acc(
-        [RawItemBlock | RawItemBlocks],
-        !IntImportDeps, !IntUseDeps, !ImpImportDeps, !ImpUseDeps) :-
-    RawItemBlock = item_block(_, Section, _Incls, Imports, _Items),
-    (
-        Section = ms_interface,
-        get_dependencies_in_avails_acc(Imports, !IntImportDeps, !IntUseDeps)
-    ;
-        Section = ms_implementation,
-        get_dependencies_in_avails_acc(Imports, !ImpImportDeps, !ImpUseDeps)
-    ),
-    get_dependencies_in_int_imp_in_raw_item_blocks_acc(RawItemBlocks,
-        !IntImportDeps, !IntUseDeps, !ImpImportDeps, !ImpUseDeps).
-
-%-----------------------------------------------------------------------------%
-
-get_dependencies_in_avails(Avails, ImportDeps, UseDeps) :-
-    get_dependencies_in_avails_acc(Avails,
-        multi_map.init, ImportDeps, multi_map.init, UseDeps).
-
-:- pred get_dependencies_in_avails_acc(list(item_avail)::in,
-    multi_map(module_name, prog_context)::in,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::in,
-    multi_map(module_name, prog_context)::out) is det.
-
-get_dependencies_in_avails_acc([], !ImportDeps, !UseDeps).
-get_dependencies_in_avails_acc([Avail | Avails], !ImportDeps, !UseDeps) :-
-    (
-        Avail = avail_import(avail_import_info(ModuleName, Context, _)),
-        multi_map.add(ModuleName, Context, !ImportDeps)
-    ;
-        Avail = avail_use(avail_use_info(ModuleName, Context, _)),
-        multi_map.add(ModuleName, Context, !UseDeps)
-    ),
-    get_dependencies_in_avails_acc(Avails, !ImportDeps, !UseDeps).
-
-%-----------------------------------------------------------------------------%
-
-get_implicit_dependencies_in_items(Globals, Items, ImportDeps, UseDeps) :-
-    ImplicitImportNeeds0 = init_implicit_import_needs,
-    gather_implicit_import_needs_in_items(Items,
-        ImplicitImportNeeds0, ImplicitImportNeeds),
-    compute_implicit_import_needs(Globals, ImplicitImportNeeds,
-        ImportDeps, UseDeps).
-
-get_implicit_dependencies_in_item_blocks(Globals, ItemBlocks,
-        ImportDeps, UseDeps) :-
-    ImplicitImportNeeds0 = init_implicit_import_needs,
-    gather_implicit_import_needs_in_item_blocks(ItemBlocks,
-        ImplicitImportNeeds0, ImplicitImportNeeds),
-    compute_implicit_import_needs(Globals, ImplicitImportNeeds,
-        ImportDeps, UseDeps).
-
-:- pred compute_implicit_import_needs(globals::in, implicit_import_needs::in,
-    multi_map(module_name, prog_context)::out,
-    multi_map(module_name, prog_context)::out) is det.
-
-compute_implicit_import_needs(Globals, ImplicitImportNeeds,
-        !:ImportDeps, !:UseDeps) :-
-    multi_map.add(mercury_public_builtin_module, term.context_init,
-        multi_map.init, !:ImportDeps),
-    multi_map.add(mercury_private_builtin_module, term.context_init,
-        multi_map.init, !:UseDeps),
-    ImplicitImportNeeds = implicit_import_needs(
-        ItemsNeedTabling, ItemsNeedTablingStatistics,
-        ItemsNeedSTM, ItemsNeedException,
-        ItemsNeedStringFormat, ItemsNeedStreamFormat, ItemsNeedIO),
-    % We should include mercury_table_builtin_module if the Items contain
-    % a tabling pragma, or if one of --use-minimal-model (either kind) and
-    % --trace-table-io is specified. In the former case, we may also need
-    % to import mercury_table_statistics_module.
-    (
-        ItemsNeedTabling = do_need_tabling,
-        multi_map.add(mercury_table_builtin_module, term.context_init,
-            !UseDeps),
-        (
-            ItemsNeedTablingStatistics = do_need_tabling_statistics,
-            multi_map.add(mercury_table_statistics_module, term.context_init,
-                !UseDeps)
-        ;
-            ItemsNeedTablingStatistics = dont_need_tabling_statistics
-        )
-    ;
-        ItemsNeedTabling = dont_need_tabling,
-        expect(unify(ItemsNeedTablingStatistics, dont_need_tabling_statistics),
-            $pred, "tabling statistics without tabling"),
-        ( if
-            % These forms of tabling cannot ask for statistics.
-            (
-                globals.lookup_bool_option(Globals,
-                    use_minimal_model_stack_copy, yes)
-            ;
-                globals.lookup_bool_option(Globals,
-                    use_minimal_model_own_stacks, yes)
-            ;
-                globals.lookup_bool_option(Globals, trace_table_io, yes)
-            )
-        then
-            multi_map.add(mercury_table_builtin_module, term.context_init,
-                !UseDeps)
-        else
-            true
-        )
-    ),
-    (
-        ItemsNeedSTM = do_need_stm,
-        multi_map.add(mercury_stm_builtin_module, term.context_init, !UseDeps),
-        multi_map.add(mercury_exception_module, term.context_init, !UseDeps),
-        multi_map.add(mercury_univ_module, term.context_init, !UseDeps)
-    ;
-        ItemsNeedSTM = dont_need_stm
-    ),
-    (
-        ItemsNeedException = do_need_exception,
-        multi_map.add(mercury_exception_module, term.context_init, !UseDeps)
-    ;
-        ItemsNeedException = dont_need_exception
-    ),
-    (
-        ItemsNeedStringFormat = do_need_string_format,
-        multi_map.add(mercury_string_format_module, term.context_init,
-            !UseDeps),
-        multi_map.add(mercury_string_parse_util_module, term.context_init,
-            !UseDeps)
-    ;
-        ItemsNeedStringFormat = dont_need_string_format
-    ),
-    (
-        ItemsNeedStreamFormat = do_need_stream_format,
-        multi_map.add(mercury_stream_module, term.context_init, !UseDeps)
-    ;
-        ItemsNeedStreamFormat = dont_need_stream_format
-    ),
-    (
-        ItemsNeedIO = do_need_io,
-        multi_map.add(mercury_io_module, term.context_init, !UseDeps)
-    ;
-        ItemsNeedIO = dont_need_io
-    ),
-    globals.lookup_bool_option(Globals, profile_deep, Deep),
-    (
-        Deep = yes,
-        multi_map.add(mercury_profiling_builtin_module, term.context_init,
-            !UseDeps)
-    ;
-        Deep = no
-    ),
-    ( if
-        (
-            globals.lookup_bool_option(Globals,
-                record_term_sizes_as_words, yes)
-        ;
-            globals.lookup_bool_option(Globals,
-                record_term_sizes_as_cells, yes)
-        )
-    then
-        multi_map.add(mercury_term_size_prof_builtin_module, term.context_init,
-            !UseDeps)
-    else
-        true
-    ),
-    globals.get_target(Globals, Target),
-    globals.lookup_bool_option(Globals, highlevel_code, HighLevelCode),
-    globals.lookup_bool_option(Globals, parallel, Parallel),
-    ( if
-        Target = target_c,
-        HighLevelCode = no,
-        Parallel = yes
-    then
-        multi_map.add(mercury_par_builtin_module, term.context_init, !UseDeps)
-    else
-        true
-    ),
-    globals.lookup_bool_option(Globals, use_regions, UseRegions),
-    (
-        UseRegions = yes,
-        multi_map.add(mercury_region_builtin_module, term.context_init,
-            !UseDeps)
-    ;
-        UseRegions = no
-    ),
-    globals.get_ssdb_trace_level(Globals, SSDBTraceLevel),
-    (
-        SSDBTraceLevel = none
-    ;
-        ( SSDBTraceLevel = shallow
-        ; SSDBTraceLevel = deep
-        ),
-        globals.lookup_bool_option(Globals, force_disable_ssdebug,
-            DisableSSDB),
-        (
-            DisableSSDB = yes
-        ;
-            DisableSSDB = no,
-            multi_map.add(mercury_ssdb_builtin_module, term.context_init,
-                !UseDeps)
-        )
-    ).
 
 :- type maybe_need_tabling
     --->    dont_need_tabling
@@ -416,11 +111,431 @@ compute_implicit_import_needs(Globals, ImplicitImportNeeds,
 
 :- func init_implicit_import_needs = implicit_import_needs.
 
+    % get_implicits_foreigns_fact_tables(IntItems, ImpItems,
+    %   ImplicitImportNeeds, ForeignInclFiles, Langs, FactTables):
+    %
+    % Given the interface and implementation items of a raw compilation unit,
+    % compute and return
+    %
+    % - a representation of the implicit import needs of those items,
+    %   i.e. of the set of modules that we need to implicitly import,
+    %   in the interface and in the implementation;
+    % - the foreign files they include;
+    % - the foreign languages they use; and
+    % - the names of the files that contain their fact tables.
+    %
+:- pred get_implicits_foreigns_fact_tables(list(item)::in, list(item)::in,
+    implicit_import_needs::out, implicit_import_needs::out,
+    cord(foreign_include_file_info)::out, set(foreign_language)::out,
+    set(string)::out) is det.
+
+    % get_implicit_dependencies_in_*(Globals, Items/ItemBlocks,
+    %   ImportDeps, UseDeps):
+    %
+    % Get the list of builtin modules (e.g. "public_builtin",
+    % "private_builtin" etc) that the given items may implicitly depend on.
+    % ImportDeps is the list of modules which should be automatically
+    % implicitly imported as if via `:- import_module', and UseDeps is
+    % the list which should be automatically implicitly imported as if via
+    % `:- use_module'.
+    %
+:- pred get_implicit_dependencies_in_item_blocks(globals::in,
+    list(item_block(MS))::in,
+    set(module_name)::out, set(module_name)::out) is det.
+:- pred get_implicit_dependencies_in_items(globals::in,
+    list(item)::in,
+    set(module_name)::out, set(module_name)::out) is det.
+
+:- pred compute_implicit_import_needs(globals::in, implicit_import_needs::in,
+    set(module_name)::out, set(module_name)::out) is det.
+
+:- pred gather_implicit_import_needs_in_instance_method(instance_method::in,
+    implicit_import_needs::in, implicit_import_needs::out) is det.
+:- pred gather_implicit_import_needs_in_mutable(item_mutable_info::in,
+    implicit_import_needs::in, implicit_import_needs::out) is det.
+:- pred gather_implicit_import_needs_in_clause(item_clause_info::in,
+    implicit_import_needs::in, implicit_import_needs::out) is det.
+:- pred gather_implicit_import_needs_in_goal(goal::in,
+    implicit_import_needs::in, implicit_import_needs::out) is det.
+
+    % Get the fact table dependencies for the given list of items.
+    %
+:- pred get_fact_table_dependencies_in_item_blocks(list(item_block(MS))::in,
+    list(string)::out) is det.
+
+    % Get foreign include_file dependencies for a module.
+    % This replicates part of get_item_list_foreign_code.
+    %
+:- pred get_foreign_include_files_in_item_blocks(list(item_block(MS))::in,
+    foreign_include_file_infos::out) is det.
+
+%-----------------------------------------------------------------------------%
+%-----------------------------------------------------------------------------%
+
+:- implementation.
+
+:- import_module libs.options.
+:- import_module mdbcomp.builtin_modules.
+:- import_module parse_tree.prog_data_pragma.
+:- import_module parse_tree.prog_foreign.
+:- import_module parse_tree.maybe_error.
+
+:- import_module bool.
+:- import_module maybe.
+:- import_module require.
+:- import_module term.
+
+%-----------------------------------------------------------------------------%
+
+% XXX ITEM_LIST: consider reordering these predicates.
+
+get_dependencies_in_item_blocks(ItemBlocks, ImportDeps, UseDeps) :-
+    get_dependencies_in_item_blocks_acc(ItemBlocks,
+        multi_map.init, ImportDeps, multi_map.init, UseDeps).
+
+:- pred get_dependencies_in_item_blocks_acc(list(item_block(MS))::in,
+    multi_map(module_name, prog_context)::in,
+    multi_map(module_name, prog_context)::out,
+    multi_map(module_name, prog_context)::in,
+    multi_map(module_name, prog_context)::out) is det.
+
+get_dependencies_in_item_blocks_acc([], !ImportDeps, !UseDeps).
+get_dependencies_in_item_blocks_acc([ItemBlock | ItemBlocks],
+        !ImportDeps, !UseDeps) :-
+    ItemBlock = item_block(_, _, _, Avails, _),
+    accumulate_imports_uses_maps(Avails, !ImportDeps, !UseDeps),
+    get_dependencies_in_item_blocks_acc(ItemBlocks, !ImportDeps, !UseDeps).
+
+%-----------------------------------------------------------------------------%
+
+get_implicit_dependencies_in_items(Globals, Items, ImportDeps, UseDeps) :-
+    ImplicitImportNeeds0 = init_implicit_import_needs,
+    gather_implicit_import_needs_in_items(Items,
+        ImplicitImportNeeds0, ImplicitImportNeeds),
+    compute_implicit_import_needs(Globals, ImplicitImportNeeds,
+        ImportDeps, UseDeps).
+
+get_implicit_dependencies_in_item_blocks(Globals, ItemBlocks,
+        ImportDeps, UseDeps) :-
+    ImplicitImportNeeds0 = init_implicit_import_needs,
+    gather_implicit_import_needs_in_item_blocks(ItemBlocks,
+        ImplicitImportNeeds0, ImplicitImportNeeds),
+    compute_implicit_import_needs(Globals, ImplicitImportNeeds,
+        ImportDeps, UseDeps).
+
+compute_implicit_import_needs(Globals, ImplicitImportNeeds,
+        !:ImportDeps, !:UseDeps) :-
+    !:ImportDeps = set.make_singleton_set(mercury_public_builtin_module),
+    !:UseDeps = set.make_singleton_set(mercury_private_builtin_module),
+    ImplicitImportNeeds = implicit_import_needs(
+        ItemsNeedTabling, ItemsNeedTablingStatistics,
+        ItemsNeedSTM, ItemsNeedException,
+        ItemsNeedStringFormat, ItemsNeedStreamFormat, ItemsNeedIO),
+    % We should include mercury_table_builtin_module if the Items contain
+    % a tabling pragma, or if one of --use-minimal-model (either kind) and
+    % --trace-table-io is specified. In the former case, we may also need
+    % to import mercury_table_statistics_module.
+    (
+        ItemsNeedTabling = do_need_tabling,
+        set.insert(mercury_table_builtin_module, !UseDeps),
+        (
+            ItemsNeedTablingStatistics = do_need_tabling_statistics,
+            set.insert(mercury_table_statistics_module, !UseDeps)
+        ;
+            ItemsNeedTablingStatistics = dont_need_tabling_statistics
+        )
+    ;
+        ItemsNeedTabling = dont_need_tabling,
+        expect(unify(ItemsNeedTablingStatistics, dont_need_tabling_statistics),
+            $pred, "tabling statistics without tabling"),
+        ( if
+            % These forms of tabling cannot ask for statistics.
+            (
+                globals.lookup_bool_option(Globals,
+                    use_minimal_model_stack_copy, yes)
+            ;
+                globals.lookup_bool_option(Globals,
+                    use_minimal_model_own_stacks, yes)
+            ;
+                globals.lookup_bool_option(Globals, trace_table_io, yes)
+            )
+        then
+            set.insert(mercury_table_builtin_module, !UseDeps)
+        else
+            true
+        )
+    ),
+    (
+        ItemsNeedSTM = do_need_stm,
+        set.insert(mercury_stm_builtin_module, !UseDeps),
+        set.insert(mercury_exception_module, !UseDeps),
+        set.insert(mercury_univ_module, !UseDeps)
+    ;
+        ItemsNeedSTM = dont_need_stm
+    ),
+    (
+        ItemsNeedException = do_need_exception,
+        set.insert(mercury_exception_module, !UseDeps)
+    ;
+        ItemsNeedException = dont_need_exception
+    ),
+    (
+        ItemsNeedStringFormat = do_need_string_format,
+        set.insert(mercury_string_format_module, !UseDeps),
+        set.insert(mercury_string_parse_util_module, !UseDeps)
+    ;
+        ItemsNeedStringFormat = dont_need_string_format
+    ),
+    (
+        ItemsNeedStreamFormat = do_need_stream_format,
+        set.insert(mercury_stream_module, !UseDeps)
+    ;
+        ItemsNeedStreamFormat = dont_need_stream_format
+    ),
+    (
+        ItemsNeedIO = do_need_io,
+        set.insert(mercury_io_module, !UseDeps)
+    ;
+        ItemsNeedIO = dont_need_io
+    ),
+    globals.lookup_bool_option(Globals, profile_deep, Deep),
+    (
+        Deep = yes,
+        set.insert(mercury_profiling_builtin_module, !UseDeps)
+    ;
+        Deep = no
+    ),
+    ( if
+        (
+            globals.lookup_bool_option(Globals,
+                record_term_sizes_as_words, yes)
+        ;
+            globals.lookup_bool_option(Globals,
+                record_term_sizes_as_cells, yes)
+        )
+    then
+        set.insert(mercury_term_size_prof_builtin_module, !UseDeps)
+    else
+        true
+    ),
+    globals.get_target(Globals, Target),
+    globals.lookup_bool_option(Globals, highlevel_code, HighLevelCode),
+    globals.lookup_bool_option(Globals, parallel, Parallel),
+    ( if
+        Target = target_c,
+        HighLevelCode = no,
+        Parallel = yes
+    then
+        set.insert(mercury_par_builtin_module, !UseDeps)
+    else
+        true
+    ),
+    globals.lookup_bool_option(Globals, use_regions, UseRegions),
+    (
+        UseRegions = yes,
+        set.insert(mercury_region_builtin_module, !UseDeps)
+    ;
+        UseRegions = no
+    ),
+    globals.get_ssdb_trace_level(Globals, SSDBTraceLevel),
+    (
+        SSDBTraceLevel = none
+    ;
+        ( SSDBTraceLevel = shallow
+        ; SSDBTraceLevel = deep
+        ),
+        globals.lookup_bool_option(Globals, force_disable_ssdebug,
+            DisableSSDB),
+        (
+            DisableSSDB = yes
+        ;
+            DisableSSDB = no,
+            set.insert(mercury_ssdb_builtin_module, !UseDeps)
+        )
+    ).
+
 init_implicit_import_needs = ImplicitImportNeeds :-
     ImplicitImportNeeds = implicit_import_needs(
         dont_need_tabling, dont_need_tabling_statistics,
         dont_need_stm, dont_need_exception,
         dont_need_string_format, dont_need_stream_format, dont_need_io).
+
+%-----------------------------------------------------------------------------%
+
+get_implicits_foreigns_fact_tables(IntItems, ImpItems,
+        IntImplicitImportNeeds, IntImpImplicitImportNeeds,
+        !:ForeignInclFiles, !:Langs, !:FactTables) :-
+    ImplicitImportNeeds0 = init_implicit_import_needs,
+    !:ForeignInclFiles = cord.init,
+    set.init(!:Langs),
+    set.init(!:FactTables),
+    get_implicits_foreigns_fact_tables_acc(IntItems,
+        ImplicitImportNeeds0, IntImplicitImportNeeds,
+        !ForeignInclFiles, !Langs, !FactTables),
+    get_implicits_foreigns_fact_tables_acc(ImpItems,
+        IntImplicitImportNeeds, IntImpImplicitImportNeeds,
+        !ForeignInclFiles, !Langs, !FactTables).
+
+:- pred get_implicits_foreigns_fact_tables_acc(list(item)::in,
+    implicit_import_needs::in, implicit_import_needs::out,
+    cord(foreign_include_file_info)::in, cord(foreign_include_file_info)::out,
+    set(foreign_language)::in, set(foreign_language)::out,
+    set(string)::in, set(string)::out) is det.
+
+get_implicits_foreigns_fact_tables_acc([],
+        !ImplicitImportNeeds, !ForeignInclFiles, !Langs, !FactTables).
+get_implicits_foreigns_fact_tables_acc([Item | Items],
+        !ImplicitImportNeeds, !ForeignInclFiles, !Langs, !FactTables) :-
+    (
+        Item = item_type_defn(ItemTypeDefn),
+        ItemTypeDefn = item_type_defn_info(_TypeCtorName, _TypeParams,
+            TypeDefn, _TVarSet, _Context, _SeqNum),
+        (
+            TypeDefn = parse_tree_solver_type(DetailsSolver),
+            DetailsSolver = type_details_solver(SolverTypeDetails,
+                _MaybeUnifyComparePredNames),
+            SolverTypeDetails = solver_type_details(_RepresentationType,
+                _GroundInst, _AnyInst, MutableItems),
+            list.foldl(gather_implicit_import_needs_in_mutable, MutableItems,
+                !ImplicitImportNeeds)
+        ;
+            TypeDefn = parse_tree_foreign_type(DetailsForeign),
+            DetailsForeign = type_details_foreign(ForeignType, _, _),
+            set.insert(foreign_type_language(ForeignType), !Langs)
+        ;
+            ( TypeDefn = parse_tree_du_type(_)
+            ; TypeDefn = parse_tree_eqv_type(_)
+            ; TypeDefn = parse_tree_abstract_type(_)
+            )
+        )
+    ;
+        Item = item_pragma(ItemPragma),
+        ItemPragma = item_pragma_info(Pragma, _, _, _),
+        (
+            (
+                Pragma = pragma_foreign_decl(FDInfo),
+                FDInfo = pragma_info_foreign_decl(Lang, _, LiteralOrInclude)
+            ;
+                Pragma = pragma_foreign_code(FCInfo),
+                FCInfo = pragma_info_foreign_code(Lang, LiteralOrInclude)
+            ),
+            (
+                LiteralOrInclude = floi_literal(_)
+            ;
+                LiteralOrInclude = floi_include_file(FileName),
+                InclFile = foreign_include_file_info(Lang, FileName),
+                !:ForeignInclFiles = cord.snoc(!.ForeignInclFiles, InclFile)
+            ),
+            set.insert(Lang, !Langs)
+        ;
+            Pragma = pragma_foreign_proc(FPInfo),
+            FPInfo = pragma_info_foreign_proc(Attrs, _, _, _, _, _, _),
+            set.insert(get_foreign_language(Attrs), !Langs)
+        ;
+            (
+                Pragma = pragma_foreign_proc_export(FPEInfo),
+                FPEInfo = pragma_info_foreign_proc_export(Lang, _, _)
+            ;
+                Pragma = pragma_foreign_enum(FEInfo),
+                FEInfo = pragma_info_foreign_enum(Lang, _, _)
+            ),
+            set.insert(Lang, !Langs)
+        ;
+            Pragma = pragma_fact_table(FactTableInfo),
+            FactTableInfo = pragma_info_fact_table(_PredNameArity, FileName),
+            set.insert(FileName, !FactTables)
+        ;
+            Pragma = pragma_tabled(TableInfo),
+            TableInfo = pragma_info_tabled(_, _, _, MaybeAttributes),
+            !ImplicitImportNeeds ^ iin_tabling := do_need_tabling,
+            (
+                MaybeAttributes = no
+            ;
+                MaybeAttributes = yes(Attributes),
+                StatsAttr = Attributes ^ table_attr_statistics,
+                (
+                    StatsAttr = table_gather_statistics,
+                    !ImplicitImportNeeds ^ iin_tabling_statistics
+                        := do_need_tabling_statistics
+                ;
+                    StatsAttr = table_dont_gather_statistics
+                )
+            )
+        ;
+            ( Pragma = pragma_foreign_export_enum(_)
+            ; Pragma = pragma_external_proc(_)
+            ; Pragma = pragma_type_spec(_)
+            ; Pragma = pragma_inline(_)
+            ; Pragma = pragma_no_inline(_)
+            ; Pragma = pragma_consider_used(_)
+            ; Pragma = pragma_unused_args(_)
+            ; Pragma = pragma_exceptions(_)
+            ; Pragma = pragma_trailing_info(_)
+            ; Pragma = pragma_mm_tabling_info(_)
+            ; Pragma = pragma_obsolete(_)
+            ; Pragma = pragma_no_detism_warning(_)
+            ; Pragma = pragma_require_tail_recursion(_)
+            ; Pragma = pragma_oisu(_)
+            ; Pragma = pragma_promise_eqv_clauses(_)
+            ; Pragma = pragma_promise_pure(_)
+            ; Pragma = pragma_promise_semipure(_)
+            ; Pragma = pragma_termination_info(_)
+            ; Pragma = pragma_termination2_info(_)
+            ; Pragma = pragma_terminates(_)
+            ; Pragma = pragma_does_not_terminate(_)
+            ; Pragma = pragma_check_termination(_)
+            ; Pragma = pragma_mode_check_clauses(_)
+            ; Pragma = pragma_structure_sharing(_)
+            ; Pragma = pragma_structure_reuse(_)
+            ; Pragma = pragma_require_feature_set(_)
+            )
+        )
+    ;
+        Item = item_instance(ItemInstance),
+        ItemInstance = item_instance_info(_DerivingClass, _ClassName,
+            _Types, _OriginalTypes, InstanceBody, _VarSet,
+            _ModuleContainingInstance, _Context, _SeqNum),
+        (
+            InstanceBody = instance_body_abstract
+        ;
+            InstanceBody = instance_body_concrete(InstanceMethods),
+            list.foldl(gather_implicit_import_needs_in_instance_method,
+                InstanceMethods, !ImplicitImportNeeds)
+        )
+    ;
+        Item = item_clause(ItemClause),
+        gather_implicit_import_needs_in_clause(ItemClause,
+            !ImplicitImportNeeds)
+    ;
+        Item = item_promise(ItemPromise),
+        ItemPromise = item_promise_info(_PromiseType, Goal, _VarSet,
+            _UnivQuantVars, _Context, _SeqNum),
+        gather_implicit_import_needs_in_goal(Goal, !ImplicitImportNeeds)
+    ;
+        Item = item_mutable(ItemMutable),
+        % We can use all foreign languages.
+        set.insert_list(all_foreign_languages, !Langs),
+        gather_implicit_import_needs_in_mutable(ItemMutable,
+            !ImplicitImportNeeds)
+    ;
+        ( Item = item_inst_defn(_)
+        ; Item = item_mode_defn(_)
+        ; Item = item_pred_decl(_)
+        ; Item = item_mode_decl(_)
+        ; Item = item_typeclass(_)
+        ; Item = item_initialise(_)
+        ; Item = item_finalise(_)
+        ; Item = item_foreign_import_module(_)
+        )
+    ;
+        Item = item_type_repn(_),
+        % These should not be generated yet.
+        unexpected($pred, "item_type_repn")
+    ),
+    get_implicits_foreigns_fact_tables_acc(Items,
+        !ImplicitImportNeeds, !ForeignInclFiles, !Langs, !FactTables).
+
+%-----------------------------------------------------------------------------%
 
 :- pred gather_implicit_import_needs_in_item_blocks(list(item_block(MS))::in,
     implicit_import_needs::in, implicit_import_needs::out) is det.
@@ -555,9 +670,6 @@ gather_implicit_import_needs_in_items([Item | Items], !ImplicitImportNeeds) :-
     ),
     gather_implicit_import_needs_in_items(Items, !ImplicitImportNeeds).
 
-:- pred gather_implicit_import_needs_in_instance_method(instance_method::in,
-    implicit_import_needs::in, implicit_import_needs::out) is det.
-
 gather_implicit_import_needs_in_instance_method(InstanceMethod,
         !ImplicitImportNeeds) :-
     InstanceMethod = instance_method(_PredOrFunc, _MethodName, ProcDef,
@@ -570,18 +682,12 @@ gather_implicit_import_needs_in_instance_method(InstanceMethod,
             !ImplicitImportNeeds)
     ).
 
-:- pred gather_implicit_import_needs_in_mutable(item_mutable_info::in,
-    implicit_import_needs::in, implicit_import_needs::out) is det.
-
 gather_implicit_import_needs_in_mutable(ItemMutableInfo,
         !ImplicitImportNeeds) :-
     ItemMutableInfo = item_mutable_info(_Name,
         _OrigType, _Type, _OrigInst, _Inst, InitValue,
         _Attrs, _VarSet, _Context, _SeqNum),
     gather_implicit_import_needs_in_term(InitValue, !ImplicitImportNeeds).
-
-:- pred gather_implicit_import_needs_in_clause(item_clause_info::in,
-    implicit_import_needs::in, implicit_import_needs::out) is det.
 
 gather_implicit_import_needs_in_clause(ItemClause, !ImplicitImportNeeds) :-
     ItemClause = item_clause_info(_PredName,_PredOrFunc, HeadTerms,
@@ -593,9 +699,6 @@ gather_implicit_import_needs_in_clause(ItemClause, !ImplicitImportNeeds) :-
     ;
         MaybeGoal = error1(_)
     ).
-
-:- pred gather_implicit_import_needs_in_goal(goal::in,
-    implicit_import_needs::in, implicit_import_needs::out) is det.
 
 gather_implicit_import_needs_in_goal(Goal, !ImplicitImportNeeds) :-
     (
