@@ -10,22 +10,26 @@
 % Main author: fjh, conway.
 % Stability: high.
 %
-% This file provides the 'map' ADT.
-% A map (also known as a dictionary or an associative array) is a collection
-% of (Key, Data) pairs which allows you to look up any Data item given the
-% Key.
+% This file provides the 'map' abstract data type.
 %
-% The implementation is using balanced binary trees, as provided by tree234.m.
+% A map (also known as a dictionary or an associative array) is a collection
+% of (Key, Value) pairs that allows you to look up any Value given its Key.
+% Each Key may have only one corresponding Value. (If you want the ability
+% to store more than one Value for a given Key, use multi_map.m.)
+%
+% The implementation uses balanced binary trees, as provided by tree234.m.
 % Virtually all the predicates in this file just forward the work
 % to the corresponding predicate in tree234.m.
 %
 % Note: 2-3-4 trees do not have a canonical representation for any given map.
-% Therefore, two maps with the same set of key-value pairs may have
-% different internal representations. This means that two maps with the
-% same set of key-value pairs that may fail to unify and may compare as
-% unequal, for example if items were inserted into one of the maps in a
-% different order. See equal/2 below which can be used to test if two
-% maps have the same set of key-value pairs.
+% This means that two maps that represent the same set of key-value pairs
+% may have different internal representations, and that therefore they
+% may fail to unify and may compare as unequal. The reason for the difference
+% in the internal representation is usually that the (Key, Value) pairs were
+% inserted into the two maps in different orders, or that the two maps
+% have a different history of deletions. If you want to know whether
+% two maps have the same set of (Key, Data) pairs, use the map.equal/2
+% predicate below.
 %
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
@@ -183,7 +187,8 @@
     %
     % Search for the key K in the map. If the key is already in the map,
     % with corresponding value OldV, set MaybeOldV to yes(OldV). If it
-    % is not in the map, then insert it into the map with value V.
+    % is not in the map, then insert it into the map with value V,
+    % and set MaybeOldV to no.
     %
 :- pred search_insert(K::in, V::in, maybe(V)::out,
     map(K, V)::in, map(K, V)::out) is det.
@@ -219,7 +224,7 @@
 :- func sorted_keys(map(K, _V)) = list(K).
 :- pred sorted_keys(map(K, _V)::in, list(K)::out) is det.
 
-    % Given a map, return a list of all the data values in the map.
+    % Given a map, return a list of all the values in the map.
     %
 :- func values(map(_K, V)) = list(V).
 :- pred values(map(_K, V)::in, list(V)::out) is det.
@@ -733,6 +738,18 @@
     pred(in, out, in, out, in, out, in, out) is semidet,
     in, out, in, out, in, out, in, out) is semidet.
 
+    % intersect_list(Pred, M, Ms, ResultM):
+    %
+    % Take the non-empty list of maps [M | Ms], and intersect pairs of
+    % those maps (using map.intersect above) until there is only one map left.
+    % Return this map as ResultM. The order of in which those intersect
+    % operations are performed is not defined, so the caller should choose
+    % a Pred for which the order does not matter.
+    %
+:- pred intersect_list(pred(V, V, V), map(K, V), list(map(K, V)), map(K, V)).
+:- mode intersect_list(pred(in, in, out) is semidet, in, in, out) is semidet.
+:- mode intersect_list(pred(in, in, out) is det, in, in, out) is det.
+
     % Given two maps M1 and M2, create a third map M3 that has only the
     % keys that occur in both M1 and M2. For keys that occur in both M1
     % and M2, compute the value in the final map by applying the supplied
@@ -789,6 +806,18 @@
 
 :- pred det_union(pred(V, V, V), map(K, V), map(K, V), map(K, V)).
 :- mode det_union(pred(in, in, out) is semidet, in, in, out) is det.
+
+    % union_list(Pred, M, Ms, ResultM):
+    %
+    % Take the non-empty list of maps [M | Ms], and union pairs of those maps
+    % (using union above) until there is only one map left. Return this map
+    % as ResultM. The order of in which those union operations are performed
+    % is not defined, so the caller should choose a Pred for which the order
+    % does not matter.
+    %
+:- pred union_list(pred(V, V, V), map(K, V), list(map(K, V)), map(K, V)).
+:- mode union_list(pred(in, in, out) is semidet, in, in, out) is semidet.
+:- mode union_list(pred(in, in, out) is det, in, in, out) is det.
 
     % Consider the original map a set of key-value pairs. This predicate
     % returns a map that maps each value to the set of keys it is paired
@@ -1591,6 +1620,142 @@ map.det_union(CommonPred, Map1, Map2, Union) :-
         Union = UnionPrime
     else
         unexpected($pred, "map.union failed")
+    ).
+
+%-----------------------------------------------------------------------------%
+
+%-----------------------------------------------------------------------------%
+
+map.intersect_list(CommonPred, HeadMap, TailMaps, Common) :-
+    map.to_sorted_assoc_list(HeadMap, HeadAssocList),
+    list.map(map.to_sorted_assoc_list, TailMaps, TailAssocLists),
+    map.intersect_list_passes(HeadAssocList, TailAssocLists, CommonPred,
+        CommonAssocList),
+    map.from_sorted_assoc_list(CommonAssocList, Common).
+
+:- pred map.intersect_list_passes(assoc_list(K, V), list(assoc_list(K, V)),
+    pred(V, V, V), assoc_list(K, V)).
+:- mode map.intersect_list_passes(in, in, pred(in, in, out) is semidet, out)
+    is semidet.
+:- mode map.intersect_list_passes(in, in, pred(in, in, out) is det, out)
+    is det.
+
+map.intersect_list_passes(HeadAssocList, TailAssocLists, CommonPred,
+        CommonAssocList) :-
+    (
+        TailAssocLists = [],
+        CommonAssocList = HeadAssocList
+    ;
+        TailAssocLists = [_ | _],
+        map.intersect_list_pass(HeadAssocList, TailAssocLists, CommonPred,
+            FirstAssocList, LaterAssocLists),
+        map.intersect_list_passes(FirstAssocList, LaterAssocLists, CommonPred,
+            CommonAssocList)
+    ).
+
+    % If the list [HeadAssocList | TailAssocLists] has 2k sorted association
+    % lists (representing 2k maps), then reduce these to k sorted association
+    % lists by intersecting assoclist 2i with assoc list 2i+1 for all i
+    % in 0..(k-1). If it has 2k+1 sorted association lists, intersect
+    % the first 2k as above, and add the last to the end of the list as is,
+    % without intersecting it with anything.
+    %
+    % If the input has N assoc lists, the output will have ceil(N/2) assoc
+    % lists. If invoked with two or more lists, the output will always have
+    % fewer assoc lists than the input. This will always be the case, since
+    % our caller does not call us when N<2.
+    %
+:- pred map.intersect_list_pass(assoc_list(K, V), list(assoc_list(K, V)),
+    pred(V, V, V), assoc_list(K, V), list(assoc_list(K, V))).
+:- mode map.intersect_list_pass(in, in, pred(in, in, out) is semidet, out, out)
+    is semidet.
+:- mode map.intersect_list_pass(in, in, pred(in, in, out) is det, out, out)
+    is det.
+
+map.intersect_list_pass(HeadAssocList, TailAssocLists, CommonPred,
+        FirstAssocList, LaterAssocLists) :-
+    (
+        TailAssocLists = [],
+        FirstAssocList = HeadAssocList,
+        LaterAssocLists = []
+    ;
+        TailAssocLists = [HeadTailAssocList | TailTailAssocLists],
+        map.intersect_loop(HeadAssocList, HeadTailAssocList, CommonPred,
+            [], RevFirstAssocList),
+        list.reverse(RevFirstAssocList, FirstAssocList),
+        (
+            TailTailAssocLists = [],
+            LaterAssocLists = []
+        ;
+            TailTailAssocLists =
+                [HeadTailTailAssocList | TailTailTailAssocLists],
+            map.intersect_list_pass(HeadTailTailAssocList,
+                TailTailTailAssocLists, CommonPred,
+                HeadLaterAssocList, TailLaterAssocLists),
+            LaterAssocLists = [HeadLaterAssocList | TailLaterAssocLists]
+        )
+    ).
+
+%-----------------------------------------------------------------------------%
+
+map.union_list(CommonPred, HeadMap, TailMaps, Common) :-
+    map.to_sorted_assoc_list(HeadMap, HeadAssocList),
+    list.map(map.to_sorted_assoc_list, TailMaps, TailAssocLists),
+    map.union_list_passes(HeadAssocList, TailAssocLists, CommonPred,
+        CommonAssocList),
+    map.from_sorted_assoc_list(CommonAssocList, Common).
+
+:- pred map.union_list_passes(assoc_list(K, V), list(assoc_list(K, V)),
+    pred(V, V, V), assoc_list(K, V)).
+:- mode map.union_list_passes(in, in, pred(in, in, out) is semidet, out)
+    is semidet.
+:- mode map.union_list_passes(in, in, pred(in, in, out) is det, out)
+    is det.
+
+map.union_list_passes(HeadAssocList, TailAssocLists, CommonPred,
+        CommonAssocList) :-
+    (
+        TailAssocLists = [],
+        CommonAssocList = HeadAssocList
+    ;
+        TailAssocLists = [_ | _],
+        map.union_list_pass(HeadAssocList, TailAssocLists, CommonPred,
+            FirstAssocList, LaterAssocLists),
+        map.union_list_passes(FirstAssocList, LaterAssocLists, CommonPred,
+            CommonAssocList)
+    ).
+
+    % This predicate works on the same principle as map.intersect_list_pass.
+    % See the documentation of that predicate.
+    %
+:- pred map.union_list_pass(assoc_list(K, V), list(assoc_list(K, V)),
+    pred(V, V, V), assoc_list(K, V), list(assoc_list(K, V))).
+:- mode map.union_list_pass(in, in, pred(in, in, out) is semidet, out, out)
+    is semidet.
+:- mode map.union_list_pass(in, in, pred(in, in, out) is det, out, out)
+    is det.
+
+map.union_list_pass(HeadAssocList, TailAssocLists, CommonPred,
+        FirstAssocList, LaterAssocLists) :-
+    (
+        TailAssocLists = [],
+        FirstAssocList = HeadAssocList,
+        LaterAssocLists = []
+    ;
+        TailAssocLists = [HeadTailAssocList | TailTailAssocLists],
+        map.union_loop(HeadAssocList, HeadTailAssocList, CommonPred,
+            [], RevFirstAssocList),
+        list.reverse(RevFirstAssocList, FirstAssocList),
+        (
+            TailTailAssocLists = [],
+            LaterAssocLists = []
+        ;
+            TailTailAssocLists =
+                [HeadTailTailAssocList | TailTailTailAssocLists],
+            map.union_list_pass(HeadTailTailAssocList, TailTailTailAssocLists,
+                CommonPred, HeadLaterAssocList, TailLaterAssocLists),
+            LaterAssocLists = [HeadLaterAssocList | TailLaterAssocLists]
+        )
     ).
 
 %-----------------------------------------------------------------------------%

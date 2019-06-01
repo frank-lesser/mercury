@@ -1422,13 +1422,6 @@ MERCURY_CHECK_FOR_HEADERS( \
         semaphore.h pthread.h time.h spawn.h fenv.h sys/mman.h sys/sem.h \
         sched.h utmpx.h dispatch/dispatch.h stdint.h sys/select.h )
 
-if test "$MR_HAVE_GETOPT_H" = 1; then
-    GETOPT_H_AVAILABLE=yes
-else
-    GETOPT_H_AVAILABLE=no
-fi
-AC_SUBST(GETOPT_H_AVAILABLE)
-
 if test "$MR_HAVE_UCONTEXT_H" != 1; then
     MERCURY_CHECK_FOR_HEADERS(sys/ucontext.h)
 fi
@@ -1483,6 +1476,16 @@ AC_MSG_RESULT($mercury_cv_have_builtin_bswap64)
 if test "$mercury_cv_have_builtin_bswap64" = yes; then
     AC_DEFINE(MR_HAVE_BUILTIN_BSWAP64)
 fi
+
+#-----------------------------------------------------------------------------#
+#
+# Check whether getopt() is available
+#
+
+AC_CHECK_FUNC(getopt,
+    [HAVE_GETOPT=yes],
+    [HAVE_GETOPT=no])
+AC_SUBST(HAVE_GETOPT)
 
 #-----------------------------------------------------------------------------#
 #
@@ -2616,8 +2619,7 @@ case "$ac_cv_prog_gcc" in yes)
         # the `gp' register. Ideally we ought to write a big enough example
         # program to trigger the problem, but that would be too much work.
         alpha*-dec-*)
-            MERCURY_MSG(
-"asm labels work on the Alpha but plain gcc labels do not")
+            MERCURY_MSG("asm labels work on the Alpha but plain gcc labels do not")
             mercury_cv_asm_labels=yes
             mercury_cv_gcc_labels=no
             CFLAGS_FOR_GOTOS="$CFLAGS_FOR_GOTOS -fomit-frame-pointer"
@@ -2633,6 +2635,9 @@ case "$ac_cv_prog_gcc" in yes)
             ;;
         # On hppa64, ia64 and powerpc64 the test programs appear to work, but
         # larger programs die with an Illegal Instruction fault.
+        # On powerpc (POWER) the test program enters an infinite loop;
+        # this is likely true for the other architectures which have not been
+        # tested recently.
         hppa64-*)
             MERCURY_MSG("gcc labels do not work on HPPA64")
             mercury_cv_asm_labels=no
@@ -2643,8 +2648,8 @@ case "$ac_cv_prog_gcc" in yes)
             mercury_cv_asm_labels=no
             mercury_cv_gcc_labels=no
             ;;
-        powerpc64-*)
-            MERCURY_MSG("gcc labels do not work on PPC64")
+        powerpc*-*)
+            MERCURY_MSG("gcc labels do not work on PPC/PPC64")
             mercury_cv_asm_labels=no
             mercury_cv_gcc_labels=no
             ;;
@@ -5436,7 +5441,7 @@ mercury_check_c_files () {
             ;;
         *)
             sed -n -e "/END_OF_C_GRADE_INFO/q" $maybe_delete_level -e "/=/p" \
-                < $c_file | tr -s '* \r\n' ';' > confscratch
+                < $c_file | tr -s '* \r\n' ';;;;' > confscratch
             if cmp -s confscratch confscratch.ref
             then
                 some_kept=true
@@ -5691,8 +5696,9 @@ MERCURY_MSG("")
 
 if test "$have_default_grade" = "no"
 then
-    AC_MSG_WARN([the default grade for applications is $DEFAULT_GRADE,
-****    but this grade is not going to be installed.])
+    MERCURY_MSG(["WARNING: the default grade for applications is $DEFAULT_GRADE,"])
+    MERCURY_MSG(["but this grade is not going to be installed."])
+    MERCURY_MSG("")
 fi
 
 min_minutes_per_grade=10
@@ -5709,11 +5715,18 @@ else
     MERCURY_MSG("This will likely take $min_minutes to $max_minutes minutes.")
 fi
 MERCURY_MSG("")
-# Putting commas directly into the message confuses m4, even if escaped.
-COMMA=","
-MERCURY_MSG("You can make the install faster by installing fewer grades${COMMA}")
-MERCURY_MSG("as shown by the fine-tuning section of the INSTALL file${COMMA}")
-MERCURY_MSG("or by compiling the files of each grade in parallel${COMMA}")
-MERCURY_MSG("which you can do via a command such as make PARALLEL=-j2 install.")
+MERCURY_MSG(["You can make the install faster by installing fewer grades,"])
+MERCURY_MSG(["as shown by the fine-tuning section of the INSTALL file,"])
+MERCURY_MSG(["or by compiling the files of each grade in parallel,"])
+MERCURY_MSG(["which you can do via a command such as make PARALLEL=-j2 install."])
+MERCURY_MSG("")
+
+if test -z "$MAKEINFO" -o -z "$INFO"
+then
+    MERCURY_MSG(["WARNING: missing \`makeinfo' or \`info'."])
+    MERCURY_MSG(["They are necessary to generate documentation in all formats,"])
+    MERCURY_MSG(["as well as the help text in the debugger."])
+    MERCURY_MSG("")
+fi
 
 #-----------------------------------------------------------------------------#

@@ -745,7 +745,7 @@ map_foldl_over_type_ctor_defns_2(Pred, _Name, !TypeCtorTable, !Acc) :-
 :- type hlds_type_body
     --->    hlds_du_type(
                 % The ctors for this type.
-                du_type_ctors               :: list(constructor),
+                du_type_ctors               :: one_or_more(constructor),
 
                 % Does this type have user-defined equality and comparison
                 % predicates?
@@ -960,6 +960,8 @@ set_type_defn_prev_errors(X, !Defn) :-
                 cr_ordinal          :: uint32,
 
                 % Existential constraints, if any.
+                % It is an invariant that this will be no_exist_constraints
+                % if the list of arguments is empty.
                 cr_maybe_exist      :: maybe_cons_exist_constraints,
 
                 % The cons_id should be cons(SymName, Arity, TypeCtor)

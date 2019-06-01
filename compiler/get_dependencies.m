@@ -111,8 +111,17 @@
 
 :- func init_implicit_import_needs = implicit_import_needs.
 
+:- type item_contents
+    --->    item_contents(
+                ic_fifos                :: cord(foreign_include_file_info),
+                ic_fact_tables          :: set(string),
+                ic_langs                :: set(foreign_language),
+                ic_foreign_export_langs :: set(foreign_language),
+                ic_has_main             :: has_main
+            ).
+
     % get_implicits_foreigns_fact_tables(IntItems, ImpItems,
-    %   ImplicitImportNeeds, ForeignInclFiles, Langs, FactTables):
+    %   ImplicitImportNeeds, Contents):
     %
     % Given the interface and implementation items of a raw compilation unit,
     % compute and return
@@ -121,13 +130,13 @@
     %   i.e. of the set of modules that we need to implicitly import,
     %   in the interface and in the implementation;
     % - the foreign files they include;
-    % - the foreign languages they use; and
-    % - the names of the files that contain their fact tables.
+    % - the foreign languages they use;
+    % - the names of the files that contain their fact tables; and
+    % - whether they export the program's entry point predicate.
     %
 :- pred get_implicits_foreigns_fact_tables(list(item)::in, list(item)::in,
     implicit_import_needs::out, implicit_import_needs::out,
-    cord(foreign_include_file_info)::out, set(foreign_language)::out,
-    set(string)::out) is det.
+    item_contents::out) is det.
 
     % get_implicit_dependencies_in_*(Globals, Items/ItemBlocks,
     %   ImportDeps, UseDeps):
@@ -176,6 +185,7 @@
 
 :- import_module libs.options.
 :- import_module mdbcomp.builtin_modules.
+:- import_module mdbcomp.prim_data.
 :- import_module parse_tree.prog_data_pragma.
 :- import_module parse_tree.prog_foreign.
 :- import_module parse_tree.maybe_error.
@@ -363,29 +373,27 @@ init_implicit_import_needs = ImplicitImportNeeds :-
 %-----------------------------------------------------------------------------%
 
 get_implicits_foreigns_fact_tables(IntItems, ImpItems,
-        IntImplicitImportNeeds, IntImpImplicitImportNeeds,
-        !:ForeignInclFiles, !:Langs, !:FactTables) :-
+        IntImplicitImportNeeds, IntImpImplicitImportNeeds, !:Contents) :-
     ImplicitImportNeeds0 = init_implicit_import_needs,
-    !:ForeignInclFiles = cord.init,
-    set.init(!:Langs),
-    set.init(!:FactTables),
+    !:Contents = item_contents(cord.init, set.init, set.init, set.init,
+        no_main),
     get_implicits_foreigns_fact_tables_acc(IntItems,
-        ImplicitImportNeeds0, IntImplicitImportNeeds,
-        !ForeignInclFiles, !Langs, !FactTables),
+        ImplicitImportNeeds0, IntImplicitImportNeeds, !Contents),
+    IntHasMain = !.Contents ^ ic_has_main,
     get_implicits_foreigns_fact_tables_acc(ImpItems,
-        IntImplicitImportNeeds, IntImpImplicitImportNeeds,
-        !ForeignInclFiles, !Langs, !FactTables).
+        IntImplicitImportNeeds, IntImpImplicitImportNeeds, !Contents),
+    % We ignore declarations of predicates named "main" in the
+    % implementation section, because nonexported predicates cannot serve
+    % as program entry points.
+    !Contents ^ ic_has_main := IntHasMain.
 
 :- pred get_implicits_foreigns_fact_tables_acc(list(item)::in,
     implicit_import_needs::in, implicit_import_needs::out,
-    cord(foreign_include_file_info)::in, cord(foreign_include_file_info)::out,
-    set(foreign_language)::in, set(foreign_language)::out,
-    set(string)::in, set(string)::out) is det.
+    item_contents::in, item_contents::out) is det.
 
-get_implicits_foreigns_fact_tables_acc([],
-        !ImplicitImportNeeds, !ForeignInclFiles, !Langs, !FactTables).
+get_implicits_foreigns_fact_tables_acc([], !ImplicitImportNeeds, !Contents).
 get_implicits_foreigns_fact_tables_acc([Item | Items],
-        !ImplicitImportNeeds, !ForeignInclFiles, !Langs, !FactTables) :-
+        !ImplicitImportNeeds, !Contents) :-
     (
         Item = item_type_defn(ItemTypeDefn),
         ItemTypeDefn = item_type_defn_info(_TypeCtorName, _TypeParams,
@@ -401,7 +409,9 @@ get_implicits_foreigns_fact_tables_acc([Item | Items],
         ;
             TypeDefn = parse_tree_foreign_type(DetailsForeign),
             DetailsForeign = type_details_foreign(ForeignType, _, _),
-            set.insert(foreign_type_language(ForeignType), !Langs)
+            Langs0 = !.Contents ^ ic_langs,
+            set.insert(foreign_type_language(ForeignType), Langs0, Langs),
+            !Contents ^ ic_langs := Langs
         ;
             ( TypeDefn = parse_tree_du_type(_)
             ; TypeDefn = parse_tree_eqv_type(_)
@@ -424,26 +434,39 @@ get_implicits_foreigns_fact_tables_acc([Item | Items],
             ;
                 LiteralOrInclude = floi_include_file(FileName),
                 InclFile = foreign_include_file_info(Lang, FileName),
-                !:ForeignInclFiles = cord.snoc(!.ForeignInclFiles, InclFile)
+                FIFOs0 = !.Contents ^ ic_fifos,
+                FIFOs = cord.snoc(FIFOs0, InclFile),
+                !Contents ^ ic_fifos := FIFOs
             ),
-            set.insert(Lang, !Langs)
+            Langs0 = !.Contents ^ ic_langs,
+            set.insert(Lang, Langs0, Langs),
+            !Contents ^ ic_langs := Langs
         ;
             Pragma = pragma_foreign_proc(FPInfo),
             FPInfo = pragma_info_foreign_proc(Attrs, _, _, _, _, _, _),
-            set.insert(get_foreign_language(Attrs), !Langs)
+            Langs0 = !.Contents ^ ic_langs,
+            set.insert(get_foreign_language(Attrs), Langs0, Langs),
+            !Contents ^ ic_langs := Langs
         ;
             (
                 Pragma = pragma_foreign_proc_export(FPEInfo),
-                FPEInfo = pragma_info_foreign_proc_export(Lang, _, _)
+                FPEInfo = pragma_info_foreign_proc_export(Lang, _, _),
+                FELangs0 = !.Contents ^ ic_foreign_export_langs,
+                set.insert(Lang, FELangs0, FELangs),
+                !Contents ^ ic_foreign_export_langs := FELangs
             ;
                 Pragma = pragma_foreign_enum(FEInfo),
                 FEInfo = pragma_info_foreign_enum(Lang, _, _)
             ),
-            set.insert(Lang, !Langs)
+            Langs0 = !.Contents ^ ic_langs,
+            set.insert(Lang, Langs0, Langs),
+            !Contents ^ ic_langs := Langs
         ;
             Pragma = pragma_fact_table(FactTableInfo),
             FactTableInfo = pragma_info_fact_table(_PredNameArity, FileName),
-            set.insert(FileName, !FactTables)
+            FactTables0 = !.Contents ^ ic_fact_tables,
+            set.insert(FileName, FactTables0, FactTables),
+            !Contents ^ ic_fact_tables := FactTables
         ;
             Pragma = pragma_tabled(TableInfo),
             TableInfo = pragma_info_tabled(_, _, _, MaybeAttributes),
@@ -513,27 +536,59 @@ get_implicits_foreigns_fact_tables_acc([Item | Items],
         gather_implicit_import_needs_in_goal(Goal, !ImplicitImportNeeds)
     ;
         Item = item_mutable(ItemMutable),
-        % We can use all foreign languages.
-        set.insert_list(all_foreign_languages, !Langs),
+        Langs0 = !.Contents ^ ic_langs,
+        set.insert_list(all_foreign_languages, Langs0, Langs),
+        !Contents ^ ic_langs := Langs,
         gather_implicit_import_needs_in_mutable(ItemMutable,
             !ImplicitImportNeeds)
     ;
-        ( Item = item_inst_defn(_)
-        ; Item = item_mode_defn(_)
-        ; Item = item_pred_decl(_)
-        ; Item = item_mode_decl(_)
-        ; Item = item_typeclass(_)
-        ; Item = item_initialise(_)
+        ( Item = item_initialise(_)
         ; Item = item_finalise(_)
-        ; Item = item_foreign_import_module(_)
+        ),
+        FELangs0 = !.Contents ^ ic_foreign_export_langs,
+        set.insert_list(all_foreign_languages, FELangs0, FELangs),
+        !Contents ^ ic_foreign_export_langs := FELangs
+    ;
+        Item = item_pred_decl(ItemPredDecl),
+        ItemPredDecl = item_pred_decl_info(SymName, PorF, ArgTypes,
+            _, WithType, _, _, _, _, _, _, _, _, _),
+        ( if
+            % XXX ITEM_LIST Could the predicate name be unqualified?
+            (
+                SymName = unqualified(_),
+                unexpected($pred, "unqualified SymName")
+            ;
+                SymName = qualified(_, "main")
+            ),
+            PorF = pf_predicate,
+            % XXX The comment below is obsolete, and was probably wrong
+            % even before it became obsolete.
+            % XXX We should allow `main/2' to be declared using `with_type`,
+            % but equivalences haven't been expanded at this point.
+            % The `has_main' field is only used for some special case handling
+            % of the module containing main for the IL backend (we generate
+            % a `.exe' file rather than a `.dll' file). This would arguably
+            % be better done by generating a `.dll' file as normal, and a
+            % separate `.exe' file containing initialization code and a call
+            % to `main/2', as we do with the `_init.c' file in the C backend.
+            ArgTypes = [_, _],
+            WithType = no
+        then
+            !Contents ^ ic_has_main := has_main
+        else
+            true
         )
     ;
-        Item = item_type_repn(_),
-        % These should not be generated yet.
-        unexpected($pred, "item_type_repn")
+        ( Item = item_inst_defn(_)
+        ; Item = item_mode_defn(_)
+        ; Item = item_mode_decl(_)
+        ; Item = item_typeclass(_)
+        ; Item = item_foreign_import_module(_)
+        ; Item = item_type_repn(_)
+        )
     ),
     get_implicits_foreigns_fact_tables_acc(Items,
-        !ImplicitImportNeeds, !ForeignInclFiles, !Langs, !FactTables).
+        !ImplicitImportNeeds, !Contents).
 
 %-----------------------------------------------------------------------------%
 
@@ -662,11 +717,8 @@ gather_implicit_import_needs_in_items([Item | Items], !ImplicitImportNeeds) :-
         ; Item = item_initialise(_)
         ; Item = item_finalise(_)
         ; Item = item_foreign_import_module(_)
+        ; Item = item_type_repn(_)
         )
-    ;
-        Item = item_type_repn(_),
-        % XXX TYPE_REPN Implement this.
-        unexpected($pred, "item_type_repn nyi")
     ),
     gather_implicit_import_needs_in_items(Items, !ImplicitImportNeeds).
 

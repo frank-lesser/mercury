@@ -389,8 +389,8 @@
 % items of the same name from each other.
 %
 
-    % Did an item originate in user code or was it added by the compiler as
-    % part of a source-to-source transformation, e.g. the initialise
+    % Did an item originate in user code or was it added by the compiler
+    % as part of a source-to-source transformation, e.g. the initialise
     % declarations? If the latter, specify the information that the
     % make_hlds pass may need to answer questions about the item.
     %
@@ -410,7 +410,11 @@
 
 :- type maybe_is_mutable
     --->    is_not_mutable
-    ;       is_mutable.
+    ;       is_mutable(
+                is_mutable_module_name          :: module_name,
+                is_mutable_name                 :: string,
+                is_mutable_pred_kind            :: mutable_pred_kind
+            ).
 
 :- type item
     --->    item_clause(item_clause_info)
@@ -502,7 +506,6 @@
                 pf_maybe_with_inst              :: maybe(mer_inst),
                 pf_maybe_detism                 :: maybe(determinism),
                 pf_maybe_attrs                  :: item_maybe_attrs,
-                % ZZZ pf_pred_origin            :: pred_origin_subset
                 pf_tvarset                      :: tvarset,
                 pf_instvarset                   :: inst_varset,
                 pf_existqvars                   :: existq_tvars,
@@ -915,7 +918,7 @@
                 mer_type
             )
     ;       tcrepn_fits_in_n_bits(int, fill_kind)
-    ;       tcrepn_is_word_aligned_ptr(wap_kind)
+    ;       tcrepn_is_word_aligned_ptr
     ;       tcrepn_has_direct_arg_functors(list(sym_name_and_arity))
     ;       tcrepn_du(du_repn)
     ;       tcrepn_maybe_foreign(
@@ -937,17 +940,14 @@
                 maybe(du_repn)
             ).
 
-:- type wap_kind
-    --->    wap_foreign_type_assertion
-    ;       wap_mercury_type(sym_name_and_arity).
-
 :- type foreign_type_repn
     --->    foreign_type_repn(
                 % The name of the foreign type that represents values
                 % of this Mercury type.
-                frd_foreign_type        :: string
+                frd_foreign_type        :: string,
 
-                % ZZZ assertions?
+                % The assertions about this foreign type.
+                frd_assertions          :: foreign_type_assertions
             ).
 
     % There should be exactly one applicable du_repn for any given type_ctor.
@@ -1213,7 +1213,7 @@
     --->    pragma_info_foreign_enum(
                 foreign_enum_language   :: foreign_language,
                 foreign_enum_type_ctor  :: type_ctor,
-                foreign_enum_values     :: assoc_list(sym_name, string)
+                foreign_enum_values     :: one_or_more(pair(sym_name, string))
             ).
 
 :- type pragma_info_external_proc
@@ -2193,11 +2193,9 @@ get_foreign_code_indicators_from_item(Globals, Item, !Info) :-
         % Mutables introduce foreign_procs, but mutable declarations
         % won't have been expanded by the time we get here, so we need
         % to handle them separately.
-        % XXX mutables are currently only implemented for the C backends
-        % but we should handle the Java/C# backends here as well.
-        % (See do_get_item_foreign_code for details/5).
         UsedForeignLanguages0 = !.Info ^ used_foreign_languages,
-        set.insert(lang_c, UsedForeignLanguages0, UsedForeignLanguages),
+        set.insert_list(all_foreign_languages,
+            UsedForeignLanguages0, UsedForeignLanguages),
         !Info ^ used_foreign_languages := UsedForeignLanguages
     ;
         ( Item = item_initialise(_)
@@ -2205,9 +2203,9 @@ get_foreign_code_indicators_from_item(Globals, Item, !Info) :-
         ),
         % Intialise/finalise declarations introduce export pragmas, but
         % again they won't have been expanded by the time we get here.
-        % XXX we don't currently support these on non-C backends.
         UsedForeignLanguages0 = !.Info ^ used_foreign_languages,
-        set.insert(lang_c, UsedForeignLanguages0, UsedForeignLanguages),
+        set.insert_list(all_foreign_languages,
+            UsedForeignLanguages0, UsedForeignLanguages),
         !Info ^ used_foreign_languages := UsedForeignLanguages,
         !Info ^ module_has_foreign_export := contains_foreign_export
     ;

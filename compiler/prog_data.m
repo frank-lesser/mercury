@@ -278,7 +278,7 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
     --->    type_details_du(
                 % The list of data constructors (function symbols) defined
                 % by the type constructor.
-                du_ctors            :: list(constructor),
+                du_ctors            :: one_or_more(constructor),
 
                 % Does the type constructor definition specify
                 % a unification and/or comparison predicate for its instances?
@@ -386,6 +386,8 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
                 cons_ordinal        :: uint32,
 
                 % Existential constraints, if any.
+                % It is an invariant that this will be no_exist_constraints
+                % if the list of arguments is empty.
                 cons_maybe_exist    :: maybe_cons_exist_constraints,
 
                 % The cons_id should be cons(SymName, Arity, TypeCtor)
@@ -1449,6 +1451,27 @@ best_purity(purity_semipure, purity_impure) = purity_semipure.
 best_purity(purity_impure, purity_pure) = purity_pure.
 best_purity(purity_impure, purity_semipure) = purity_semipure.
 best_purity(purity_impure, purity_impure) = purity_impure.
+
+%---------------------------------------------------------------------------%
+%
+% Predicates.
+%
+
+:- interface.
+
+:- type mutable_pred_kind
+    --->    mutable_pred_std_get
+    ;       mutable_pred_std_set
+    ;       mutable_pred_io_get
+    ;       mutable_pred_io_set
+    ;       mutable_pred_unsafe_get
+    ;       mutable_pred_unsafe_set
+    ;       mutable_pred_constant_get
+    ;       mutable_pred_constant_secret_set
+    ;       mutable_pred_lock
+    ;       mutable_pred_unlock
+    ;       mutable_pred_pre_init
+    ;       mutable_pred_init.
 
 %---------------------------------------------------------------------------%
 %
