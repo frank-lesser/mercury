@@ -385,6 +385,8 @@ Changes to the Mercury standard library:
    - foldr5/12
    - intersect_list/4
    - union_list/4
+   - select_unselect/4
+   - select_unselect_sorted_list/4
 
 * The following predicate has been added to the set modules:
 
@@ -642,6 +644,8 @@ Changes to the Mercury compiler:
 * We have added support for OpenBSD.
 
 * We have added support for Linux systems using musl libc.
+
+* We have improved support for AIX.
 
 * The compiler now reports an error for binary/octal/hexadecimal integer
   literals that cannot be represented in the compiler's native int type.

@@ -3248,18 +3248,20 @@ case "$host" in
         ;;
 
     *-openbsd*)
-        CFLAGS_FOR_THREADS="-DGC_THREADS"
+        CFLAGS_FOR_THREADS="-DGC_THREADS -D_REENTRANT"
         THREAD_LIBS="-lpthread"
         ENABLE_BOEHM_THREAD_LOCAL_ALLOC="-DTHREAD_LOCAL_ALLOC"
         ENABLE_BOEHM_PARALLEL_MARK="-DPARALLEL_MARK"
         avoid_sbrk=yes
         ;;
 
-### # The threads stuff on HPUX is not yet enabled because
-### # we don't have an HPUX box to test it on.
-### *hpux*)
-###     CFLAGS_FOR_THREADS="" # XXX incomplete
-###     THREAD_LIBS="-lpthread -lrt" ;;
+    *-aix*)
+        CFLAGS_FOR_THREADS="-DGC_THREADS -D_THREAD_SAFE"
+        THREAD_LIBS="-lpthread"
+        ENABLE_BOEHM_THREAD_LOCAL_ALLOC="-DTHREAD_LOCAL_ALLOC"
+        ENABLE_BOEHM_PARALLEL_MARK="-DPARALLEL_MARK"
+        avoid_sbrk=yes  # assumed
+        ;;
 
     *)
         # Multithreading not (yet) supported on other architectures.
@@ -5258,7 +5260,7 @@ AC_SUBST(USE_MSVCRT)
 
 #-----------------------------------------------------------------------------#
 #
-# Check for readline and editline.
+# Check for readline and editline (libedit).
 #
 
 MERCURY_CHECK_READLINE
