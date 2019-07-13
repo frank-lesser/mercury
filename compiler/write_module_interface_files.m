@@ -30,6 +30,10 @@
 % includes declarations (but not clauses) from the implementation section.
 % It is generated only for modules that have submodules.
 %
+% NOTE The above is only a summary, and may be out of date. An attempt
+% at an up-to-date and much more detailed description can be found in
+% notes/interface_files.html.
+%
 %---------------------------------------------------------------------------%
 %
 % The datestamp on the .date3 file gives the last time
@@ -138,12 +142,10 @@ write_short_interface_file_int3(Globals, SourceFileName, RawCompUnit, !IO) :-
     % in the current module and writes out the .int3 file.
 
     RawCompUnit = raw_compilation_unit(ModuleName, _, _),
-    generate_short_interface_int3(Globals, RawCompUnit, ParseTreeInt3, Specs0),
-    module_qualify_parse_tree_int(Globals, ParseTreeInt3, QualParseTreeInt3,
-        Specs0, Specs),
+    generate_short_interface_int3(Globals, RawCompUnit, ParseTreeInt3, Specs),
     write_error_specs_ignore(Specs, Globals, !IO),
     % XXX Why do we do this even if there are some errors?
-    actually_write_interface_file(Globals, SourceFileName, QualParseTreeInt3,
+    actually_write_interface_file(Globals, SourceFileName, ParseTreeInt3,
         no, !IO),
     touch_interface_datestamp(Globals, ModuleName, ".date3", !IO).
 

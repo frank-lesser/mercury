@@ -15,7 +15,7 @@ Interface files
 <h2>A warning</h2>
 
 <p>
-Our system of interface files is quite complex,
+Our system of interface files is quite complex.
 Some of the complexity is justified, or at least was justified at the time.
 Other aspects are almost certainly accidents.
 The compiler's old representation of parse trees as raw lists of items,
@@ -181,7 +181,17 @@ it may be left out of the .int3 file.
 </ul>
 
 <p>
-The rules for choosing between these three outcomes
+If the item is included in the .int3 file, whether changed or unchanged,
+it stays in the interface section,
+so .int3 files contain no implementation section.
+<p>
+After we decide what items to include in the .int3 file,
+its contents are module qualified to the maximum extent possible.
+However, this cannot guarantee <em>full</em> module qualification,
+for reasons explained below.
+
+<p>
+The rules for choosing between the above three outcomes
 of course depend on the item's type.
 
 <p>
@@ -229,26 +239,28 @@ so if the interface section of a module refers to type t1,
 the code that creates the module's .int file needs to know
 which of the imported modules defines a type named t1.
 It gets this information from the .int3 files
-of the modules listed in import_module (and use_module) declarations.
+of the modules listed in import_module declarations.
 
 <p>
 The second piece of information is
 whether the representation of the given type differs from the standard,
 and if so, how.
-<em>XXX</em> I intend to put this info into
-type representation items that are separate from the type definition items.
+<em>XXX</em> The compiler can now put this info into type representation items
+that are separate from the type definition items.
+For now, it actually does so only if the value of the --experiment option
+is set to a special value.
 
 <p>
 <li>
-Inst and mode definitions are always included in the .int3 file unchanged.
-<em>XXX</em> I know that the names of defined insts and modes must be put
-into the .int3 file for the same reason as the names of defined types,
-but I don't understand the reason for putting the entire definition
-into the .int3 file.
+Inst and mode definitions are always included in the .int3 file
+in an abstract form that contains no information except their name and arity.
+The reason is to allow references to inst and mode names
+to be fully module qualified.
 
 <p>
 <li>
-Class definitions are always included in the .int3 file in abstract form.
+Class definitions are also included in the .int3 file
+in an abstract form that contains no information except their name and arity.
 Again, the reason is to allow references to class names
 to be fully module qualified.
 
@@ -284,12 +296,19 @@ we generate a warning, as we do for clauses.
 
 <p>
 <li>
-Foreign_import_module items are never includes in .int3 files.
+Foreign_import_module items are never included in .int3 files.
 
 <p>
 <li>
 Promises are never included in .int3 files.
-Neither are definitions of mutables, or initialize and finalize declarations.
+
+<p>
+<li>
+Mutables are never included in .int3 files.
+
+<p>
+<li>
+Initialise and finalize declarations are never included in .int3 files.
 
 <p>
 <li>
@@ -297,39 +316,171 @@ Declarations of submodules are always included in the .int3 file unchanged.
 
 <p>
 <li>
-If the interface contains no inst definitions, mode definitions,
-typeclass definitions or instance definitions,
-then none of the interface's module import and use declarations
-will be included in the .int3 file.
-If it does, then all of the interface's module import and use declarations
-will be included in the .int3 file.
-
+We include in the .int3 file
+the module's import_module (but not use_module) declarations
+only if the .int3 file contains at least one item
+that contains a name (type name, inst name, mode name etc)
+that may be defined in those other modules.
+In that case, the module qualification of that name
+will require knowing which other module defines that name.
 <p>
-When generating .int3 files, the compiler has no way to know whether
-the names of the type constructors
-in the heads of the (abstract forms of) typeclass and instance definitions
-are fully qualified or not.
-Copying all the import_module declarations from the interface to the .int3 file
-allows readers of the .int3 file to fully module qualify them.
-
+At the moment, such possibly unqualified names may appear in
 <p>
-I (zs) don't think we should include
-the right hand sides of inst and mode definitions in .int3 files,
-but as long as we do, we need to copy
-all the import_module declarations from the interface to the .int3 file
-to help readers module qualify them.
-
-<p>
-<em>XXX</em> In neither case does this justify copying use_module declarations,
-since the source code must fully module qualify
-any reference to any type in such a module,
-leaving nothing to be done by the readers of the .int3 file.
+<ul>
+<li>
+the member types in the heads of abstract instance definitions
+(all instance definitions in .int3 files are abstract).
 </ul>
+<p>
+If the interface contains any of these kinds of items,
+then <em>none</em> of the interface's import_module declarations
+will be included in the .int3 file.
+If it does, then <em>all</em> of the interface's
+import_module declarations will be included in the .int3 file.
+</ul>
+
+<p>
+<em>XXX</em>
+While type definition items will never contain references
+to type constructor names that may require qualification,
+type <em>representation</em> items for equivalence types may.
+<p>
+<em>XXX</em>
+If e.g. the constructor t1/0 appears in an abstract instance definition,
+and the module defines a type constructor t1/0,
+this arguably should <em>not</em> require us
+to include all the imports in the .int3 file.
+The reason has two parts.
+Either the t1/0 is defined in one or more of the imported modules, or it isn't.
+If it is not defined in any of them,
+then causing the readers of this module's .int3 file
+to read those other modules' .int3 files
+will just compute the same result, only slower.
+On the other hand, if some of those modules do define t1/0,
+then this type constructor is multiply defined, so its appearance
+in the instance definition is ambiguous.
+This fact will be reported in an error message when
+this module is compiled to target code.
+Reporting it during some other compiler invocation
+that happens to read this module's .int3 file
+may be more of a distraction than a help.
+<p>
+<em>XXX</em>
+We should investigate replacing the copied import_module declaration list
+with a single item that says
+"these type, inst, etc names in this .int3 file
+may be defined in these other modules".
+This should have two benefits.
+One, it would allow us to stop the transitive grabbing of .int3 files
+as soon as we have read the .int3 files
+that define all the type, inst etc names that are still outstanding.
+Two, it should allow us to start using the transitively grabbed files
+<em>only</em> for their intended purpose,
+which should stop "leaks" of declarations/definitions
+from these transitively-included-only-for-module-qualification modules
+to the HLDS of the module being compiled.
+Right now, it is possible, though rare,
+to delete an import of module b from module a,
+and discover that this results in an error a type being undefined,
+when that type is defined in module c.
+This happens only because the import of b
+dragged with it the definitions inside c as well,
+so that the import of c was required by the language definition
+but <em>not</em> by the compiler.
 
 <h2>The contents of .int0 files</h2>
 
 <p>
-TODO
+The contents of the .int0 file of a module are derived from the contents of
+both the interface sections and the implementation sections of that module,
+<em>after</em> they are fully module qualified.
+This requires reading in, via grab_unqual_imported_modules_make_int,
+<ul>
+<li>
+the .int0 files of this module's ancestor modules;
+<li>
+the .int3 files of the modules used or imported by this module;
+<li>
+the .int3 files of the modules imported by the .int0 or .int3 files
+we have read in under the first, second or <em>third</em> point,
+until we get to a fixpoint.
+</ul>
+
+<p>
+Items are never moved between sections:
+items in the interface section of the module
+are put into the interface section of the .int0 file,
+while items in the implementation section of the module
+are put into the implementation section of the .int0 file.
+
+<p>
+<ul>
+
+<li>
+Type definitions are always included in the .int0 file unchanged.
+<em>XXX</em> Julien says this may be the wrong thing to do for solver types,
+and that the failure of the submodules/ts test case
+with intermodule optimization may be caused by this.
+
+<p>
+<li>
+Inst and mode definitions are always included in the .int0 file unchanged.
+
+<p>
+<li>
+Class definitions are always included in the .int0 file unchanged.
+
+<p>
+<li>
+Instance definitions are always included in the .int3 file in abstract form.
+
+<p>
+<li>
+The type and mode declarations of predicates and functions
+are always included in .int0 files unchanged.
+
+<p>
+<li>
+Clauses are never included in .int0 files.
+
+<p>
+<li>
+Pragmas that may appear in interface sections
+are always included in .int0 files unchanged
+(regardless of which section they <em>actually</em> appear in).
+Pragmas that may not appear in interface sections
+are never included in .int0 files.
+
+<p>
+<li>
+Foreign_import_module items are always included in .int0 files.
+
+<p>
+<li>
+Promises are always included in .int0 files unchanged.
+
+<p>
+<li>
+Initialize and finalize declarations are never included in .int0 files.
+
+<p>
+<li>
+Mutables are never included in .int0 files.
+(This is because every module that sees a mutable declaration
+would attempt to reserve its own memory for the mutable;
+having more than one location for a single mutable would obviously not work.)
+However, we do put automatically generated predmode declarations
+for all of the mutable's get and set predicates into .int0 files.
+
+<p>
+<li>
+Declarations of submodules are always included in the .int3 file unchanged.
+
+<p>
+<li>
+Import_module and use_module declarations
+are always included in the .int3 file unchanged.
+</ul>
 
 <h2>The contents of .int files</h2>
 
@@ -340,3 +491,22 @@ TODO
 
 <p>
 TODO
+
+<h2>Timestamp files</h2>
+
+<ul>
+<p>
+<li>
+The datestamp on the .date3 file gives the last time
+the .int3 file was checked for consistency.
+
+<p>
+<li>
+The datestamp on the .date0 file gives the last time
+the .int0 file was checked for consistency.
+
+<p>
+<li>
+The datestamp on the .date file gives the last time
+the .int and .int2 files were checked for consistency.
+</ul>

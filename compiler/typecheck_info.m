@@ -35,6 +35,7 @@
 :- import_module list.
 :- import_module maybe.
 :- import_module map.
+:- import_module set_tree234.
 
 %-----------------------------------------------------------------------------%
 %
@@ -136,33 +137,36 @@
 % Basic access predicates for typecheck_info.
 %
 
-:- pred typecheck_info_get_module_info(typecheck_info::in,
-    module_info::out) is det.
 :- pred typecheck_info_get_error_clause_context(typecheck_info::in,
     type_error_clause_context::out) is det.
-:- pred typecheck_info_get_ambiguity_error_limit(typecheck_info::in,
+:- pred typecheck_info_get_overloaded_symbol_map(typecheck_info::in,
+    overloaded_symbol_map::out) is det.
+:- pred typecheck_info_get_ambiguity_warn_limit(typecheck_info::in,
     int::out) is det.
 
+:- pred typecheck_info_get_module_info(typecheck_info::in,
+    module_info::out) is det.
 :- pred typecheck_info_get_pred_id(typecheck_info::in,
     pred_id::out) is det.
+
 :- pred typecheck_info_get_calls_are_fully_qualified(typecheck_info::in,
     is_fully_qualified::out) is det.
+:- pred typecheck_info_get_ambiguity_error_limit(typecheck_info::in,
+    int::out) is det.
 :- pred typecheck_info_get_is_field_access_function(typecheck_info::in,
     maybe(pred_status)::out) is det.
 :- pred typecheck_info_get_non_overload_errors(typecheck_info::in,
     list(error_spec)::out) is det.
 :- pred typecheck_info_get_overload_error(typecheck_info::in,
     maybe(error_spec)::out) is det.
-:- pred typecheck_info_get_overloaded_symbol_map(typecheck_info::in,
-    overloaded_symbol_map::out) is det.
-:- pred typecheck_info_get_ambiguity_warn_limit(typecheck_info::in,
-    int::out) is det.
+:- pred typecheck_info_get_nosuffix_integer_vars(typecheck_info::in,
+    set_tree234(prog_var)::out) is det.
 
-:- pred typecheck_info_set_overload_error(maybe(error_spec)::in,
-    typecheck_info::in, typecheck_info::out) is det.
 :- pred typecheck_info_set_overloaded_symbol_map(overloaded_symbol_map::in,
     typecheck_info::in, typecheck_info::out) is det.
 :- pred typecheck_info_set_non_overload_errors(list(error_spec)::in,
+    typecheck_info::in, typecheck_info::out) is det.
+:- pred typecheck_info_set_overload_error(maybe(error_spec)::in,
     typecheck_info::in, typecheck_info::out) is det.
 
 %-----------------------------------------------------------------------------%
@@ -172,13 +176,18 @@
 
 :- pred typecheck_info_get_module_name(typecheck_info::in, module_name::out)
     is det.
-:- pred typecheck_info_get_preds(typecheck_info::in, predicate_table::out)
+:- pred typecheck_info_get_pred_table(typecheck_info::in, predicate_table::out)
     is det.
-:- pred typecheck_info_get_types(typecheck_info::in, type_table::out) is det.
-:- pred typecheck_info_get_ctors(typecheck_info::in, cons_table::out) is det.
+:- pred typecheck_info_get_type_table(typecheck_info::in, type_table::out)
+    is det.
+:- pred typecheck_info_get_cons_table(typecheck_info::in, cons_table::out)
+    is det.
 
 :- pred typecheck_info_add_overloaded_symbol(overloaded_symbol::in,
     prog_context::in, typecheck_info::in, typecheck_info::out) is det.
+
+:- pred typecheck_info_add_nosuffix_integer_var(prog_var::in,
+    typecheck_info::in, typecheck_info::out) is det.
 
 :- pred typecheck_info_add_error(error_spec::in,
     typecheck_info::in, typecheck_info::out) is det.
@@ -196,10 +205,6 @@
 :- import_module libs.options.
 
 :- import_module term.
-
-%-----------------------------------------------------------------------------%
-
-project_cons_type_info_source(CTI) = CTI ^ cti_source.
 
 %-----------------------------------------------------------------------------%
 
@@ -238,6 +243,9 @@ project_cons_type_info_source(CTI) = CTI ^ cti_source.
                 % they will be.
                 tcsi_calls_are_fully_qualified  :: is_fully_qualified,
 
+                % The value of the option --typecheck-ambiguity-error-limit.
+                tcsi_ambiguity_error_limit      :: int,
+
                 % Is the pred we are checking a field access function? If so,
                 % there should only be a field access function application
                 % in the body, not predicate or function calls or constructor
@@ -254,8 +262,13 @@ project_cons_type_info_source(CTI) = CTI ^ cti_source.
                 % highly ambiguous overloading? If yes, this has the message.
                 tcsi_overload_error             :: maybe(error_spec),
 
-                % The value of the option --typecheck-ambiguity-error-limit.
-                tcsi_ambiguity_error_limit      :: int
+                % The set of variables that have been unified with integer
+                % constants without suffixes. If a variable in this set
+                % is used in a context that expects either an unsigned integer
+                % or a sized integer (either signed or unsigned), then
+                % we extend the error message with a reminder about the
+                % need for the right suffix.
+                tcsi_nosuffix_integer_vars      :: set_tree234(prog_var)
             ).
 
 %-----------------------------------------------------------------------------%
@@ -273,20 +286,28 @@ typecheck_info_init(ModuleInfo, PredId, IsFieldAccessFunction,
     OverloadErrors = no,
     module_info_get_globals(ModuleInfo, Globals),
     globals.lookup_int_option(Globals, typecheck_ambiguity_warn_limit,
-        WarnLimit),
+        AmbiguityWarnLimit),
     globals.lookup_int_option(Globals, typecheck_ambiguity_error_limit,
-        ErrorLimit),
-    SubInfo = typecheck_sub_info(CallsAreFullyQualified,
+        AmbiguityErrorLimit),
+    NoSuffixIntegerMap = set_tree234.init,
+    SubInfo = typecheck_sub_info(CallsAreFullyQualified, AmbiguityErrorLimit,
         MaybeFieldAccessFunction, NonOverloadErrors, OverloadErrors,
-        ErrorLimit),
+        NoSuffixIntegerMap),
     ClauseNum = 0,
     ClauseContext = type_error_clause_context(ModuleInfo, PredId,
         PredMarkers, ClauseNum, term.context_init, ClauseVarSet),
     map.init(OverloadedSymbolMap),
     Info = typecheck_info(SubInfo, ClauseContext, OverloadedSymbolMap,
-        WarnLimit).
+        AmbiguityWarnLimit).
 
 %-----------------------------------------------------------------------------%
+
+project_cons_type_info_source(CTI) = CTI ^ cti_source.
+
+%-----------------------------------------------------------------------------%
+
+:- pred typecheck_info_set_nosuffix_integer_vars(set_tree234(prog_var)::in,
+    typecheck_info::in, typecheck_info::out) is det.
 
 typecheck_info_get_error_clause_context(Info, X) :-
     X = Info ^ tci_error_clause_context.
@@ -302,14 +323,16 @@ typecheck_info_get_pred_id(Info, X) :-
 
 typecheck_info_get_calls_are_fully_qualified(Info, X) :-
     X = Info ^ tci_sub_info ^ tcsi_calls_are_fully_qualified.
+typecheck_info_get_ambiguity_error_limit(Info, X) :-
+    X = Info ^ tci_sub_info ^ tcsi_ambiguity_error_limit.
 typecheck_info_get_is_field_access_function(Info, X) :-
     X = Info ^ tci_sub_info ^ tcsi_is_field_access_function.
 typecheck_info_get_non_overload_errors(Info, X) :-
     X = Info ^ tci_sub_info ^ tcsi_non_overload_errors.
 typecheck_info_get_overload_error(Info, X) :-
     X = Info ^ tci_sub_info ^ tcsi_overload_error.
-typecheck_info_get_ambiguity_error_limit(Info, X) :-
-    X = Info ^ tci_sub_info ^ tcsi_ambiguity_error_limit.
+typecheck_info_get_nosuffix_integer_vars(Info, X) :-
+    X = Info ^ tci_sub_info ^ tcsi_nosuffix_integer_vars.
 
 typecheck_info_set_overloaded_symbol_map(X, !Info) :-
     !Info ^ tci_overloaded_symbol_map := X.
@@ -318,6 +341,8 @@ typecheck_info_set_non_overload_errors(X, !Info) :-
     !Info ^ tci_sub_info ^ tcsi_non_overload_errors := X.
 typecheck_info_set_overload_error(X, !Info) :-
     !Info ^ tci_sub_info ^ tcsi_overload_error := X.
+typecheck_info_set_nosuffix_integer_vars(X, !Info) :-
+    !Info ^ tci_sub_info ^ tcsi_nosuffix_integer_vars := X.
 
 % Access statistics from before the change on 2015 jan 9.
 %
@@ -363,13 +388,13 @@ typecheck_info_set_overload_error(X, !Info) :-
 typecheck_info_get_module_name(Info, Name) :-
     typecheck_info_get_module_info(Info, ModuleInfo),
     module_info_get_name(ModuleInfo, Name).
-typecheck_info_get_preds(Info, Preds) :-
+typecheck_info_get_pred_table(Info, Preds) :-
     typecheck_info_get_module_info(Info, ModuleInfo),
     module_info_get_predicate_table(ModuleInfo, Preds).
-typecheck_info_get_types(Info, Types) :-
+typecheck_info_get_type_table(Info, Types) :-
     typecheck_info_get_module_info(Info, ModuleInfo),
     module_info_get_type_table(ModuleInfo, Types).
-typecheck_info_get_ctors(Info, Ctors) :-
+typecheck_info_get_cons_table(Info, Ctors) :-
     typecheck_info_get_module_info(Info, ModuleInfo),
     module_info_get_cons_table(ModuleInfo, Ctors).
 
@@ -385,6 +410,11 @@ typecheck_info_add_overloaded_symbol(Symbol, Context, !Info) :-
             OverloadedSymbolMap0, OverloadedSymbolMap)
     ),
     typecheck_info_set_overloaded_symbol_map(OverloadedSymbolMap, !Info).
+
+typecheck_info_add_nosuffix_integer_var(Var, !Info) :-
+    typecheck_info_get_nosuffix_integer_vars(!.Info, NoSuffixIntegerMap0),
+    set_tree234.insert(Var, NoSuffixIntegerMap0, NoSuffixIntegerMap),
+    typecheck_info_set_nosuffix_integer_vars(NoSuffixIntegerMap, !Info).
 
 typecheck_info_add_error(Error, !Info) :-
     typecheck_info_get_non_overload_errors(!.Info, Errors0),

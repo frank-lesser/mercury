@@ -295,9 +295,10 @@
             % The item is from a module imported by an ancestor.
             % XXX Did the ancestor do the import in its interface, or not?
 
-    ;       import_locn_ancestor_private_interface_proper.
-            % The item is from the _actual_ private interface of an ancestor
-            % module, i.e. the implementation section of a `.int0' file.
+    ;       import_locn_ancestor_int0_interface
+    ;       import_locn_ancestor_int0_implementation.
+            % The item is from the interface or implementation section
+            % of the .int0 file of an ancestor module.
 
 %-----------------------------------------------------------------------------%
 
@@ -308,6 +309,8 @@
 :- func make_ims_used_and_imported(import_locn, module_name, int_file_kind) =
     int_module_section.
 :- func make_ims_abstract_imported(module_name, int_file_kind) =
+    int_module_section.
+:- func make_ims_int3_implementation(module_name, int_file_kind) =
     int_module_section.
 
 :- func make_oms_opt_imported(module_name, opt_file_kind) =
@@ -1674,6 +1677,9 @@ make_ims_used_and_imported(ImportLocn, ModuleName, IntFileKind) =
         iou_used_and_imported).
 make_ims_abstract_imported(ModuleName, IntFileKind) =
     ims_abstract_imported(ModuleName, IntFileKind).
+make_ims_int3_implementation(_ModuleName, _IntFileKind) = _ :-
+    unexpected($pred,
+        "An .int3 file should not have an implementation section").
 
 make_oms_opt_imported(ModuleName, OptFileKind) =
     oms_opt_imported(ModuleName, OptFileKind).
@@ -1831,7 +1837,13 @@ get_included_modules_in_item_include_acc(Incl, !IncludedModuleNames) :-
     multi_map.add(ModuleName, Context, !IncludedModuleNames).
 
 avail_is_import(Avail) :-
-    Avail = avail_import(_).
+    require_complete_switch [Avail]
+    (
+        Avail = avail_import(_)
+    ;
+        Avail = avail_use(_),
+        fail
+    ).
 
 wrap_avail_use(AvailUseInfo) = avail_use(AvailUseInfo).
 

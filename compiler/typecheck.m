@@ -1131,8 +1131,8 @@ typecheck_clause(HeadVars, ArgTypes, !Clause, !TypeAssignSet, !Info) :-
 
     % Typecheck the clause - first the head unification, and then the body.
     ArgVectorKind = arg_vector_clause_head,
-    typecheck_vars_have_types(ArgVectorKind, Context,
-        HeadVars, ArgTypes, !TypeAssignSet, !Info),
+    typecheck_vars_have_types(ArgVectorKind, Context, HeadVars, ArgTypes,
+        !TypeAssignSet, !Info),
     typecheck_goal(Body0, Body, Context, !TypeAssignSet, !Info),
     trace [compiletime(flag("type_checkpoint")), io(!IO)] (
         typecheck_info_get_error_clause_context(!.Info, ClauseContext),
@@ -2056,10 +2056,9 @@ typecheck_var_has_type_in_arg_vector(Info, Context, ArgVectorKind, ArgNum,
         TypeAssignSet0 = [_ | _]
     then
         TypeAssignSet = TypeAssignSet0,
-        typecheck_info_get_error_clause_context(Info, ClauseContext),
         GoalContext =
             type_error_in_var_vector(var_vector_args(ArgVectorKind), ArgNum),
-        SpecAndMaybeActualExpected = report_error_var(ClauseContext,
+        SpecAndMaybeActualExpected = report_error_var(Info,
             GoalContext, Context, Var, Type, TypeAssignSet0),
         SpecAndMaybeActualExpected =
             spec_and_maybe_actual_expected(Spec, MaybeActualExpected),
@@ -2105,8 +2104,7 @@ typecheck_var_has_type(GoalContext, Context, Var, Type,
         TypeAssignSet0 = [_ | _]
     then
         TypeAssignSet = TypeAssignSet0,
-        typecheck_info_get_error_clause_context(!.Info, ClauseContext),
-        SpecAndMaybeActualExpected = report_error_var(ClauseContext,
+        SpecAndMaybeActualExpected = report_error_var(!.Info,
             GoalContext, Context, Var, Type, TypeAssignSet0),
         SpecAndMaybeActualExpected = spec_and_maybe_actual_expected(Spec, _),
         typecheck_info_add_error(Spec, !Info)
@@ -2263,6 +2261,11 @@ typecheck_unify_var_functor(UnifyContext, Context, Var, ConsId, ArgVars,
         GoalId, TypeAssignSet0, TypeAssignSet, !Info) :-
     typecheck_info_get_error_clause_context(!.Info, ClauseContext),
     ( if cons_id_must_be_builtin_type(ConsId, ConsType, BuiltinTypeName) then
+        ( if ConsType = builtin_type(builtin_type_int(int_type_int)) then
+            typecheck_info_add_nosuffix_integer_var(Var, !Info)
+        else
+            true
+        ),
         list.foldl(
             type_assign_check_functor_type_builtin(ConsType, Var),
             TypeAssignSet0, [], TypeAssignSet1),
@@ -2284,7 +2287,7 @@ typecheck_unify_var_functor(UnifyContext, Context, Var, ConsId, ArgVars,
                 empty_hlds_constraints(EmptyConstraints),
                 ConsDefn = cons_type_info(ConsTypeVarSet, [], ConsType, [],
                     EmptyConstraints, source_builtin_type(BuiltinTypeName)),
-                ConsIdSpec = report_error_functor_type(ClauseContext,
+                ConsIdSpec = report_error_functor_type(!.Info,
                     UnifyContext, Context, Var, [ConsDefn],
                     ConsId, 0, TypeAssignSet0),
                 typecheck_info_add_error(ConsIdSpec, !Info)
@@ -2336,7 +2339,7 @@ typecheck_unify_var_functor(UnifyContext, Context, Var, ConsId, ArgVars,
                 ArgsTypeAssignSet = [],
                 ConsTypeAssignSet = [_ | _]
             then
-                ConsIdSpec = report_error_functor_type(ClauseContext,
+                ConsIdSpec = report_error_functor_type(!.Info,
                     UnifyContext, Context, Var, ConsDefns, ConsId, Arity,
                     TypeAssignSet0),
                 typecheck_info_add_error(ConsIdSpec, !Info)
@@ -2827,7 +2830,7 @@ builtin_atomic_type(impl_defined_const(Name), Type) :-
 
 builtin_pred_type(Info, ConsId, Arity, GoalId, ConsTypeInfos) :-
     ConsId = cons(SymName, _, _),
-    typecheck_info_get_preds(Info, PredicateTable),
+    typecheck_info_get_pred_table(Info, PredicateTable),
     typecheck_info_get_calls_are_fully_qualified(Info, IsFullyQualified),
     predicate_table_lookup_sym(PredicateTable, IsFullyQualified, SymName,
         PredIds),
@@ -3031,8 +3034,8 @@ get_field_access_constructor(Info, GoalId, FuncName, Arity, AccessType,
     ;
         IsFieldAccessFunc = yes(_)
     ),
-    module_info_get_cons_table(ModuleInfo, Ctors),
-    lookup_cons_table_of_type_ctor(Ctors, TypeCtor, ConsId, ConsDefn),
+    module_info_get_cons_table(ModuleInfo, ConsTable),
+    lookup_cons_table_of_type_ctor(ConsTable, TypeCtor, ConsId, ConsDefn),
     MaybeExistConstraints = ConsDefn ^ cons_maybe_exist,
     (
         MaybeExistConstraints = no_exist_constraints,
@@ -3278,10 +3281,10 @@ typecheck_info_get_ctor_list_2(Info, Functor, Arity, GoalId, ConsInfos,
     % Check if `Functor/Arity' has been defined as a constructor in some
     % discriminated union type(s). This gives us a list of possible
     % cons_type_infos.
-    typecheck_info_get_ctors(Info, Ctors),
+    typecheck_info_get_cons_table(Info, ConsTable),
     ( if
         Functor = cons(_, _, _),
-        search_cons_table(Ctors, Functor, HLDS_ConsDefns)
+        search_cons_table(ConsTable, Functor, HLDS_ConsDefns)
     then
         convert_cons_defn_list(Info, GoalId, do_not_flip_constraints,
             HLDS_ConsDefns, PlainMaybeConsInfos)
@@ -3309,7 +3312,7 @@ typecheck_info_get_ctor_list_2(Info, Functor, Arity, GoalId, ConsInfos,
         Functor = cons(Name, Arity, FunctorTypeCtor),
         remove_new_prefix(Name, OrigName),
         OrigFunctor = cons(OrigName, Arity, FunctorTypeCtor),
-        search_cons_table(Ctors, OrigFunctor, HLDS_ExistQConsDefns)
+        search_cons_table(ConsTable, OrigFunctor, HLDS_ExistQConsDefns)
     then
         convert_cons_defn_list(Info, GoalId, flip_constraints_for_new,
             HLDS_ExistQConsDefns, UnivQuantifiedMaybeConsInfos)
@@ -3454,7 +3457,7 @@ convert_cons_defn(Info, GoalId, Action, HLDS_ConsDefn, ConsTypeInfo) :-
     HLDS_ConsDefn = hlds_cons_defn(TypeCtor, ConsTypeVarSet, ConsTypeParams,
         ConsTypeKinds, MaybeExistConstraints, Args, _),
     ArgTypes = list.map(func(C) = C ^ arg_type, Args),
-    typecheck_info_get_types(Info, TypeTable),
+    typecheck_info_get_type_table(Info, TypeTable),
     lookup_type_ctor_defn(TypeTable, TypeCtor, TypeDefn),
     hlds_data.get_type_defn_body(TypeDefn, Body),
 
