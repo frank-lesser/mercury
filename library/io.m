@@ -94,6 +94,10 @@
     --->    ok(T)
     ;       error(T, io.error).
 
+:- type maybe_partial_res_2(T1, T2)
+    --->    ok2(T1, T2)
+    ;       error2(T1, T2, io.error).
+
 :- inst maybe_partial_res(T) for maybe_partial_res/1
     --->    ok(T)
     ;       error(T, ground).
@@ -197,6 +201,14 @@
     io::di, io::uo) is det.
 :- pred read_file_as_string(io.text_input_stream::in,
     io.maybe_partial_res(string)::out, io::di, io::uo) is det.
+
+    % The same as read_file_as_string, but returns not only a string,
+    % but also the number of code units in that string.
+    %
+:- pred read_file_as_string_and_num_code_units(
+    io.maybe_partial_res_2(string, int)::out, io::di, io::uo) is det.
+:- pred read_file_as_string_and_num_code_units(io.text_input_stream::in,
+    io.maybe_partial_res_2(string, int)::out, io::di, io::uo) is det.
 
     % Applies the given closure to each character (code point) read from
     % the input stream in turn, until eof or error.
@@ -343,22 +355,29 @@
     % The type `posn' represents a position within a string.
     %
 :- type posn
-    --->    posn(int, int, int).
-            % line number, offset of start of line, current offset (the first
-            % two are used only for the purposes of computing term_contexts,
-            % for use e.g. in error messages). Offsets start at zero.
+    --->    posn(
+                % The first two fields are used only for computing
+                % term contexts, for use e.g. in error messages.
+                %
+                % Line numbers start at 1; offsets start at zero.
+                % So the usual posn at the start of a file is posn(1, 0, 0).
+                posn_current_line_number        :: int,
+                posn_offset_of_start_of_line    :: int,
+                posn_current_offset             :: int
+            ).
 
     % read_from_string(FileName, String, MaxPos, Result, Posn0, Posn):
-    % Same as read/4 except that it reads from a string rather than from a
-    % stream.
+    %
+    % Does the same job as read/4, but reads from a string, not from a stream.
+    %
     % FileName is the name of the source (for use in error messages).
     % String is the string to be parsed.
     % Posn0 is the position to start parsing from.
     % Posn is the position one past where the term read in ends.
     % MaxPos is the offset in the string which should be considered the
-    % end-of-stream -- this is the upper bound for Posn. (In the usual case,
-    % MaxPos is just the length of the String.)
-    % WARNING: if MaxPos > length of String then the behaviour is UNDEFINED.
+    % end-of-stream -- this is the upper bound for Posn.
+    % (In the usual case, MaxPos is just the length of the String.)
+    % WARNING: if MaxPos > length of String, then the behaviour is UNDEFINED.
     %
 :- pred read_from_string(string::in, string::in, int::in,
     read_result(T)::out, posn::in, posn::out) is det.
@@ -3847,8 +3866,8 @@ read_line_as_string(input_stream(Stream), Result, !IO) :-
 ").
 
 read_line_as_string_2(Stream, FirstCall, Res, String, Error, !IO) :-
-    % XXX This is terribly inefficient, a better approach would be to
-    % use a buffer like what is done for io.read_file_as_string.
+    % XXX This is terribly inefficient, a better approach would be
+    % to use a buffer like what is done for io.read_file_as_string.
     read_char_code(input_stream(Stream), ResultCode, Char, Error0, !IO),
     (
         ResultCode = result_code_ok,
@@ -3912,7 +3931,7 @@ read_file_as_string(Result, !IO) :-
     read_file_as_string(Stream, Result, !IO).
 
 read_file_as_string(input_stream(Stream), Result, !IO) :-
-    read_file_as_string_2(Stream, String, Error, NullCharError, !IO),
+    read_file_as_string_2(Stream, String, _NumCUs, Error, NullCharError, !IO),
     ( if is_error(Error, "read failed: ", IOError) then
         Result = error(String, IOError)
     else
@@ -3925,12 +3944,30 @@ read_file_as_string(input_stream(Stream), Result, !IO) :-
         )
     ).
 
-:- pred read_file_as_string_2(stream::in, string::out, system_error::out,
-    bool::out, io::di, io::uo) is det.
+read_file_as_string_and_num_code_units(Result, !IO) :-
+    input_stream(Stream, !IO),
+    read_file_as_string_and_num_code_units(Stream, Result, !IO).
+
+read_file_as_string_and_num_code_units(input_stream(Stream), Result, !IO) :-
+    read_file_as_string_2(Stream, String, NumCUs, Error, NullCharError, !IO),
+    ( if is_error(Error, "read failed: ", IOError) then
+        Result = error2(String, NumCUs, IOError)
+    else
+        (
+            NullCharError = yes,
+            Result = error2("", 0, io_error("null character in input"))
+        ;
+            NullCharError = no,
+            Result = ok2(String, NumCUs)
+        )
+    ).
+
+:- pred read_file_as_string_2(stream::in, string::out, int::out,
+    system_error::out, bool::out, io::di, io::uo) is det.
 
 :- pragma foreign_proc("Java",
-    read_file_as_string_2(Stream::in, String::out, Error::out,
-        NullCharError::out, _IO0::di, _IO::uo),
+    read_file_as_string_2(Stream::in, String::out, NumCUs::out,
+        Error::out, NullCharError::out, _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
 "
     StringBuilder sb = new StringBuilder();
@@ -3941,12 +3978,13 @@ read_file_as_string(input_stream(Stream), Result, !IO) :-
         Error = e;
     }
     String = sb.toString();
+    NumCUs = String.length();
     NullCharError = bool.NO;
 ").
 
 :- pragma foreign_proc("Erlang",
-    read_file_as_string_2(Stream::in, String::out, Error::out,
-        NullCharError::out, _IO0::di, _IO::uo),
+    read_file_as_string_2(Stream::in, String::out, NumCUs::out,
+        Error::out, NullCharError::out, _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
     case mercury__io:mercury_read_string_to_eof(Stream) of
@@ -3955,10 +3993,11 @@ read_file_as_string(input_stream(Stream), Result, !IO) :-
         {error, String, Reason} ->
             Error = {error, Reason}
     end,
+    NumCUs = size(String),
     NullCharError = {no}
 ").
 
-read_file_as_string_2(Stream, String, Error, NullCharError, !IO) :-
+read_file_as_string_2(Stream, String, NumCUs, Error, NullCharError, !IO) :-
     % Check if the stream is a regular file; if so, allocate a buffer
     % according to the size of the file. Otherwise, just use a default buffer
     % size of 4k minus a bit (to give malloc some room).
@@ -3972,11 +4011,11 @@ read_file_as_string_2(Stream, String, Error, NullCharError, !IO) :-
 
     % Read the file into the buffer (resizing it as we go if necessary),
     % convert the buffer into a string, and see if anything went wrong.
-    Pos0 = 0,
-    read_file_as_string_loop(input_stream(Stream), Buffer0, Buffer, Pos0, Pos,
-        BufferSize0, BufferSize, Error, !IO),
-    require(Pos < BufferSize, "io.read_file_as_string: overflow"),
-    ( if buffer_to_string(Buffer, Pos, StringPrime) then
+    NumCUs0 = 0,
+    read_file_as_string_loop(input_stream(Stream),
+        Buffer0, Buffer, BufferSize0, BufferSize, NumCUs0, NumCUs, Error, !IO),
+    require(NumCUs < BufferSize, "io.read_file_as_string: overflow"),
+    ( if buffer_to_string(Buffer, NumCUs, StringPrime) then
         String = StringPrime,
         NullCharError = no
     else
@@ -3988,18 +4027,20 @@ read_file_as_string_2(Stream, String, Error, NullCharError, !IO) :-
     buffer::buffer_uo, int::in, int::out, int::in, int::out, system_error::out,
     io::di, io::uo) is det.
 
-read_file_as_string_loop(Stream, !Buffer, !Pos, !Size, Error, !IO) :-
-    Size0 = !.Size,
+read_file_as_string_loop(Stream, !Buffer, BufferSize0, BufferSize,
+        !NumCUs, Error, !IO) :-
     Stream = input_stream(RealStream),
-    read_into_buffer(RealStream, !Buffer, !Pos, Size0, Error0, !IO),
-    ( if !.Pos < Size0 then
+    read_into_buffer(RealStream, !Buffer, BufferSize0, !NumCUs, Error0, !IO),
+    ( if !.NumCUs < BufferSize0 then
         % Buffer not full: end-of-file or error.
+        BufferSize = BufferSize0,
         Error = Error0
-    else if !.Pos = Size0 then
+    else if !.NumCUs = BufferSize0 then
         % Full buffer.
-        !:Size = Size0 * 2,
-        resize_buffer(Size0, !.Size, !Buffer),
-        read_file_as_string_loop(Stream, !Buffer, !Pos, !Size, Error, !IO)
+        BufferSize1 = BufferSize0 * 2,
+        resize_buffer(BufferSize0, BufferSize1, !Buffer),
+        read_file_as_string_loop(Stream, !Buffer, BufferSize1, BufferSize,
+            !NumCUs, Error, !IO)
     else
         error("io.read_file_as_string: buffer overflow")
     ).
@@ -5119,11 +5160,11 @@ buffer_to_string(buffer(Array), Len, String) :-
     string.semidet_from_char_list(List, String).
 
 :- pred read_into_buffer(stream::in, buffer::buffer_di, buffer::buffer_uo,
-    int::in, int::out, int::in, system_error::out, io::di, io::uo) is det.
+    int::in, int::in, int::out, system_error::out, io::di, io::uo) is det.
 
 :- pragma foreign_proc("C",
     read_into_buffer(Stream::in, Buffer0::buffer_di, Buffer::buffer_uo,
-        Pos0::in, Pos::out, Size::in, Error::out, _IO0::di, _IO::uo),
+        BufferSize::in, Pos0::in, Pos::out, Error::out, _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, tabled_for_io, thread_safe,
         does_not_affect_liveness],
 "
@@ -5133,7 +5174,7 @@ buffer_to_string(buffer(Array), Len, String) :-
     MR_CHECK_EXPR_TYPE(Buffer0, char *);
     MR_CHECK_EXPR_TYPE(Buffer, char *);
 
-    bytes_to_read = Size - Pos0;
+    bytes_to_read = BufferSize - Pos0;
     bytes_read = MR_READ(*Stream, Buffer0 + Pos0, bytes_to_read);
 
     Buffer = Buffer0;
@@ -5146,17 +5187,17 @@ buffer_to_string(buffer(Array), Len, String) :-
     }
 ").
 
-read_into_buffer(Stream, buffer(Array0), buffer(Array), Pos0, Pos, Size,
-        Error, !IO) :-
-    read_into_array(input_stream(Stream), Array0, Array, Pos0, Pos, Size,
-        Error, !IO).
+read_into_buffer(Stream, buffer(Array0), buffer(Array), BufferSize,
+        Pos0, Pos, Error, !IO) :-
+    read_into_array(input_stream(Stream), Array0, Array, BufferSize,
+        Pos0, Pos, Error, !IO).
 
 :- pred read_into_array(input_stream::in,
-    array(char)::array_di, array(char)::array_uo, int::in, int::out,
-    int::in, system_error::out, io::di, io::uo) is det.
+    array(char)::array_di, array(char)::array_uo, int::in, int::in, int::out,
+    system_error::out, io::di, io::uo) is det.
 
-read_into_array(Stream, !Array, !Pos, Size, Error, !IO) :-
-    ( if !.Pos >= Size then
+read_into_array(Stream, !Array, ArraySize, !Pos, Error, !IO) :-
+    ( if !.Pos >= ArraySize then
         Error = no_error
     else
         read_char_code(Stream, ResultCode, Char, Error0, !IO),
@@ -5164,12 +5205,11 @@ read_into_array(Stream, !Array, !Pos, Size, Error, !IO) :-
             ResultCode = result_code_ok,
             array.set(!.Pos, Char, !Array),
             !:Pos = !.Pos + 1,
-            read_into_array(Stream, !Array, !Pos, Size, Error, !IO)
+            read_into_array(Stream, !Array, ArraySize, !Pos, Error, !IO)
         ;
-            ResultCode = result_code_eof,
-            Error = Error0
-        ;
-            ResultCode = result_code_error,
+            ( ResultCode = result_code_eof
+            ; ResultCode = result_code_error
+            ),
             Error = Error0
         )
     ).
@@ -7917,7 +7957,7 @@ mercury_open(const char *filename, const char *openmode,
     }
 #endif
 
-    MR_incr_hp_type_msg(mf, MercuryFile, alloc_id, ""MercuryFile"");
+    mf = MR_GC_NEW_ATTRIB(MercuryFile, alloc_id);
     MR_mercuryfile_init(f, 1, mf);
     return mf;
 }
@@ -14060,5 +14100,3 @@ res_to_stream_res(error(E)) = error(E).
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
-
-%---------------------%

@@ -35,7 +35,7 @@
     found_invalid_type::in, found_invalid_type::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-    % Add the constructors of du types to constructor table of the HLDS,
+    % Add the constructors of du types to the constructor table of the HLDS,
     % and check that Mercury types defined solely by foreign types
     % have a definition that works for the target backend.
     %
@@ -110,15 +110,15 @@ module_add_type_defn(TypeStatus0, NeedQual, ItemTypeDefnInfo,
             % XXX STATUS The status should tell us.
         )
     then
-        type_make_status_abstract(TypeStatus0, TypeStatus1)
+        type_make_status_abstract(TypeStatus0, TypeStatus)
     else
-        TypeStatus1 = TypeStatus0
+        TypeStatus = TypeStatus0
     ),
     % XXX kind inference:
     % We set the kinds to `star'. This will be different when we have a
     % kind system.
     map.init(KindMap),
-    create_hlds_type_defn(TVarSet, TypeParams, KindMap, Body, no, TypeStatus1,
+    create_hlds_type_defn(TVarSet, TypeParams, KindMap, Body, no, TypeStatus,
         NeedQual, type_defn_no_prev_errors, Context, HLDSTypeDefn0),
 
     % Our caller in make_hlds_passes.m ensures that we get called
@@ -129,19 +129,37 @@ module_add_type_defn(TypeStatus0, NeedQual, ItemTypeDefnInfo,
 
     (
         ParseTreeTypeDefn = parse_tree_abstract_type(_),
-        module_add_type_defn_abstract(TypeStatus1, TypeCtor, Body,
+        module_add_type_defn_abstract(TypeStatus, TypeCtor, Body,
             HLDSTypeDefn0, Context, !ModuleInfo, !FoundInvalidType, [], Specs)
     ;
         ( ParseTreeTypeDefn = parse_tree_du_type(_)
         ; ParseTreeTypeDefn = parse_tree_eqv_type(_)
-        ; ParseTreeTypeDefn = parse_tree_solver_type(_)
         ),
-        module_add_type_defn_mercury(TypeStatus1, TypeCtor, TypeParams,
+        module_add_type_defn_mercury(TypeStatus, TypeCtor, TypeParams,
             ParseTreeTypeDefn, Body, HLDSTypeDefn0, Context,
             !ModuleInfo, !FoundInvalidType, [], Specs)
     ;
+        ParseTreeTypeDefn = parse_tree_solver_type(_),
+        ( if
+            type_status_defined_in_this_module(TypeStatus) = yes,
+            type_status_defined_in_impl_section(TypeStatus) = no
+        then
+            SolverPieces = [words("Error: the definition"),
+                words("(as opposed to the name) of a solver type such as"),
+                unqual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+                words("must not be exported from its defining module."), nl],
+            SolverSpec = error_spec(severity_error, phase_parse_tree_to_hlds,
+                [simple_msg(Context, [always(SolverPieces)])]),
+            Specs0 = [SolverSpec]
+        else
+            Specs0 = []
+        ),
+        module_add_type_defn_mercury(TypeStatus, TypeCtor, TypeParams,
+            ParseTreeTypeDefn, Body, HLDSTypeDefn0, Context,
+            !ModuleInfo, !FoundInvalidType, Specs0, Specs)
+    ;
         ParseTreeTypeDefn = parse_tree_foreign_type(_),
-        module_add_type_defn_foreign(TypeStatus0, TypeStatus1, TypeCtor, Body,
+        module_add_type_defn_foreign(TypeStatus0, TypeStatus, TypeCtor, Body,
             HLDSTypeDefn0, Context, !ModuleInfo, !FoundInvalidType, [], Specs)
     ),
     ( if contains_errors(Globals, Specs) = yes then
@@ -883,47 +901,6 @@ do_foreign_type_visibilities_match(OldStatus, NewStatus) :-
         type_status_is_exported_to_non_submodules(NewStatus) = no
     ).
 
-%---------------------%
-
-    % Check_foreign_type ensures that if we are generating code for a specific
-    % backend that the foreign type has a representation on that backend.
-    %
-:- pred check_foreign_type_for_current_target(type_ctor::in,
-    foreign_type_body::in, type_defn_prev_errors::in, prog_context::in,
-    found_invalid_type::out, module_info::in, module_info::out,
-    list(error_spec)::in, list(error_spec)::out) is det.
-
-check_foreign_type_for_current_target(TypeCtor, ForeignTypeBody, PrevErrors,
-        Context, FoundInvalidType, !ModuleInfo, !Specs) :-
-    TypeCtor = type_ctor(Name, Arity),
-    module_info_get_globals(!.ModuleInfo, Globals),
-    globals.get_target(Globals, Target),
-    ( if have_foreign_type_for_backend(Target, ForeignTypeBody, yes) then
-        FoundInvalidType = did_not_find_invalid_type
-    else if PrevErrors = type_defn_prev_errors then
-        % The error message being generated below may be misleading,
-        % since the relevant foreign language definition of this type
-        % may have been present, but in error.
-        FoundInvalidType = found_invalid_type
-    else
-        ( Target = target_c, LangStr = "C"
-        ; Target = target_csharp, LangStr = "C#"
-        ; Target = target_java, LangStr = "Java"
-        ; Target = target_erlang, LangStr = "Erlang"
-        ),
-        MainPieces = [words("Error: no"), fixed(LangStr),
-            pragma_decl("foreign_type"), words("declaration for"),
-            unqual_sym_name_and_arity(sym_name_arity(Name, Arity)),
-            suffix("."), nl],
-        VerbosePieces = [words("There are representations for this type"),
-            words("on other back-ends, but none for this back-end."), nl],
-        Msg = simple_msg(Context,
-            [always(MainPieces), verbose_only(verbose_always, VerbosePieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
-        !:Specs = [Spec | !.Specs],
-        FoundInvalidType = found_invalid_type
-    ).
-
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
 
@@ -1170,6 +1147,47 @@ add_ctor_field_name(FieldName, FieldDefn, NeedQual, PartialQuals,
 do_add_ctor_field(FieldName, FieldNameDefn, ModuleName, !FieldNameTable) :-
     multi_map.set(qualified(ModuleName, FieldName), FieldNameDefn,
         !FieldNameTable).
+
+%---------------------------------------------------------------------------%
+
+    % check_foreign_type_for_current_target checks whether a foreign type
+    % has a representation for the backend we are generating code for.
+    % If it does not, we generate an error message.
+    %
+:- pred check_foreign_type_for_current_target(type_ctor::in,
+    foreign_type_body::in, type_defn_prev_errors::in, prog_context::in,
+    found_invalid_type::out, module_info::in, module_info::out,
+    list(error_spec)::in, list(error_spec)::out) is det.
+
+check_foreign_type_for_current_target(TypeCtor, ForeignTypeBody, PrevErrors,
+        Context, FoundInvalidType, !ModuleInfo, !Specs) :-
+    TypeCtor = type_ctor(Name, Arity),
+    module_info_get_globals(!.ModuleInfo, Globals),
+    globals.get_target(Globals, Target),
+    ( if have_foreign_type_for_backend(Target, ForeignTypeBody, yes) then
+        FoundInvalidType = did_not_find_invalid_type
+    else if PrevErrors = type_defn_prev_errors then
+        % The error message being generated below may be misleading,
+        % since the relevant foreign language definition of this type
+        % may have been present, but in error.
+        FoundInvalidType = found_invalid_type
+    else
+        LangStr = compilation_target_string(Target),
+        MainPieces = [words("Error: the type"),
+            unqual_sym_name_and_arity(sym_name_arity(Name, Arity)),
+            words("has no definition that is valid when targeting"),
+            fixed(LangStr), suffix(";"),
+            words("neither a Mercury definition,"),
+            words("nor a"), pragma_decl("foreign_type"), words("declaration"),
+            words("for"), fixed(LangStr), suffix("."), nl],
+        VerbosePieces = [words("There are representations for this type"),
+            words("on other back-ends, but none for this back-end."), nl],
+        Msg = simple_msg(Context,
+            [always(MainPieces), verbose_only(verbose_always, VerbosePieces)]),
+        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        !:Specs = [Spec | !.Specs],
+        FoundInvalidType = found_invalid_type
+    ).
 
 %---------------------------------------------------------------------------%
 :- end_module hlds.make_hlds.add_type.

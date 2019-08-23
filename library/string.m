@@ -2892,10 +2892,8 @@ codepoint_offset(String, N, Index) :-
 %
 % Computing hashes of strings.
 %
-%
-% NOTE: hash, hash2 and hash3 are also defined as MR_hash_string,
-% MR_hash_string2 and MR_hash_string3 in runtime/mercury_string.h.
-% The corresponding definitions must be kept identical.
+% Note that these functions are also defined in runtime/mercury_string.h.
+% The definition here and in mercury_string.h must be kept equivalent.
 %
 
 hash(String) = HashVal :-
@@ -2931,7 +2929,7 @@ hash2_loop(String, Index, Length, !HashVal) :-
     ( if Index < Length then
         unsafe_index_code_unit(String, Index, C),
         !:HashVal = !.HashVal * 37,
-        !:HashVal= !.HashVal + C,
+        !:HashVal = !.HashVal + C,
         hash2_loop(String, Index + 1, Length, !HashVal)
     else
         true
@@ -2949,7 +2947,7 @@ hash3_loop(String, Index, Length, !HashVal) :-
     ( if Index < Length then
         unsafe_index_code_unit(String, Index, C),
         !:HashVal = !.HashVal * 49,
-        !:HashVal= !.HashVal + C,
+        !:HashVal = !.HashVal + C,
         hash3_loop(String, Index + 1, Length, !HashVal)
     else
         true
@@ -2973,7 +2971,7 @@ hash4_loop(String, Index, Length, !HashVal) :-
         !:HashVal = keep_30_bits(!.HashVal `xor`
             (!.HashVal `unchecked_left_shift` 5)),
         !:HashVal = !.HashVal `xor` C,
-        hash_loop(String, Index + 1, Length, !HashVal)
+        hash4_loop(String, Index + 1, Length, !HashVal)
     else
         true
     ).
@@ -2990,7 +2988,7 @@ hash5_loop(String, Index, Length, !HashVal) :-
     ( if Index < Length then
         unsafe_index_code_unit(String, Index, C),
         !:HashVal = keep_30_bits(!.HashVal * 37),
-        !:HashVal= keep_30_bits(!.HashVal + C),
+        !:HashVal = keep_30_bits(!.HashVal + C),
         hash5_loop(String, Index + 1, Length, !HashVal)
     else
         true
@@ -3008,7 +3006,7 @@ hash6_loop(String, Index, Length, !HashVal) :-
     ( if Index < Length then
         unsafe_index_code_unit(String, Index, C),
         !:HashVal = keep_30_bits(!.HashVal * 49),
-        !:HashVal= keep_30_bits(!.HashVal + C),
+        !:HashVal = keep_30_bits(!.HashVal + C),
         hash6_loop(String, Index + 1, Length, !HashVal)
     else
         true

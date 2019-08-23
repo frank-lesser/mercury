@@ -231,60 +231,115 @@ output_java_src_file(ModuleInfo, Indent, MLDS, Errors, !IO) :-
         ForeignBodyCodes, ForeignCodeResults, !IO),
     list.filter_map(maybe_is_error, ForeignCodeResults, ForeignCodeErrors),
 
-    io.write_string("\n// RttiDefns\n", !IO),
-    list.foldl(
-        output_global_var_defn_for_java(Info, Indent + 1, oa_alloc_only),
-        RttiDefns, !IO),
-    output_rtti_assignments_for_java(Info, Indent + 1, RttiDefns, !IO),
+    (
+        RttiDefns = []
+    ;
+        RttiDefns = [_ | _],
+        io.write_string("\n// RttiDefns\n", !IO),
+        list.foldl(
+            output_global_var_defn_for_java(Info, Indent + 1, oa_alloc_only),
+            RttiDefns, !IO),
+        output_rtti_assignments_for_java(Info, Indent + 1, RttiDefns, !IO)
+    ),
 
-    io.write_string("\n// Cell and tabling definitions\n", !IO),
-    output_global_var_decls_for_java(Info, Indent + 1, CellDefns, !IO),
-    output_global_var_decls_for_java(Info, Indent + 1, TableStructDefns, !IO),
-    output_global_var_assignments_for_java(Info, Indent + 1,
-        CellDefns ++ TableStructDefns, !IO),
+    ( if
+        CellDefns = [],
+        TableStructDefns = []
+    then
+        true
+    else
+        io.write_string("\n// Cell and tabling definitions\n", !IO),
+        output_global_var_decls_for_java(Info, Indent + 1, CellDefns, !IO),
+        output_global_var_decls_for_java(Info, Indent + 1, TableStructDefns,
+            !IO),
+        output_global_var_assignments_for_java(Info, Indent + 1,
+            CellDefns ++ TableStructDefns, !IO)
+    ),
 
-    % Scalar common data must appear after the previous data definitions,
-    % and the vector common data after that.
-    io.write_string("\n// Scalar common data\n", !IO),
-    output_scalar_common_data_for_java(Info, Indent + 1,
-        ScalarCellGroupMap, !IO),
+    % Scalar common data must appear after the previous data definitions, and
+    % the vector common data after that.
+    ( if map.is_empty(ScalarCellGroupMap) then
+        true
+    else
+        io.write_string("\n// Scalar common data\n", !IO),
+        output_scalar_common_data_for_java(Info, Indent + 1,
+            ScalarCellGroupMap, !IO)
+    ),
 
-    io.write_string("\n// Vector common data\n", !IO),
-    output_vector_common_data_for_java(Info, Indent + 1,
-        VectorCellGroupMap, !IO),
+    ( if map.is_empty(VectorCellGroupMap) then
+        true
+    else
+        io.write_string("\n// Vector common data\n", !IO),
+        output_vector_common_data_for_java(Info, Indent + 1,
+            VectorCellGroupMap, !IO)
+    ),
 
-    io.write_string("\n// Function definitions\n", !IO),
     list.sort(ClosureWrapperFuncDefns ++ ProcDefns, SortedFuncDefns),
-    list.foldl(output_function_defn_for_java(Info, Indent + 1, oa_none),
-        SortedFuncDefns, !IO),
+    (
+        SortedFuncDefns = []
+    ;
+        SortedFuncDefns = [_ | _],
+        io.write_string("\n// Function definitions\n", !IO),
+        list.foldl(output_function_defn_for_java(Info, Indent + 1, oa_none),
+            SortedFuncDefns, !IO)
+    ),
 
-    io.write_string("\n// Class definitions\n", !IO),
     list.sort(WrapperClassDefns ++ TypeDefns, SortedClassDefns),
-    list.foldl(output_class_defn_for_java(Info, Indent + 1),
-        SortedClassDefns, !IO),
+    (
+        SortedClassDefns = []
+    ;
+        SortedClassDefns = [_ | _],
+        io.write_string("\n// Class definitions\n", !IO),
+        list.foldl(output_class_defn_for_java(Info, Indent + 1),
+            SortedClassDefns, !IO)
+    ),
 
-    io.write_string("\n// ExportDefns\n", !IO),
-    output_exports_for_java(Info, Indent + 1, ExportDefns, !IO),
+    (
+        ExportDefns = []
+    ;
+        ExportDefns = [_ | _],
+        io.write_string("\n// ExportDefns\n", !IO),
+        output_exports_for_java(Info, Indent + 1, ExportDefns, !IO)
+    ),
 
-    io.write_string("\n// ExportedEnums\n", !IO),
-    output_exported_enums_for_java(Info, Indent + 1, ExportedEnums, !IO),
+    (
+        ExportedEnums = []
+    ;
+        ExportedEnums = [_ | _],
+        io.write_string("\n// ExportedEnums\n", !IO),
+        output_exported_enums_for_java(Info, Indent + 1, ExportedEnums, !IO)
+    ),
 
-    io.write_string("\n// InitPreds\n", !IO),
-    output_inits_for_java(Indent + 1, InitPreds, !IO),
+    (
+        InitPreds = []
+    ;
+        InitPreds = [_ | _],
+        io.write_string("\n// InitPreds\n", !IO),
+        output_inits_for_java(Indent + 1, InitPreds, !IO)
+    ),
 
-    io.write_string("\n// FinalPreds\n", !IO),
-    output_finals_for_java(Indent + 1, FinalPreds, !IO),
+    (
+        FinalPreds = []
+    ;
+        FinalPreds = [_  | _],
+        io.write_string("\n// FinalPreds\n", !IO),
+        output_finals_for_java(Indent + 1, FinalPreds, !IO)
+    ),
 
-    io.write_string("\n// EnvVarNames\n", !IO),
     set.init(EnvVarNamesSet0),
     list.foldl(accumulate_env_var_names, ProcDefns,
         EnvVarNamesSet0, EnvVarNamesSet1),
     list.foldl(accumulate_env_var_names, ClosureWrapperFuncDefns,
         EnvVarNamesSet1, EnvVarNamesSet),
-    set.foldl(output_env_var_definition_for_java(Indent + 1),
-        EnvVarNamesSet, !IO),
+    ( if set.is_empty(EnvVarNamesSet) then
+        true
+    else
+        io.write_string("\n// EnvVarNames\n", !IO),
+        set.foldl(output_env_var_definition_for_java(Indent + 1),
+            EnvVarNamesSet, !IO)
+    ),
 
-    output_src_end_for_java(Indent, ModuleName, !IO),
+    output_src_end_for_java(Info, Indent, ModuleName, !IO),
     % XXX Need to handle non-Java foreign code at this point.
 
     Errors = ForeignDeclErrors ++ ForeignCodeErrors.
@@ -306,10 +361,17 @@ make_code_addr_map_for_java([CodeAddr | CodeAddrs], !Map) :-
 % Code to output imports.
 %
 
-:- pred output_imports(mlds_imports::in, io::di, io::uo) is det.
+:- pred output_imports(java_out_info::in, mlds_imports::in,
+    io::di, io::uo) is det.
 
-output_imports(Imports, !IO) :-
-    list.foldl(output_import, Imports, !IO).
+output_imports(Info, Imports, !IO) :-
+    AutoComments = Info ^ joi_auto_comments,
+    (
+        AutoComments = yes,
+        list.foldl(output_import, Imports, !IO)
+    ;
+        AutoComments = no
+    ).
 
 :- pred output_import(mlds_import::in, io::di, io::uo) is det.
 
@@ -505,14 +567,20 @@ output_env_var_definition_for_java(Indent, EnvVarName, !IO) :-
 output_src_start_for_java(Info, Indent, MercuryModuleName, Imports,
         ForeignDecls, FuncDefns, Errors, !IO) :-
     output_auto_gen_comment(Info ^ joi_source_filename, !IO),
-    output_n_indents(Indent, !IO),
-    io.write_string("/* :- module ", !IO),
-    prog_out.write_sym_name(MercuryModuleName, !IO),
-    io.write_string(". */\n\n", !IO),
+    AutoComments = Info ^ joi_auto_comments,
+    (
+        AutoComments = yes,
+        output_n_indents(Indent, !IO),
+        io.write_string("/* :- module ", !IO),
+        prog_out.write_sym_name(MercuryModuleName, !IO),
+        io.write_string(". */\n\n", !IO)
+    ;
+        AutoComments = no
+    ),
     output_n_indents(Indent, !IO),
     io.write_string("package jmercury;\n", !IO),
 
-    output_imports(Imports, !IO),
+    output_imports(Info, Imports, !IO),
     list.map_foldl(output_java_decl(Info, Indent),
         ForeignDecls, ForeignDeclResults, !IO),
     list.filter_map(maybe_is_error, ForeignDeclResults, Errors),
@@ -522,7 +590,7 @@ output_src_start_for_java(Info, Indent, MercuryModuleName, Imports,
     io.write_string(ClassName, !IO),
     io.write_string(" {\n", !IO),
 
-    output_debug_class_init(MercuryModuleName, "start", !IO),
+    output_debug_class_init(Info, MercuryModuleName, "start", !IO),
 
     % Check if this module contains a `main' predicate and if it does insert
     % a `main' method in the resulting Java class that calls the `main'
@@ -567,29 +635,41 @@ write_main_driver_for_java(Indent, ClassName, !IO) :-
     output_n_indents(Indent, !IO),
     io.write_string("}\n", !IO).
 
-:- pred output_src_end_for_java(indent::in, mercury_module_name::in,
-    io::di, io::uo) is det.
+:- pred output_src_end_for_java(java_out_info::in, indent::in,
+        mercury_module_name::in, io::di, io::uo) is det.
 
-output_src_end_for_java(Indent, ModuleName, !IO) :-
-    output_debug_class_init(ModuleName, "end", !IO),
+output_src_end_for_java(Info, Indent, ModuleName, !IO) :-
+    output_debug_class_init(Info, ModuleName, "end", !IO),
     io.write_string("}\n", !IO),
-    output_n_indents(Indent, !IO),
-    io.write_string("// :- end_module ", !IO),
-    prog_out.write_sym_name(ModuleName, !IO),
-    io.write_string(".\n", !IO).
+    AutoComments = Info ^ joi_auto_comments,
+    (
+        AutoComments = yes,
+        output_n_indents(Indent, !IO),
+        io.write_string("// :- end_module ", !IO),
+        prog_out.write_sym_name(ModuleName, !IO),
+        io.write_string(".\n", !IO)
+    ;
+        AutoComments = no
+    ).
 
-:- pred output_debug_class_init(mercury_module_name::in, string::in,
-    io::di, io::uo) is det.
+:- pred output_debug_class_init(java_out_info::in, mercury_module_name::in,
+    string::in, io::di, io::uo) is det.
 
-output_debug_class_init(ModuleName, State, !IO) :-
-    list.foldl(io.write_string, [
+output_debug_class_init(Info, ModuleName, State, !IO) :-
+    DebugClassInit = get_debug_class_init(Info),
+    (
+        DebugClassInit = yes,
+        list.foldl(io.write_string, [
         "  static {\n",
         "    if (System.getenv(""MERCURY_DEBUG_CLASS_INIT"") != null) {\n",
         "      System.out.println(""[", sym_name_mangle(ModuleName),
         " ", State, " init]"");\n",
         "    }\n",
         "  }\n"
-    ], !IO).
+        ], !IO)
+    ;
+        DebugClassInit = no
+    ).
 
 %---------------------------------------------------------------------------%
 :- end_module ml_backend.mlds_to_java_file.

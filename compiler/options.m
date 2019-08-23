@@ -39,7 +39,7 @@
 % - Every option should have a clause in the long_options predicate
 %   that converts the user-visible name of the option into its internal
 %   representation as a value in the options type. For options whose names
-%   include words that whose spelling differs in American vs British english,
+%   include words that whose spelling differs in American vs British English,
 %   there should normally be one entry for each spelling. In the rare case
 %   that the option is used very frequently, there may also be an entry
 %   for the option in the short_option predicate.
@@ -696,6 +696,7 @@
     ;       prefer_while_loop_over_jump_self
     ;       prefer_while_loop_over_jump_mutual
     ;       opt_no_return_calls
+    ;       debug_class_init
 
     % Optimization Options
     ;       opt_level
@@ -1092,18 +1093,29 @@
             % configure.in.
 
     ;       experiment
-            % This option is provided for use by implementors who want to
-            % compare a new way of doing something with the old way. The idea
-            % is that the code that switches between the two ways should
-            % consult this option and make its decision accordingly.
+    ;       experiment1
+    ;       experiment2
+    ;       experiment3
+    ;       experiment4
+    ;       experiment5
+            % These options are provided for use by implementors who want to
+            % compare a new way of doing something with the old way.
+            % The idea is that the code that switches between the two ways
+            % should consult one (or more) of these options and make its
+            % decision accordingly.
             %
-            % The intention is that all use of this option is within developer
-            % workspaces; no code using this option should be committed.
+            % Experiment[1-5] are booleans; experiment itself is a string.
+            %
+            % The intention is that most use of these options is
+            % within developer workspaces, with rare examples of code
+            % using some of these options being committed, but only
+            % for short lengths of time (a week or two at most;
+            % enough for all members of a team to try out the experiment).
             %
             % Of course, a developer could always create a purpose-specific
             % option to control their code, but adding an option requires
-            % recompiling most of the modules in the compiler. Having this
-            % option permanently here should reduce the need for that.
+            % recompiling most of the modules in the compiler. Having these
+            % options permanently here should reduce the need for that.
 
     ;       ignore_par_conjunctions
     ;       control_granularity
@@ -1590,7 +1602,8 @@ option_defaults_2(code_gen_option, [
     prefer_switch                       -   bool(yes),
     prefer_while_loop_over_jump_self    -   bool(yes),
     prefer_while_loop_over_jump_mutual  -   bool(no),
-    opt_no_return_calls                 -   bool(yes)
+    opt_no_return_calls                 -   bool(yes),
+    debug_class_init                    -   bool(no)
 ]).
 option_defaults_2(special_optimization_option, [
     % Special optimization options.
@@ -2021,6 +2034,11 @@ option_defaults_2(miscellaneous_option, [
     analysis_file_cache_dir             -   string(""),
     compiler_sufficiently_recent        -   bool(no),
     experiment                          -   string(""),
+    experiment1                         -   bool(no),
+    experiment2                         -   bool(no),
+    experiment3                         -   bool(yes),
+    experiment4                         -   bool(yes),
+    experiment5                         -   bool(no),
     ignore_par_conjunctions             -   bool(no),
     control_granularity                 -   bool(no),
     distance_granularity                -   int(0),
@@ -2537,6 +2555,7 @@ long_option("prefer-while-loop-over-jump-self",
 long_option("prefer-while-loop-over-jump-mutual",
                                     prefer_while_loop_over_jump_mutual).
 long_option("opt-no-return-calls",  opt_no_return_calls).
+long_option("debug-class-init",     debug_class_init).
 
 % optimization options
 
@@ -3081,6 +3100,11 @@ long_option("builtin-lt-gt-2018-10-08",
 long_option("fixed-contiguity-2018-10-19",
                                     compiler_sufficiently_recent).
 long_option("experiment",           experiment).
+long_option("experiment1",          experiment1).
+long_option("experiment2",          experiment2).
+long_option("experiment3",          experiment3).
+long_option("experiment4",          experiment4).
+long_option("experiment5",          experiment5).
 long_option("ignore-par-conjunctions",
                                     ignore_par_conjunctions).
 long_option("control-granularity",  control_granularity).
@@ -4368,7 +4392,7 @@ options_help_aux_output -->
         "\tchanges (e.g. because the location of a predicate declaration",
         "\tchanges in the Mercury source file).",
         "--auto-comments",
-        "\tOutput comments in the `<module>.c' file.",
+        "\tOutput comments in the generated target language file.",
 % This option is for developers only. Since it can include one C comment inside
 % another, the resulting code is not guaranteed to be valid C.
 %       "--frameopt-comments",
@@ -4899,7 +4923,7 @@ options_help_compilation_model -->
         % RBMM is undocumented since it is still experimental.
         % should also document rbmmd rbmmp rbmmdp
         %"--use-regions\t\t(grade modifier: `.rbmm')",
-        %"\tEnable support for region-based memory managment."
+        %"\tEnable support for region-based memory management."
         %"--use-alloc-regions",
         %"\tCompute and use the exact set of regions",
         %"\t that may be allocated into by a call."
@@ -5024,7 +5048,7 @@ options_help_compilation_model -->
 %        "\tDo not box 64-bit integer numbers",
 %        "\tThis assumes that word size of the target machine is at least",
 %        "\t64-bits in size.",
-%        "\tThe C code needs to be compiled iwth `-UMR_BOXED_INT64S'.",
+%        "\tThe C code needs to be compiled with `-UMR_BOXED_INT64S'.",
 
         % This is a developer only option.
 %       "--no-unboxed-no-tag-types",
@@ -5253,6 +5277,11 @@ options_help_code_generation -->
 %       "--no-opt-no-return-calls",
 %       "\tDo not optimize the stack usage of calls that cannot return.",
 
+        % This is a developer only option.
+%        "--debug-class-init",
+%        "\tIn Java grades, generate code that causes a trace of class",
+%        "\tinitialization to be printed to the standard output when the",
+%        "\tenvironment variable MERCURY_DEBUG_CLASS_INIT is defined."
     ]),
 
     io.write_string("\n    Code generation target options:\n"),
@@ -5585,7 +5614,7 @@ options_help_hlds_hlds_optimization -->
 %        "\tEnable the analysis for region-based memory management."
     ]).
 
-    % XXX This is out-of-date. --smart-indxing also affects the
+    % XXX This is out-of-date. --smart-indexing also affects the
     % MLDS backend.
     %
 :- pred options_help_hlds_llds_optimization(io::di, io::uo) is det.

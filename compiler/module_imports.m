@@ -30,7 +30,6 @@
 :- import_module parse_tree.prog_data.
 :- import_module parse_tree.prog_data_foreign.
 :- import_module parse_tree.prog_item.
-:- import_module recompilation.
 
 :- import_module cord.
 :- import_module io.
@@ -288,7 +287,7 @@
     module_and_imports::in, module_and_imports::out) is det.
 
 :- pred module_and_imports_maybe_add_module_version_numbers(
-    module_name::in, maybe(version_numbers)::in,
+    module_name::in, maybe_version_numbers::in,
     module_and_imports::in, module_and_imports::out) is det.
 
 :- pred module_and_imports_add_specs(list(error_spec)::in,
@@ -337,9 +336,10 @@
 
 :- implementation.
 
-:- import_module parse_tree.comp_unit_interface.
 :- import_module parse_tree.get_dependencies.
+:- import_module parse_tree.item_util.
 :- import_module parse_tree.split_parse_tree_src.
+:- import_module recompilation.
 
 :- import_module dir.
 :- import_module multi_map.
@@ -501,10 +501,10 @@ parse_tree_int_to_module_and_imports(Globals, IntFileName,
         ParseTreeInt, ReadModuleErrors, ModuleAndImports) :-
     ParseTreeInt = parse_tree_int(ModuleName, _, ModuleContext,
         _MaybeVersionNumbers, IntIncl, ImpIncls, IntAvails, ImpAvails,
-        IntItems, ImpItems),
-    int_imp_items_to_item_blocks(ModuleName,
-        ms_interface, ms_implementation, IntIncl, ImpIncls,
-        IntAvails, ImpAvails, IntItems, ImpItems, RawItemBlocks),
+        IntFIMs, ImpFIMs, IntItems, ImpItems),
+    int_imp_items_to_item_blocks(ModuleName, ms_interface, ms_implementation,
+        IntIncl, ImpIncls, IntAvails, ImpAvails, IntFIMs, ImpFIMs,
+        IntItems, ImpItems, RawItemBlocks),
     RawCompUnit =
         raw_compilation_unit(ModuleName, ModuleContext, RawItemBlocks),
 
@@ -525,7 +525,7 @@ rebuild_module_and_imports_for_dep_file(Globals,
         _ModuleVersionNumbers, SrcItemBlocks,
         _DirectIntItemBlocksCord, _IndirectIntItemBlocksCord,
         _OptItemBlocksCord, _IntForOptItemBlocksCord),
-    convert_back_to_raw_item_blocks(SrcItemBlocks, RawItemBlocks),
+    list.map(src_to_raw_item_block, SrcItemBlocks, RawItemBlocks),
     RawCompUnit = raw_compilation_unit(ModuleName, ModuleNameContext,
         RawItemBlocks),
     module_and_imports_get_source_file_name(ModuleAndImports0,
@@ -538,25 +538,6 @@ rebuild_module_and_imports_for_dep_file(Globals,
     init_module_and_imports(Globals, SourceFileName, SourceFileModuleName,
         NestedChildren, Specs, ReadModuleErrors0, RawCompUnit,
         ModuleAndImports).
-
-:- pred convert_back_to_raw_item_blocks(list(src_item_block)::in,
-    list(raw_item_block)::out) is det.
-
-convert_back_to_raw_item_blocks([], []).
-convert_back_to_raw_item_blocks([SrcItemBlock | SrcItemBlocks],
-        [RawItemBlock | RawItemBlocks]) :-
-    SrcItemBlock = item_block(ModuleName, SrcSection, Incls, Avails, Items),
-    (
-        SrcSection = sms_interface,
-        RawSection = ms_interface
-    ;
-        ( SrcSection = sms_implementation
-        ; SrcSection = sms_impl_but_exported_to_submodules
-        ),
-        RawSection = ms_implementation
-    ),
-    RawItemBlock = item_block(ModuleName, RawSection, Incls, Avails, Items),
-    convert_back_to_raw_item_blocks(SrcItemBlocks, RawItemBlocks).
 
 %---------------------------------------------------------------------------%
 
@@ -599,8 +580,7 @@ init_module_and_imports(Globals, FileName, SourceFileModuleName,
     % Use case 2: our caller rebuild_module_and_imports_for_dep_file
     % passes to as NestedModuleNames the value of the same field
     % of the original module_and_imports structure being rebuilt.
-    % This works because the operation of this if-then-else
-    % is idempotent.
+    % This works because the operation of this if-then-else is idempotent.
     ( if ModuleName = SourceFileModuleName then
         set.delete(ModuleName, NestedModuleNames, NestedDeps)
     else
@@ -680,7 +660,7 @@ init_module_and_imports(Globals, FileName, SourceFileModuleName,
     % XXX END OF THE REMAINS OF THE OLD CODE
 
     get_raw_components(RawItemBlocks, IntIncls, ImpIncls,
-        IntAvails, ImpAvails, IntItems, ImpItems),
+        IntAvails, ImpAvails, _IntFIMs, _ImpFIMs, IntItems, ImpItems),
     list.foldl(get_included_modules_in_item_include_acc, IntIncls,
         multi_map.init, PublicChildrenMap),
     list.foldl(get_included_modules_in_item_include_acc, ImpIncls,
@@ -756,6 +736,32 @@ init_module_and_imports(Globals, FileName, SourceFileModuleName,
         SrcItemBlocks, DirectIntBlocksCord, IndirectIntBlocksCord,
         OptBlocksCords, IntForOptBlocksCords,
         VersionNumbers, MaybeTimestampMap, Specs, Errors, mcm_init).
+
+    % XXX ITEM_LIST This shouldn't be needed; the representation of the
+    % compilation unit should have all this information separate from
+    % the items.
+    %
+:- pred get_foreign_self_imports_from_item_blocks(list(item_block(MS))::in,
+    list(foreign_language)::out) is det.
+
+get_foreign_self_imports_from_item_blocks(ItemBlocks, Langs) :-
+    list.foldl(accumulate_foreign_import_langs_in_item_block, ItemBlocks,
+        set.init, LangSet),
+    set.to_sorted_list(LangSet, Langs).
+
+:- pred accumulate_foreign_import_langs_in_item_block(item_block(MS)::in,
+    set(foreign_language)::in, set(foreign_language)::out) is det.
+
+accumulate_foreign_import_langs_in_item_block(ItemBlock, !LangSet) :-
+    ItemBlock = item_block(_, _, _, _, _, Items),
+    list.foldl(accumulate_foreign_import_langs_in_item, Items, !LangSet).
+
+:- pred accumulate_foreign_import_langs_in_item(item::in,
+    set(foreign_language)::in, set(foreign_language)::out) is det.
+
+accumulate_foreign_import_langs_in_item(Item, !LangSet) :-
+    Langs = item_needs_foreign_imports(Item),
+    set.insert_list(Langs, !LangSet).
 
 %---------------------------------------------------------------------------%
 
@@ -1645,9 +1651,9 @@ module_and_imports_add_int_for_opt_item_blocks(NewIntItemBlocks,
 module_and_imports_maybe_add_module_version_numbers(ModuleName,
         MaybeVersionNumbers, !ModuleAndImports) :-
     (
-        MaybeVersionNumbers = no
+        MaybeVersionNumbers = no_version_numbers
     ;
-        MaybeVersionNumbers = yes(VersionNumbers),
+        MaybeVersionNumbers = version_numbers(VersionNumbers),
         module_and_imports_get_version_numbers_map(!.ModuleAndImports,
             ModuleVersionNumbersMap0),
         map.det_insert(ModuleName, VersionNumbers,

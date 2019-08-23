@@ -1843,6 +1843,7 @@ then
             < ${tests_prefix}tests/.mgnuc_copts.ws \
             > ${tests_prefix}tests/.mgnuc_copts
 
+        # If you modify this, modify SUBDIRS in tests/Mmakefile as well.
         all_test_dirs="
             accumulator
             analysis
@@ -1858,11 +1859,13 @@ then
             declarative_debugger
             dppd
             exceptions
+            feedback
             general
             grade_subdirs
             hard_coded
             invalid
             invalid_purity
+            invalid_submodules
             misc_tests
             mmc_make
             par_conj

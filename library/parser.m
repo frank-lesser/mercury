@@ -94,32 +94,43 @@
     % predicates, except that the term is read from a string rather than from
     % the current input stream. The returned value `EndPos' is the position
     % one character past the end of the term read. The arguments `MaxOffset'
-    % and `StartPos' in the six-argument version specify the length of the
-    % string and the position within the string at which to start parsing.
+    % and `StartPos' in the read_term_from_substring* versions specify
+    % the length of the string and the position within the string
+    % at which to start parsing.
 
     % read_term_from_string(FileName, String, EndPos, Term).
     %
 :- pred read_term_from_string(string::in, string::in, posn::out,
     read_term(T)::out) is det.
 
-    % read_term_from_string_with_op_table(Ops, FileName,
-    %   String, EndPos, Term).
+    % read_term_from_string_with_op_table(Ops, FileName, String, EndPos, Term).
     %
 :- pred read_term_from_string_with_op_table(Ops::in, string::in,
     string::in, posn::out, read_term(T)::out) is det <= op_table(Ops).
 
-    % read_term_from_string(FileName, String, MaxOffset, StartPos,
-    %   EndPos, Term).
+    % read_term_from_substring(FileName, String, MaxOffset,
+    %   StartPos, EndPos, Term).
+    % read_term_from_linestr(FileName, String, MaxOffset,
+    %   StartLineContext, EndLineContext, StartLinePosn, EndLinePosn, Term).
     %
 :- pred read_term_from_substring(string::in, string::in, int::in,
     posn::in, posn::out, read_term(T)::out) is det.
+:- pred read_term_from_linestr(string::in, string::in, int::in,
+    line_context::in, line_context::out, line_posn::in, line_posn::out,
+    read_term(T)::out) is det.
 
-    % read_term_from_string_with_op_table(Ops, FileName, String,
-    %   MaxOffset, StartPos, EndPos, Term).
+    % read_term_from_substring_with_op_table(Ops, FileName, String, MaxOffset,
+    %   StartPos, EndPos, Term).
+    % read_term_from_linestr_with_op_table(Ops, FileName, String, MaxOffset,
+    %   StartLineContext, EndLineContext, StartLinePosn, EndLinePosn, Term).
     %
 :- pred read_term_from_substring_with_op_table(Ops::in, string::in,
     string::in, int::in, posn::in, posn::out, read_term(T)::out) is det
     <= op_table(Ops).
+:- pred read_term_from_linestr_with_op_table(Ops::in, string::in,
+    string::in, int::in,
+    line_context::in, line_context::out, line_posn::in, line_posn::out,
+    read_term(T)::out) is det <= op_table(Ops).
 
 %---------------------------------------------------------------------------%
 
@@ -215,9 +226,24 @@ read_term_from_substring(FileName, String, Len, StartPos, EndPos, Result) :-
     parser.read_term_from_substring_with_op_table(ops.init_mercury_op_table,
         FileName, String, Len, StartPos, EndPos, Result).
 
+read_term_from_linestr(FileName, String, Len,
+        StartLineContext, EndLineContext, StartLinePosn, EndLinePosn,
+        Result) :-
+    parser.read_term_from_linestr_with_op_table(ops.init_mercury_op_table,
+        FileName, String, Len,
+        StartLineContext, EndLineContext, StartLinePosn, EndLinePosn,
+        Result).
+
 read_term_from_substring_with_op_table(Ops, FileName, String, Len,
         StartPos, EndPos, Result) :-
     lexer.string_get_token_list_max(String, Len, Tokens, StartPos, EndPos),
+    parser.parse_tokens_with_op_table(Ops, FileName, Tokens, Result).
+
+read_term_from_linestr_with_op_table(Ops, FileName, String, Len,
+        StartLineContext, EndLineContext, StartLinePosn, EndLinePosn,
+        Result) :-
+    lexer.linestr_get_token_list_max(String, Len, Tokens,
+        StartLineContext, EndLineContext, StartLinePosn, EndLinePosn),
     parser.parse_tokens_with_op_table(Ops, FileName, Tokens, Result).
 
 %---------------------------------------------------------------------------%
@@ -348,8 +374,8 @@ parse_whole_term(Term, !TokensLeft, !PS) :-
                 !TokensLeft, !.PS)
         )
     ;
-        % Propagate error upwards.
         Term0 = error(_, _),
+        % Propagate error upwards.
         Term = Term0
     ).
 
@@ -767,8 +793,8 @@ parse_simple_term(Token, Context, Prec, TermParse, !TokensLeft, !PS) :-
                     !TokensLeft, !.PS)
             )
         ;
-            % Propagate error upwards.
             SubTermParse = error(_, _),
+            % Propagate error upwards.
             BaseTermParse = SubTermParse
         )
     ;
@@ -896,8 +922,8 @@ parse_special_atom(Atom, TermContext, Term, !TokensLeft, !PS) :-
             Args0 = ok(Args),
             Term = ok(term.functor(term.atom(Atom), Args, TermContext))
         ;
-            % Propagate error upwards.
             Args0 = error(Message, Tokens),
+            % Propagate error upwards.
             Term = error(Message, Tokens)
         )
     else

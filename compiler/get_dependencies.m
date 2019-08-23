@@ -16,13 +16,13 @@
 % - foreign language source or header files.
 %
 % XXX ITEM_LIST Most of the work done in this module is now done
-% more directly and simply in modules.m. When we switch over to using
+% more directly and simply in grab_modules.m. When we switch over to using
 % the new code in modules.m exclusively, most or even all of this module
 % shouldn't be needed anymore.
 %
 % XXX If some parts of this module survive this transition period,
 % we should either factor out (if possible) or at least document
-% the commonalities between the code here and in modules.m.
+% the commonalities between the code here and in grab_modules.m.
 %
 %-----------------------------------------------------------------------------%
 
@@ -120,24 +120,6 @@
                 ic_has_main             :: has_main
             ).
 
-    % get_implicits_foreigns_fact_tables(IntItems, ImpItems,
-    %   IntImplicitImportNeeds, IntImpImplicitImportNeeds, Contents):
-    %
-    % Given the interface and implementation items of a raw compilation unit,
-    % compute and return
-    %
-    % - a representation of the implicit import needs of those items,
-    %   i.e. of the set of modules that we need to implicitly import,
-    %   in the interface and in the implementation;
-    % - the foreign files they include;
-    % - the foreign languages they use;
-    % - the names of the files that contain their fact tables; and
-    % - whether they export the program's entry point predicate.
-    %
-:- pred get_implicits_foreigns_fact_tables(list(item)::in, list(item)::in,
-    implicit_import_needs::out, implicit_import_needs::out,
-    item_contents::out) is det.
-
     % get_implicit_dependencies_in_*(Globals, Items/ItemBlocks,
     %   ImportDeps, UseDeps):
     %
@@ -157,6 +139,24 @@
 
 :- pred compute_implicit_import_needs(globals::in, implicit_import_needs::in,
     set(module_name)::out, set(module_name)::out) is det.
+
+    % get_implicits_foreigns_fact_tables(IntItems, ImpItems,
+    %   IntImplicitImportNeeds, IntImpImplicitImportNeeds, Contents):
+    %
+    % Given the interface and implementation items of a raw compilation unit,
+    % compute and return
+    %
+    % - a representation of the implicit import needs of those items,
+    %   i.e. of the set of modules that we need to implicitly import,
+    %   in the interface and in the implementation;
+    % - the foreign files they include;
+    % - the foreign languages they use;
+    % - the names of the files that contain their fact tables; and
+    % - whether they export the program's entry point predicate.
+    %
+:- pred get_implicits_foreigns_fact_tables(list(item)::in, list(item)::in,
+    implicit_import_needs::out, implicit_import_needs::out,
+    item_contents::out) is det.
 
 :- pred gather_implicit_import_needs_in_instance_method(instance_method::in,
     implicit_import_needs::in, implicit_import_needs::out) is det.
@@ -212,23 +212,29 @@ get_dependencies_in_item_blocks(ItemBlocks, ImportDeps, UseDeps) :-
 get_dependencies_in_item_blocks_acc([], !ImportDeps, !UseDeps).
 get_dependencies_in_item_blocks_acc([ItemBlock | ItemBlocks],
         !ImportDeps, !UseDeps) :-
-    ItemBlock = item_block(_, _, _, Avails, _),
+    ItemBlock = item_block(_, _, _, Avails, _, _),
     accumulate_imports_uses_maps(Avails, !ImportDeps, !UseDeps),
     get_dependencies_in_item_blocks_acc(ItemBlocks, !ImportDeps, !UseDeps).
 
 %-----------------------------------------------------------------------------%
 
-get_implicit_dependencies_in_items(Globals, Items, ImportDeps, UseDeps) :-
-    ImplicitImportNeeds0 = init_implicit_import_needs,
-    gather_implicit_import_needs_in_items(Items,
-        ImplicitImportNeeds0, ImplicitImportNeeds),
-    compute_implicit_import_needs(Globals, ImplicitImportNeeds,
-        ImportDeps, UseDeps).
+init_implicit_import_needs = ImplicitImportNeeds :-
+    ImplicitImportNeeds = implicit_import_needs(
+        dont_need_tabling, dont_need_tabling_statistics,
+        dont_need_stm, dont_need_exception,
+        dont_need_string_format, dont_need_stream_format, dont_need_io).
 
 get_implicit_dependencies_in_item_blocks(Globals, ItemBlocks,
         ImportDeps, UseDeps) :-
     ImplicitImportNeeds0 = init_implicit_import_needs,
     gather_implicit_import_needs_in_item_blocks(ItemBlocks,
+        ImplicitImportNeeds0, ImplicitImportNeeds),
+    compute_implicit_import_needs(Globals, ImplicitImportNeeds,
+        ImportDeps, UseDeps).
+
+get_implicit_dependencies_in_items(Globals, Items, ImportDeps, UseDeps) :-
+    ImplicitImportNeeds0 = init_implicit_import_needs,
+    gather_implicit_import_needs_in_items(Items,
         ImplicitImportNeeds0, ImplicitImportNeeds),
     compute_implicit_import_needs(Globals, ImplicitImportNeeds,
         ImportDeps, UseDeps).
@@ -363,12 +369,6 @@ compute_implicit_import_needs(Globals, ImplicitImportNeeds,
             set.insert(mercury_ssdb_builtin_module, !UseDeps)
         )
     ).
-
-init_implicit_import_needs = ImplicitImportNeeds :-
-    ImplicitImportNeeds = implicit_import_needs(
-        dont_need_tabling, dont_need_tabling_statistics,
-        dont_need_stm, dont_need_exception,
-        dont_need_string_format, dont_need_stream_format, dont_need_io).
 
 %-----------------------------------------------------------------------------%
 
@@ -583,7 +583,6 @@ get_implicits_foreigns_fact_tables_acc([Item | Items],
         ; Item = item_mode_defn(_)
         ; Item = item_mode_decl(_)
         ; Item = item_typeclass(_)
-        ; Item = item_foreign_import_module(_)
         ; Item = item_type_repn(_)
         )
     ),
@@ -598,7 +597,7 @@ get_implicits_foreigns_fact_tables_acc([Item | Items],
 gather_implicit_import_needs_in_item_blocks([], !ImplicitImportNeeds).
 gather_implicit_import_needs_in_item_blocks([ItemBlock | ItemBlocks],
         !ImplicitImportNeeds) :-
-    ItemBlock = item_block(_, _, _Incls, _Imports, Items),
+    ItemBlock = item_block(_, _, _Incls, _Imports, _FIMs, Items),
     gather_implicit_import_needs_in_items(Items,
         !ImplicitImportNeeds),
     gather_implicit_import_needs_in_item_blocks(ItemBlocks,
@@ -716,7 +715,6 @@ gather_implicit_import_needs_in_items([Item | Items], !ImplicitImportNeeds) :-
         ; Item = item_typeclass(_)
         ; Item = item_initialise(_)
         ; Item = item_finalise(_)
-        ; Item = item_foreign_import_module(_)
         ; Item = item_type_repn(_)
         )
     ),
@@ -989,7 +987,7 @@ get_fact_table_dependencies_in_item_blocks(ItemBlocks, FactTableFileNames) :-
 gather_fact_table_dependencies_in_blocks([], !RevFactTableFileNames).
 gather_fact_table_dependencies_in_blocks([ItemBlock | ItemBlocks],
         !RevFactTableFileNames) :-
-    ItemBlock = item_block(_, _, _, _, Items),
+    ItemBlock = item_block(_, _, _, _, _, Items),
     gather_fact_table_dependencies_in_items(Items, !RevFactTableFileNames),
     gather_fact_table_dependencies_in_blocks(ItemBlocks,
         !RevFactTableFileNames).
@@ -1023,7 +1021,7 @@ get_foreign_include_files_in_item_blocks(ItemBlocks, IncludeFiles) :-
     is det.
 
 gather_foreign_include_files_in_item_blocks_acc(ItemBlock, !IncludeFiles) :-
-    ItemBlock = item_block(_, _, _, _, Items),
+    ItemBlock = item_block(_, _, _, _, _, Items),
     gather_foreign_include_files_in_items_acc(Items, !IncludeFiles).
 
 :- pred gather_foreign_include_files_in_items_acc(list(item)::in,

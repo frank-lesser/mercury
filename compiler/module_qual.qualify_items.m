@@ -31,13 +31,6 @@
     mq_info::in, mq_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-    % Module qualify the event specifications of an augmented compilation unit.
-    %
-:- pred qualify_event_specs(mq_in_interface::in, string::in,
-    assoc_list(string, event_spec)::in, assoc_list(string, event_spec)::out,
-    mq_info::in, mq_info::out,
-    list(error_spec)::in, list(error_spec)::out) is det.
-
     % Module qualify the items in an interface file.
     % (See the XXX near the calls to this predicate.)
     %
@@ -64,6 +57,15 @@
     mer_mode::in, mer_mode::out, mq_info::in, mq_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
+%---------------------%
+
+    % Module qualify the event specifications of an augmented compilation unit.
+    %
+:- pred qualify_event_specs(mq_in_interface::in, string::in,
+    assoc_list(string, event_spec)::in, assoc_list(string, event_spec)::out,
+    mq_info::in, mq_info::out,
+    list(error_spec)::in, list(error_spec)::out) is det.
+
 %---------------------------------------------------------------------------%
 
 :- implementation.
@@ -80,7 +82,8 @@
 module_qualify_items_in_src_item_blocks([], [], !Info, !Specs).
 module_qualify_items_in_src_item_blocks([SrcItemBlock0 | SrcItemBlocks0],
         [SrcItemBlock | SrcItemBlocks], !Info, !Specs) :-
-    SrcItemBlock0 = item_block(ModuleName, SrcSection, Incls, Avails, Items0),
+    SrcItemBlock0 = item_block(ModuleName, SrcSection,
+        Incls, Avails, FIMs, Items0),
     (
         SrcSection = sms_interface,
         InInt = mq_used_in_interface
@@ -111,7 +114,8 @@ module_qualify_items_in_src_item_blocks([SrcItemBlock0 | SrcItemBlocks0],
         )
     ),
     module_qualify_items_loop(InInt, Items0, Items, !Info, !Specs),
-    SrcItemBlock = item_block(ModuleName, SrcSection, Incls, Avails, Items),
+    SrcItemBlock = item_block(ModuleName, SrcSection,
+        Incls, Avails, FIMs, Items),
     module_qualify_items_in_src_item_blocks(SrcItemBlocks0, SrcItemBlocks,
         !Info, !Specs).
 
@@ -134,7 +138,6 @@ module_qualify_item(InInt, Item0, Item, !Info, !Specs) :-
         ; Item0 = item_initialise(_)
         ; Item0 = item_finalise(_)
         ; Item0 = item_promise(_)
-        ; Item0 = item_foreign_import_module(_)
         ),
         Item = Item0
     ;
@@ -821,6 +824,12 @@ qualify_bound_inst(InInt, ErrorContext, BoundInst0, BoundInst,
 % Module qualify modes.
 %
 
+qualify_mode_list(_InInt, _ErrorContext, [], [], !Info, !Specs).
+qualify_mode_list(InInt, ErrorContext, [Mode0 | Modes0], [Mode | Modes],
+        !Info, !Specs) :-
+    qualify_mode(InInt, ErrorContext, Mode0, Mode, !Info, !Specs),
+    qualify_mode_list(InInt, ErrorContext, Modes0, Modes, !Info, !Specs).
+
 qualify_mode(InInt, ErrorContext, Mode0, Mode, !Info, !Specs) :-
     (
         Mode0 = from_to_mode(InstA0, InstB0),
@@ -836,12 +845,6 @@ qualify_mode(InInt, ErrorContext, Mode0, Mode, !Info, !Specs) :-
             mq_id(SymName0, Arity), SymName, !Info, !Specs),
         Mode = user_defined_mode(SymName, Insts)
     ).
-
-qualify_mode_list(_InInt, _ErrorContext, [], [], !Info, !Specs).
-qualify_mode_list(InInt, ErrorContext, [Mode0 | Modes0], [Mode | Modes],
-        !Info, !Specs) :-
-    qualify_mode(InInt, ErrorContext, Mode0, Mode, !Info, !Specs),
-    qualify_mode_list(InInt, ErrorContext, Modes0, Modes, !Info, !Specs).
 
 %---------------------------------------------------------------------------%
 %
