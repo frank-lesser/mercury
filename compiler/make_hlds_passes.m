@@ -27,16 +27,16 @@
 %---------------------------------------------------------------------------%
 
     % do_parse_tree_to_hlds(AugCompUnit, Globals, DumpBaseFileName, MQInfo,
-    %   TypeEqvMapMap, UsedModules, QualInfo, InvalidTypes, InvalidModes, HLDS,
-    %   Specs):
+    %   TypeEqvMap, UsedModules, QualInfo, InvalidTypes, InvalidModes,
+    %   HLDS, Specs):
     %
-    % Given MQInfo (returned by module_qual.m) and TypeEqvMapMap and
-    % UsedModules (both returned by equiv_type.m), convert AugCompUnit
-    % to HLDS. Return any errors found in Specs.
+    % Given MQInfo (returned by module_qual.m) and TypeEqvMap and UsedModules
+    % (both returned by equiv_type.m), convert AugCompUnit to HLDS.
+    % Return any errors found in Specs.
     % Return InvalidTypes = yes if we found undefined types.
     % Return InvalidModes = yes if we found undefined or cyclic insts or modes.
-    % QualInfo is an abstract type that is then passed back to
-    % produce_instance_method_clauses (see below).
+    % QualInfo is an abstract type that check_typeclass.m will later pass
+    % to produce_instance_method_clauses.
     %
 :- pred do_parse_tree_to_hlds(aug_compilation_unit::in, globals::in,
     string::in, mq_info::in, type_eqv_map::in, used_modules::in,
@@ -633,15 +633,9 @@ add_mode_defn(StatusItem, !ModuleInfo, !FoundInvalidInstOrMode, !Specs) :-
 
 add_pred_decl(SectionItem, !ModuleInfo, !Specs) :-
     SectionItem = sec_item(SectionInfo, ItemPredDecl),
-    SectionInfo = sec_info(ItemMercuryStatus, NeedQual),
-    ItemPredDecl = item_pred_decl_info(PredSymName, PredOrFunc, TypesAndModes,
-        WithType, WithInst, MaybeDetism, Origin, TypeVarSet, InstVarSet,
-        ExistQVars, Purity, ClassContext, Context, SeqNum),
-    % Any WithType and WithInst annotations should have been expanded
-    % and the type and/or inst put into TypesAndModes by equiv_type.m.
-    expect(unify(WithType, no), $pred, "WithType != no"),
-    expect(unify(WithInst, no), $pred, "WithInst != no"),
-
+    ItemPredDecl = item_pred_decl_info(PredSymName, PredOrFunc, _TypesAndModes,
+        _WithType, _WithInst, _MaybeDetism, _Origin, _TypeVarSet, _InstVarSet,
+        _ExistQVars, _Purity, _ClassContext, Context, _SeqNum),
     PredName = unqualify_name(PredSymName),
     ( if PredName = "" then
         Pieces = [words("Error: you cannot declare a"),
@@ -651,39 +645,10 @@ add_pred_decl(SectionItem, !ModuleInfo, !Specs) :-
         Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
         !:Specs = [Spec | !.Specs]
     else
-        % If this predicate was added as a result of the mutable
-        % transformation, then mark this predicate as a mutable access pred.
-        % We do this so that we can tell optimizations, like inlining,
-        % to treat it specially.
-        init_markers(Markers0),
-        (
-            Origin = item_origin_compiler(CompilerAttrs),
-            CompilerAttrs = item_compiler_attributes(_AllowExport, IsMutable),
-            (
-                IsMutable = is_mutable(ModuleName, MutableName,
-                    MutablePredKind),
-                PredOrigin = origin_mutable(ModuleName, MutableName,
-                    MutablePredKind),
-                add_marker(marker_mutable_access_pred, Markers0, Markers)
-            ;
-                IsMutable = is_not_mutable,
-                % For now, the only kind of predicate declaration item
-                % that the compiler creates by itself are the auxiliary
-                % predicates implementing mutables.
-                PredOrigin = origin_user(PredSymName),
-                Markers = Markers0
-            )
-        ;
-            Origin = item_origin_user,
-            PredOrigin = origin_user(PredSymName),
-            Markers = Markers0
-        ),
+        SectionInfo = sec_info(ItemMercuryStatus, NeedQual),
         item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        module_add_pred_or_func(PredOrigin, Context, SeqNum,
-            yes(ItemMercuryStatus), PredStatus, NeedQual,
-            PredOrFunc, PredSymName, TypeVarSet, InstVarSet, ExistQVars,
-            TypesAndModes, ClassContext, MaybeDetism, Purity, Markers, _,
-            !ModuleInfo, !Specs)
+        module_add_pred_decl(PredStatus, NeedQual, ItemPredDecl,
+            _MaybePredProcId, !ModuleInfo, !Specs)
     ).
 
 %---------------------------------------------------------------------------%
@@ -795,15 +760,7 @@ add_clause(StatusItem, !ModuleInfo, !QualInfo, !Specs) :-
                     error_is_exported(Context,
                         [words("clause for " ++ ClauseId)], !Specs)
                 ;
-                    Origin = item_origin_compiler(CompilerAttrs),
-                    CompilerAttrs = item_compiler_attributes(AllowExport,
-                        _IsMutable),
-                    (
-                        AllowExport = do_allow_export
-                    ;
-                        AllowExport = do_not_allow_export,
-                        unexpected($pred, "bad introduced clause")
-                    )
+                    Origin = item_origin_compiler(_CompilerAttrs)
                 )
             ;
                 ( ItemExport = item_export_nowhere
@@ -991,7 +948,8 @@ implement_initialise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
         ( if is_valid_init_or_final_pred(PredInfo, ExpectedHeadModes) then
             module_info_new_user_init_pred(SymName, Arity, CName, !ModuleInfo),
             make_and_add_pragma_foreign_proc_export(SymName, ExpectedHeadModes,
-                CName, Context, !ModuleInfo, !Specs)
+                CName, compiler_origin_initialise, Context,
+                !ModuleInfo, !Specs)
         else
             Pieces = [words("Error:"),
                 qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
@@ -1051,7 +1009,7 @@ implement_finalise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
             module_info_new_user_final_pred(SymName, Arity, CName,
                 !ModuleInfo),
             make_and_add_pragma_foreign_proc_export(SymName, ExpectedHeadModes,
-                CName, Context, !ModuleInfo, !Specs)
+                CName, compiler_origin_finalise, Context, !ModuleInfo, !Specs)
         else
             Pieces = [words("Error:"),
                 qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
@@ -1103,22 +1061,19 @@ is_valid_init_or_final_pred(PredInfo, ExpectedHeadModes) :-
     Purity = ExpectedPurity.
 
 :- pred make_and_add_pragma_foreign_proc_export(sym_name::in,
-    list(mer_mode)::in, string::in, prog_context::in,
+    list(mer_mode)::in, string::in, compiler_origin::in, prog_context::in,
     module_info::in, module_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-make_and_add_pragma_foreign_proc_export(SymName, HeadModes, CName, Context,
-        !ModuleInfo, !Specs) :-
+make_and_add_pragma_foreign_proc_export(SymName, HeadModes, CName,
+        Origin, Context, !ModuleInfo, !Specs) :-
     module_info_get_globals(!.ModuleInfo, Globals),
     globals.get_target(Globals, CompilationTarget),
     ExportLang = target_lang_to_foreign_export_lang(CompilationTarget),
     PredNameModesPF = pred_name_modes_pf(SymName, HeadModes, pf_predicate),
     FPEInfo =
         pragma_info_foreign_proc_export(ExportLang, PredNameModesPF, CName),
-    % XXX Why is the foreign_proc_export pragma *itself* allowed to be
-    % exported? Why does add_pragma_foreign_proc_export abort in some cases
-    % if it finds do_not_allow_export?
-    Attrs = item_compiler_attributes(do_allow_export, is_not_mutable),
+    Attrs = item_compiler_attributes(Origin),
     PEOrigin = item_origin_compiler(Attrs),
     add_pragma_foreign_proc_export(PEOrigin, FPEInfo, Context,
         !ModuleInfo, !Specs).

@@ -16,6 +16,7 @@ ORDINARY_PROGS = \
 	array_all_tf \
 	array_copy \
 	array_gen \
+	array_primitives \
 	array_sort \
 	array_test \
 	array_test2 \
@@ -312,6 +313,7 @@ ORDINARY_PROGS = \
 	read_binary_uint16 \
 	read_binary_uint32 \
 	read_binary_uint64 \
+	read_bitmap_size \
 	read_min_int \
 	recursive_main \
 	redoip_clobber \
@@ -371,6 +373,8 @@ ORDINARY_PROGS = \
 	string_switch3 \
 	string_to_float_overflow \
 	string_various \
+	string_well_formed \
+	string_well_formed_utf8 \
 	sv_nested_closures \
 	sv_record_update \
 	switch_detect \
@@ -385,7 +389,6 @@ ORDINARY_PROGS = \
 	test_char_digits \
 	test_cord \
 	test_cord2 \
-	test_generic_ref \
 	test_imported_no_tag \
 	test_infinity \
 	test_int_hash \
@@ -491,6 +494,19 @@ ifeq "$(filter java% erlang%,$(GRADE))" ""
 		foreign_enum_mod1
 else
 	FOREIGN_ENUM_PROGS =
+endif
+
+# Tests of the random module do not work in the Erlang grade due to support for
+# fixed size integer types in that grade being incomplete.
+ifeq "$(filter erlang%,$(GRADE))" ""
+	RANDOM_PROGS = \
+		random1 \
+		random2 \
+		random3 \
+		random_shuffle \
+		random_shuffle2
+else
+	RANDOM_PROGS =
 endif
 
 # Some tests only link in trailing grades.
@@ -659,6 +675,9 @@ CLOSURE_LAYOUT_PROGS = \
 # XXX we fail some of the commented-out tests in write_binary
 #
 # XXX bug441
+# XXX gh72a
+# XXX gh72b
+# XXX test_generic_ref
 
 # The following tests are passed only in some grades.
 
@@ -853,6 +872,7 @@ PROGS = \
 	$(CSHARP_PROGS) \
 	$(SOLVER_PROGS) \
 	$(FOREIGN_ENUM_PROGS) \
+	$(RANDOM_PROGS) \
 	$(TRAILED_PROGS) \
 	$(STACK_SEGMENT_PROGS) \
 	$(MUTABLE_PROGS) \

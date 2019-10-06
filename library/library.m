@@ -120,6 +120,9 @@
 :- import_module psqueue.
 :- import_module queue.
 :- import_module random.
+:- import_module random.sfc16.
+:- import_module random.sfc32.
+:- import_module random.sfc64.
 :- import_module ranges.
 :- import_module rational.
 :- import_module rbtree.
@@ -304,6 +307,9 @@ mercury_std_library_module("prolog").
 mercury_std_library_module("psqueue").
 mercury_std_library_module("queue").
 mercury_std_library_module("random").
+mercury_std_library_module("random.sfc16").
+mercury_std_library_module("random.sfc32").
+mercury_std_library_module("random.sfc64").
 mercury_std_library_module("ranges").
 mercury_std_library_module("rational").
 mercury_std_library_module("rbtree").

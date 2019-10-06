@@ -2065,7 +2065,6 @@ keep_marker(marker_builtin_stub) = no.
 keep_marker(marker_infer_type) = no.
 keep_marker(marker_infer_modes) = no.
 keep_marker(marker_no_pred_decl) = no.
-keep_marker(marker_obsolete) = no.
 keep_marker(marker_no_detism_warning) = no.
 keep_marker(marker_user_marked_inline) = no.
 keep_marker(marker_user_marked_no_inline) = no.
@@ -2404,11 +2403,12 @@ generate_get_table_info_goal(PredId, ProcId, Context, !VarSet, !VarTypes,
 
 :- pred attach_call_table_tip(hlds_goal::in, hlds_goal::out) is det.
 
-attach_call_table_tip(hlds_goal(GoalExpr, GoalInfo0),
-        hlds_goal(GoalExpr, GoalInfo)) :-
+attach_call_table_tip(Goal0, Goal) :-
+    Goal0 = hlds_goal(GoalExpr, GoalInfo0),
     Features0 = goal_info_get_features(GoalInfo0),
     set.insert(feature_call_table_gen, Features0, Features),
-    goal_info_set_features(Features, GoalInfo0, GoalInfo).
+    goal_info_set_features(Features, GoalInfo0, GoalInfo),
+    Goal = hlds_goal(GoalExpr, GoalInfo).
 
 %-----------------------------------------------------------------------------%
 

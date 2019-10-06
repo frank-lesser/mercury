@@ -1076,7 +1076,11 @@ ML_new_array(int Size, object Item)
     if (Size == 0) {
         return null;
     }
-    if (Item is int || Item is double || Item is char || Item is bool) {
+    if (
+        Item is int || Item is uint || Item is sbyte || Item is byte ||
+        Item is short || Item is ushort || Item is long || Item is ulong ||
+        Item is double || Item is char || Item is bool
+    ) {
         arr = System.Array.CreateInstance(Item.GetType(), Size);
     } else {
         arr = new object[Size];
@@ -1092,7 +1096,11 @@ ML_unsafe_new_array(int Size, object Item, int IndexToSet)
 {
     System.Array arr;
 
-    if (Item is int || Item is double || Item is char || Item is bool) {
+    if (
+        Item is int || Item is uint || Item is sbyte || Item is byte ||
+        Item is short || Item is ushort || Item is long || Item is ulong ||
+        Item is double || Item is char || Item is bool
+    ) {
         arr = System.Array.CreateInstance(Item.GetType(), Size);
     } else {
         arr = new object[Size];
@@ -1118,6 +1126,34 @@ ML_array_resize(System.Array arr0, int Size, object Item)
     System.Array arr;
     if (Item is int) {
         int[] tmp = (int[]) arr0;
+        System.Array.Resize(ref tmp, Size);
+        arr = tmp;
+    } else if (Item is uint) {
+        uint[] tmp = (uint[]) arr0;
+        System.Array.Resize(ref tmp, Size);
+        arr = tmp;
+    } else if (Item is sbyte) {
+        sbyte[] tmp = (sbyte[]) arr0;
+        System.Array.Resize(ref tmp, Size);
+        arr = tmp;
+    } else if (Item is byte) {
+        byte[] tmp = (byte[]) arr0;
+        System.Array.Resize(ref tmp, Size);
+        arr = tmp;
+    } else if (Item is short) {
+        short[] tmp = (short[]) arr0;
+        System.Array.Resize(ref tmp, Size);
+        arr = tmp;
+    } else if (Item is ushort) {
+        ushort[] tmp = (ushort[]) arr0;
+        System.Array.Resize(ref tmp, Size);
+        arr = tmp;
+    } else if (Item is long) {
+        long[] tmp = (long[]) arr0;
+        System.Array.Resize(ref tmp, Size);
+        arr = tmp;
+    } else if (Item is ulong) {
+        ulong[] tmp = (ulong[]) arr0;
         System.Array.Resize(ref tmp, Size);
         arr = tmp;
     } else if (Item is double) {
@@ -1148,19 +1184,55 @@ ML_shrink_array(System.Array arr, int Size)
 {
     if (arr == null) {
         return null;
-    } else if (arr is int[]) {
+    }
+
+    // We need to use Item here to determine the type instead of arr itself
+    // since both 'arr is int[]' and 'arr is uint[]' evaluate to true;
+    // similarly for the other integer types.  (That behaviour is due to an
+    // inconsistency between the covariance of value-typed arrays in C# and
+    // the CLR.)
+    object Item = arr.GetValue(0);
+    if (Item is int) {
         int[] tmp = (int[]) arr;
         System.Array.Resize(ref tmp, Size);
         return tmp;
-    } else if (arr is double[]) {
+    } else if (Item is uint) {
+        uint[] tmp = (uint[]) arr;
+        System.Array.Resize(ref tmp, Size);
+        return tmp;
+    } else if (Item is sbyte) {
+        sbyte[] tmp = (sbyte[]) arr;
+        System.Array.Resize(ref tmp, Size);
+        return tmp;
+    } else if (Item is byte) {
+        byte[] tmp = (byte[]) arr;
+        System.Array.Resize(ref tmp, Size);
+        return tmp;
+    } else if (Item is short) {
+        short[] tmp = (short[]) arr;
+        System.Array.Resize(ref tmp, Size);
+        return tmp;
+    } else if (Item is ushort) {
+        ushort[] tmp = (ushort[]) arr;
+        System.Array.Resize(ref tmp, Size);
+        return tmp;
+    } else if (Item is long) {
+        long[] tmp = (long[]) arr;
+        System.Array.Resize(ref tmp, Size);
+        return tmp;
+    } else if (Item is ulong) {
+        ulong[] tmp = (ulong[]) arr;
+        System.Array.Resize(ref tmp, Size);
+        return tmp;
+    } else if (Item is double) {
         double[] tmp = (double[]) arr;
         System.Array.Resize(ref tmp, Size);
         return tmp;
-    } else if (arr is char[]) {
+    } else if (Item is char) {
         char[] tmp = (char[]) arr;
         System.Array.Resize(ref tmp, Size);
         return tmp;
-    } else if (arr is bool[]) {
+    } else if (Item is bool) {
         bool[] tmp = (bool[]) arr;
         System.Array.Resize(ref tmp, Size);
         return tmp;

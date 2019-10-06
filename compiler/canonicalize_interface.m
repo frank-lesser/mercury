@@ -422,8 +422,6 @@ classify_items([Item | Items], !TypeDefnMap, !InstDefnMap, !ModeDefnMap,
         ItemPragmaInfo = item_pragma_info(Pragma, _, _, _),
         (
             ( Pragma = pragma_foreign_proc_export(_)
-            ; Pragma = pragma_foreign_export_enum(_)
-            ; Pragma = pragma_foreign_enum(_)
             ; Pragma = pragma_external_proc(_)
             ; Pragma = pragma_type_spec(_)
             ; Pragma = pragma_inline(_)
@@ -433,7 +431,7 @@ classify_items([Item | Items], !TypeDefnMap, !InstDefnMap, !ModeDefnMap,
             ; Pragma = pragma_exceptions(_)
             ; Pragma = pragma_trailing_info(_)
             ; Pragma = pragma_mm_tabling_info(_)
-            ; Pragma = pragma_obsolete(_)
+            ; Pragma = pragma_obsolete(_, _)
             ; Pragma = pragma_no_detism_warning(_)
             ; Pragma = pragma_tabled(_)
             ; Pragma = pragma_fact_table(_)
@@ -462,7 +460,9 @@ classify_items([Item | Items], !TypeDefnMap, !InstDefnMap, !ModeDefnMap,
                 cord.snoc(!.NonReorderableItemsCord, Item)
         )
     ;
-        ( Item = item_promise(_)
+        ( Item = item_foreign_enum(_)
+        ; Item = item_foreign_export_enum(_)
+        ; Item = item_promise(_)
         ; Item = item_typeclass(_)
         ; Item = item_instance(_)
         ; Item = item_type_repn(_)

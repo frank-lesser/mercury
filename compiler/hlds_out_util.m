@@ -296,6 +296,9 @@ pred_info_id_to_string(PredInfo) = Str :-
             " for `", ClassStr, "(", TypeStrs, ")'"
         ])
     ;
+        Origin = origin_class_method,
+        Str = "class method"
+    ;
         Origin = origin_assertion(FileName, LineNumber),
         ( if pred_info_is_promise(PredInfo, PromiseType) then
             Str = string.format("`%s' declaration (%s:%d)",
@@ -338,6 +341,8 @@ pred_info_id_to_string(PredInfo) = Str :-
         ; Origin = origin_created(_)
         ; Origin = origin_mutable(_, _, _)
         ; Origin = origin_lambda(_, _, _)
+        ; Origin = origin_initialise
+        ; Origin = origin_finalise
         ; Origin = origin_user(_)
         ),
         SymName = qualified(Module, Name),
@@ -1036,18 +1041,8 @@ instmode_status_to_string(InstModeStatus) = Str :-
     ;
         InstModeStatus = instmode_defined_in_other_module(InstModeImport),
         (
-            InstModeImport = instmode_import_plain(InstModeImportLocn),
-            (
-                InstModeImportLocn = instmode_import_plain_imp,
-                Str = "other_module(import_plain(imp))"
-            ;
-                InstModeImportLocn = instmode_import_plain_int,
-                Str = "other_module(import_plain(int))"
-            ;
-                InstModeImportLocn =
-                    instmode_import_plain_ancestors_priv_int_file,
-                Str = "other_module(import_plain(ancestors_priv_int_file))"
-            )
+            InstModeImport = instmode_import_plain,
+            Str = "other_module(import_plain)"
         ;
             InstModeImport = instmode_import_abstract,
             Str = "other_module(import_abstract)"

@@ -67,13 +67,29 @@
 % For example, when reporting a duplicate declaration, we want to report
 % this fact in the duplicate declaration's context, while printing another
 % message giving the original declaration's context.
+%
+% simplest_spec(Severity, Phase, Context, Pieces) is a shorthand for
+% (and equivalent in every respect to) error_spec(Severity, Phase,
+% [simple_msg(Context, always(Pieces)])]).
 
 :- type error_spec
     --->    error_spec(
                 error_severity          :: error_severity,
                 error_phase             :: error_phase,
                 error_msgs              :: list(error_msg)
+            )
+    ;       simplest_spec(
+                simp_spec_severity      :: error_severity,
+                simp_spec_phase         :: error_phase,
+                simp_spec_context       :: prog_context,
+                simp_spec_pieces        :: list(format_component)
             ).
+
+:- inst full_spec for error_spec/0
+    --->    error_spec(ground, ground, ground).
+
+:- pred expand_simplest_spec(error_spec::in, error_spec::out(full_spec))
+    is det.
 
 %---------------------------------------------------------------------------%
 
@@ -164,13 +180,20 @@
 % The term simple_msg(Context, Components) is a shorthand for (and equivalent
 % in every respect to) the term error_msg(yes(Context), do_not_treat_as_first,
 % 0, Components).
+%
+% The term simplest_msg(Context, Pieces) is a shorthand for (and equivalent
+% in every respect to) the term simple_msg(Context, [always(Pieces)]).
 
 :- type maybe_treat_as_first
     --->    treat_as_first
     ;       do_not_treat_as_first.
 
 :- type error_msg
-    --->    simple_msg(
+    --->    simplest_msg(
+                simplest_context        :: prog_context,
+                simple_pieces           :: list(format_component)
+            )
+    ;       simple_msg(
                 simple_context          :: prog_context,
                 simple_components       :: list(error_msg_component)
             )
@@ -399,6 +422,11 @@
             % The output should contain the string form of the sym_name,
             % surrounded by `' quotes, followed by '/' and the arity.
 
+    ;       qual_type_ctor(type_ctor)
+    ;       unqual_type_ctor(type_ctor)
+            % The output should contain the string form of the type_ctor,
+            % surrounded by `' quotes, followed by '/' and the arity.
+
     ;       qual_cons_id_and_maybe_arity(cons_id)
     ;       unqual_cons_id_and_maybe_arity(cons_id)
             % If the cons_id is a cons_id for a builtin type, strip the
@@ -406,7 +434,7 @@
             % the result. If the cons_id is for a du type, output its name
             % in quotes, followed by '/' and its arity.
 
-    ;       top_ctor_of_type(mer_type)
+    ;       qual_top_ctor_of_type(mer_type)
             % The top level type constructor of the given type,
             % which must have one (i.e. must not be a variable).
 
@@ -612,6 +640,18 @@
 
 %---------------------------------------------------------------------------%
 
+expand_simplest_spec(Spec0, Spec) :-
+    (
+        Spec0 = error_spec(Severity, Phase, Msgs),
+        Spec = error_spec(Severity, Phase, Msgs)
+    ;
+        Spec0 = simplest_spec(Severity, Phase, Context, Pieces),
+        Spec = error_spec(Severity, Phase,
+            [simple_msg(Context, [always(Pieces)])])
+    ).
+
+%---------------------------------------------------------------------------%
+
 worst_severity(actual_severity_error, actual_severity_error) =
     actual_severity_error.
 worst_severity(actual_severity_error, actual_severity_warning) =
@@ -666,7 +706,9 @@ worst_severity_in_specs(Globals, Specs) = MaybeWorst :-
 
 worst_severity_in_specs_2(_Globals, [], !MaybeWorst).
 worst_severity_in_specs_2(Globals, [Spec | Specs], !MaybeWorst) :-
-    Spec = error_spec(Severity, _, _),
+    ( Spec = error_spec(Severity, _, _)
+    ; Spec = simplest_spec(Severity, _, _, _)
+    ),
     MaybeThis = actual_error_severity(Globals, Severity),
     (
         !.MaybeWorst = no,
@@ -751,24 +793,33 @@ sort_error_specs(Globals, !Specs) :-
     error_spec::in, error_spec::out) is semidet.
 
 remove_conditionals_in_spec(Globals, Spec0, Spec) :-
-    Spec0 = error_spec(Severity0, Phase, Msgs0),
-    MaybeActualSeverity = actual_error_severity(Globals, Severity0),
-    list.filter_map(remove_conditionals_in_msg(Globals), Msgs0, Msgs),
+    require_det (
+        (
+            Spec0 = error_spec(Severity0, Phase, Msgs0)
+        ;
+            Spec0 = simplest_spec(Severity0, Phase, Context0, Pieces0),
+            Msgs0 = [simplest_msg(Context0, Pieces0)]
+        ),
+        MaybeActualSeverity = actual_error_severity(Globals, Severity0),
+        list.filter_map(remove_conditionals_in_msg(Globals), Msgs0, Msgs)
+    ),
     ( if
         MaybeActualSeverity = yes(ActualSeverity),
         Msgs = [_ | _]
     then
-        (
-            ActualSeverity = actual_severity_error,
-            Severity = severity_error
-        ;
-            ActualSeverity = actual_severity_warning,
-            Severity = severity_warning
-        ;
-            ActualSeverity = actual_severity_informational,
-            Severity = severity_informational
-        ),
-        Spec = error_spec(Severity, Phase, Msgs)
+        require_det (
+            (
+                ActualSeverity = actual_severity_error,
+                Severity = severity_error
+            ;
+                ActualSeverity = actual_severity_warning,
+                Severity = severity_warning
+            ;
+                ActualSeverity = actual_severity_informational,
+                Severity = severity_informational
+            ),
+            Spec = error_spec(Severity, Phase, Msgs)
+        )
     else
         % Spec0 would result in nothing being printed.
         fail
@@ -780,6 +831,12 @@ remove_conditionals_in_spec(Globals, Spec0, Spec) :-
 remove_conditionals_in_msg(Globals, Msg0, Msg) :-
     require_det (
         (
+            Msg0 = simplest_msg(Context, Pieces0),
+            Components0 = [always(Pieces0)],
+            MaybeContext = yes(Context),
+            TreatAsFirst = do_not_treat_as_first,
+            ExtraIndent = 0
+        ;
             Msg0 = simple_msg(Context, Components0),
             MaybeContext = yes(Context),
             TreatAsFirst = do_not_treat_as_first,
@@ -836,7 +893,9 @@ remove_conditionals_in_msg_component(Globals, Component, !ComponentCord) :-
 :- pred compare_error_specs(error_spec::in, error_spec::in,
     comparison_result::out) is det.
 
-compare_error_specs(SpecA, SpecB, Result) :-
+compare_error_specs(SpecA0, SpecB0, Result) :-
+    expand_simplest_spec(SpecA0, SpecA),
+    expand_simplest_spec(SpecB0, SpecB),
     SpecA = error_spec(_, _, MsgsA),
     SpecB = error_spec(_, _, MsgsB),
     compare_error_msg_lists(MsgsA, MsgsB, MsgsResult),
@@ -916,6 +975,9 @@ compare_error_msgs(MsgA, MsgB, Result) :-
 
 project_msg_context(Msg) = MaybeContext :-
     (
+        Msg = simplest_msg(Context, _),
+        MaybeContext = yes(Context)
+    ;
         Msg = simple_msg(Context, _),
         MaybeContext = yes(Context)
     ;
@@ -930,6 +992,9 @@ project_msg_context(Msg) = MaybeContext :-
 
 project_msg_components(Msg) = Components :-
     (
+        Msg = simplest_msg(_, Pieces),
+        Components = [always(Pieces)]
+    ;
         Msg = simple_msg(_, Components)
     ;
         Msg = error_msg(_, _, _, Components)
@@ -942,12 +1007,13 @@ project_msg_components(Msg) = Components :-
 init_error_spec_accumulator = no.
 
 accumulate_error_specs_for_proc(ProcSpecs, !MaybeSpecs) :-
-    list.filter((pred(error_spec(_, Phase, _)::in) is semidet :-
+    list.filter(
+        ( pred(error_spec(_, Phase, _)::in) is semidet :-
             ModeReportControl = get_maybe_mode_report_control(Phase),
             ModeReportControl = yes(report_only_if_in_all_modes)
         ), ProcSpecs, ProcAllModeSpecs, ProcAnyModeSpecs),
-    ProcAnyModeSpecSet = set.from_list(ProcAnyModeSpecs),
-    ProcAllModeSpecSet = set.from_list(ProcAllModeSpecs),
+    ProcAnyModeSpecSet = set.list_to_set(ProcAnyModeSpecs),
+    ProcAllModeSpecSet = set.list_to_set(ProcAllModeSpecs),
     (
         !.MaybeSpecs = yes(AnyModeSpecSet0 - AllModeSpecSet0),
         set.union(AnyModeSpecSet0, ProcAnyModeSpecSet, AnyModeSpecSet),
@@ -1058,8 +1124,9 @@ write_error_specs(Stream, Specs0, Globals, !NumWarnings, !NumErrors, !IO) :-
     already_printed_verbose::in, already_printed_verbose::out,
     io::di, io::uo) is det.
 
-do_write_error_spec(Stream, Globals, Spec, !NumWarnings, !NumErrors,
+do_write_error_spec(Stream, Globals, Spec0, !NumWarnings, !NumErrors,
         !AlreadyPrintedVerbose, !IO) :-
+    expand_simplest_spec(Spec0, Spec),
     Spec = error_spec(Severity, _, Msgs),
     do_write_error_msgs(Stream, Msgs, Globals, treat_as_first,
         have_not_printed_anything, PrintedSome, !AlreadyPrintedVerbose, !IO),
@@ -1115,6 +1182,12 @@ do_write_error_msgs(_Stream, [], _Globals, _First, !PrintedSome,
 do_write_error_msgs(Stream, [Msg | Msgs], Globals, !.First, !PrintedSome,
         !AlreadyPrintedVerbose, !IO) :-
     (
+        Msg = simplest_msg(SimpleContext, Pieces),
+        Components = [always(Pieces)],
+        MaybeContext = yes(SimpleContext),
+        TreatAsFirst = do_not_treat_as_first,
+        ExtraIndentLevel = 0
+    ;
         Msg = simple_msg(SimpleContext, Components),
         MaybeContext = yes(SimpleContext),
         TreatAsFirst = do_not_treat_as_first,
@@ -1568,14 +1641,33 @@ error_pieces_to_string_2(FirstInMsg, [Component | Components]) = Str :-
         Word = sym_name_and_arity_to_word(SymNameAndArity),
         Str = join_string_and_tail(Word, Components, TailStr)
     ;
-        Component = qual_cons_id_and_maybe_arity(ConsId0),
-        strip_builtin_qualifier_from_cons_id(ConsId0, ConsId),
+        (
+            Component = qual_cons_id_and_maybe_arity(ConsId0),
+            strip_builtin_qualifier_from_cons_id(ConsId0, ConsId)
+        ;
+            Component = unqual_cons_id_and_maybe_arity(ConsId0),
+            strip_module_qualifier_from_cons_id(ConsId0, ConsId)
+        ),
         Word = maybe_quoted_cons_id_and_arity_to_string(ConsId),
         Str = join_string_and_tail(Word, Components, TailStr)
     ;
-        Component = unqual_cons_id_and_maybe_arity(ConsId0),
-        strip_module_qualifier_from_cons_id(ConsId0, ConsId),
-        Word = maybe_quoted_cons_id_and_arity_to_string(ConsId),
+        (
+            Component = qual_type_ctor(TypeCtor),
+            TypeCtor = type_ctor(TypeCtorSymName, TypeCtorArity)
+        ;
+            Component = unqual_type_ctor(TypeCtor0),
+            TypeCtor0 = type_ctor(TypeCtorSymName0, TypeCtorArity),
+            TypeCtorSymName = unqualified(unqualify_name(TypeCtorSymName0))
+        ),
+        SymNameAndArity = sym_name_arity(TypeCtorSymName, TypeCtorArity),
+        Word = sym_name_and_arity_to_word(SymNameAndArity),
+        Str = join_string_and_tail(Word, Components, TailStr)
+    ;
+        Component = qual_top_ctor_of_type(Type),
+        type_to_ctor_det(Type, TypeCtor),
+        TypeCtor = type_ctor(TypeCtorSymName, TypeCtorArity),
+        SymNameArity = sym_name_arity(TypeCtorSymName, TypeCtorArity),
+        Word = sym_name_and_arity_to_word(SymNameArity),
         Str = join_string_and_tail(Word, Components, TailStr)
     ;
         Component = p_or_f(PredOrFunc),
@@ -1592,13 +1684,6 @@ error_pieces_to_string_2(FirstInMsg, [Component | Components]) = Str :-
     ;
         Component = pragma_decl(PragmaName),
         Word = add_quotes(":- pragma " ++ PragmaName),
-        Str = join_string_and_tail(Word, Components, TailStr)
-    ;
-        Component = top_ctor_of_type(Type),
-        type_to_ctor_det(Type, TypeCtor),
-        TypeCtor = type_ctor(TypeCtorName, TypeCtorArity),
-        SymNameArity = sym_name_arity(TypeCtorName, TypeCtorArity),
-        Word = sym_name_and_arity_to_word(SymNameArity),
         Str = join_string_and_tail(Word, Components, TailStr)
     ;
         Component = nl,
@@ -1753,17 +1838,29 @@ convert_components_to_paragraphs_acc(FirstInMsg, [Component | Components],
         Word = sym_name_and_arity_to_word(SymNameAndArity),
         RevWords1 = [plain_word(Word) | RevWords0]
     ;
-        Component = qual_cons_id_and_maybe_arity(ConsId0),
-        strip_builtin_qualifier_from_cons_id(ConsId0, ConsId),
+        (
+            Component = qual_cons_id_and_maybe_arity(ConsId0),
+            strip_builtin_qualifier_from_cons_id(ConsId0, ConsId)
+        ;
+            Component = unqual_cons_id_and_maybe_arity(ConsId0),
+            strip_module_qualifier_from_cons_id(ConsId0, ConsId)
+        ),
         Word = maybe_quoted_cons_id_and_arity_to_string(ConsId),
         RevWords1 = [plain_word(Word) | RevWords0]
     ;
-        Component = unqual_cons_id_and_maybe_arity(ConsId0),
-        strip_module_qualifier_from_cons_id(ConsId0, ConsId),
-        Word = maybe_quoted_cons_id_and_arity_to_string(ConsId),
+        (
+            Component = qual_type_ctor(TypeCtor),
+            TypeCtor = type_ctor(TypeCtorSymName, TypeCtorArity)
+        ;
+            Component = unqual_type_ctor(TypeCtor0),
+            TypeCtor0 = type_ctor(TypeCtorSymName0, TypeCtorArity),
+            TypeCtorSymName = unqualified(unqualify_name(TypeCtorSymName0))
+        ),
+        SymNameAndArity = sym_name_arity(TypeCtorSymName, TypeCtorArity),
+        Word = sym_name_and_arity_to_word(SymNameAndArity),
         RevWords1 = [plain_word(Word) | RevWords0]
     ;
-        Component = top_ctor_of_type(Type),
+        Component = qual_top_ctor_of_type(Type),
         type_to_ctor_det(Type, TypeCtor),
         TypeCtor = type_ctor(TypeCtorName, TypeCtorArity),
         SymNameArity = sym_name_arity(TypeCtorName, TypeCtorArity),

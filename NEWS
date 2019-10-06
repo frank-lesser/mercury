@@ -162,7 +162,7 @@ Changes that may break compatibility:
 * We have changed the semantics of array.shrink/3 and array.resize/4 so that
   they throw an exception if their first argument is negative.
 
-* We have changed the semantics of array.fetch_times/4 so that it always
+* We have changed the semantics of array.fetch_items/4 so that it always
   throws an exception if its second or third argument is out of bounds.
   Previously, it would return an empty if list if its third argument was less
   than the second even if one, or both, of these arguments was out of bounds.
@@ -225,6 +225,11 @@ Changes to the Mercury language:
   preventing it from generating unused procedure warnings either for
   any of its procedures, or for any of the procedures they call,
   directly or indirectly.
+
+* We have added an optional second field to the `obsolete' pragma.
+  When present, it may contain a list of the names and arities of
+  predicates and/or functions that programmers should consider using
+  instead of the obsolete predicate or function.
 
 * The Java backend now supports defining foreign types as primitive Java
   types.
@@ -293,8 +298,8 @@ Changes to the Mercury standard library:
   an explicitly specified input stream, not from the current input stream.
 
 * We have added a module for discrete interval encoding trees, which are a
-  highly efficient set implementation for fat sets. This module is a
-  contribution from Yes Logic Pty. Ltd.
+  highly efficient set implementation for fat sets. This module, diet.m,
+  is a contribution from Yes Logic Pty. Ltd.
 
 + We have added two new modules for concurrent programming: thread.barrier
   and thread.future. The barrier module provides a barrier type which can
@@ -407,6 +412,7 @@ Changes to the Mercury standard library:
 
    - is_all_alnum/1
    - is_empty/1
+   - is_well_formed/1
    - to_utf8_code_unit_list/2
    - to_utf16_code_unit_list/2
    - from_utf8_code_unit_list/2
@@ -419,14 +425,28 @@ Changes to the Mercury standard library:
 
    - foldl5/12
    - foldr5/12
+   - map_foldl4/11
    - intersect_list/4
    - union_list/4
    - select_unselect/4
    - select_unselect_sorted_list/4
 
-* The following predicate has been added to the set modules:
+* The following predicates have been added to the tree234 module:
+
+   - map_foldl4/11
+
+* The following predicates and/or functions have been added to the set modules:
 
    - intersection_and_differences
+   - det_remove
+   - det_remove_list
+   - rev_sorted_list_to_set
+
+   while the following predicates and/or functions have been marked as obsolete:
+
+   - empty
+   - non_empty
+   - set
 
 * We have a added a new type, maybe_errors, to the maybe module.
 
@@ -657,6 +677,9 @@ Changes to the Mercury compiler:
   one tail call to one *other* member of the set, to inline the tail calls
   to turn those mutually recursive procedures into procedures that each
   contain only *self* tail recursion.
+
+* We have significantly improved the compiler's ability to detect, and
+  to generate warnings about, code that violates the occurs check.
 
 * We have fixed a long-standing bug causing crashes in deep profiling
   grades, related to unify/compare for tuples. (Bug #3)

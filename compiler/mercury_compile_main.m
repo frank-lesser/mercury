@@ -54,6 +54,7 @@
 :- import_module hlds.hlds_module.
 :- import_module hlds.make_hlds.
 :- import_module hlds.passes_aux.
+:- import_module libs.check_libgrades.
 :- import_module libs.compiler_util.
 :- import_module libs.compute_grade.
 :- import_module libs.file_util.
@@ -962,9 +963,18 @@ process_compiler_arg(Globals, OpModeArgs, DetectedGradeFlags, OptionVariables,
 
 process_compiler_arg_build(OpModeArgs, FileOrModule, OptionArgs, Globals, _,
         Succeeded, _DummyInput, {Modules, ExtraObjFiles}, !IO) :-
-    do_process_compiler_arg(Globals, OpModeArgs, OptionArgs, FileOrModule,
-        Modules, ExtraObjFiles, !IO),
-    Succeeded = yes.
+    maybe_check_libraries_are_installed(Globals, LibgradeCheckSucceeded, !IO),
+    (
+        LibgradeCheckSucceeded = yes,
+        do_process_compiler_arg(Globals, OpModeArgs, OptionArgs, FileOrModule,
+            Modules, ExtraObjFiles, !IO),
+        Succeeded = yes
+    ;
+        LibgradeCheckSucceeded = no,
+        Modules = [],
+        ExtraObjFiles = [],
+        Succeeded = no
+    ).
 
 :- func version_numbers_return_timestamp(bool) = maybe_return_timestamp.
 
@@ -2214,7 +2224,7 @@ prepare_for_intermodule_analysis(Globals, Verbose, Stats, !HLDS, !IO) :-
     globals.lookup_accumulating_option(Globals, local_module_id,
         LocalModulesList),
     SymNames = list.map(string_to_sym_name, LocalModulesList),
-    LocalModuleNames = set.from_list(SymNames),
+    LocalModuleNames = set.list_to_set(SymNames),
 
     module_info_get_analysis_info(!.HLDS, AnalysisInfo0),
     prepare_intermodule_analysis(Globals, ModuleNames, LocalModuleNames,

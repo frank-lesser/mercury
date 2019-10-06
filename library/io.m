@@ -178,6 +178,9 @@
     %
     % See the documentation for `string.line' for the definition of a line.
     %
+    % WARNING: the returned string is NOT guaranteed to be valid UTF-8
+    % or UTF-16.
+    %
 :- pred read_line_as_string(io.result(string)::out, io::di, io::uo) is det.
 :- pred read_line_as_string(io.text_input_stream::in, io.result(string)::out,
     io::di, io::uo) is det.
@@ -197,6 +200,9 @@
     % Returns an error if the file contains a null character, because
     % null characters are not allowed in Mercury strings.
     %
+    % WARNING: the returned string is NOT guaranteed to be valid UTF-8
+    % or UTF-16.
+    %
 :- pred read_file_as_string(io.maybe_partial_res(string)::out,
     io::di, io::uo) is det.
 :- pred read_file_as_string(io.text_input_stream::in,
@@ -204,6 +210,9 @@
 
     % The same as read_file_as_string, but returns not only a string,
     % but also the number of code units in that string.
+    %
+    % WARNING: the returned string is NOT guaranteed to be valid UTF-8
+    % or UTF-16.
     %
 :- pred read_file_as_string_and_num_code_units(
     io.maybe_partial_res_2(string, int)::out, io::di, io::uo) is det.
@@ -3592,21 +3601,27 @@ read_binary_file_as_bitmap(Stream, Result, !IO) :-
     % size of 4k minus a bit (to give malloc some room).
     binary_input_stream_file_size(Stream, FileSize, !IO),
     ( if FileSize >= 0 then
+        binary_input_stream_offset(Stream, CurrentOffset, !IO),
+        RemainingSize = FileSize - CurrentOffset,
         some [!BM] (
-            !:BM = bitmap.init(FileSize * bits_per_byte),
-            read_bitmap(Stream, 0, FileSize,
-                !BM, BytesRead, ReadResult, !IO),
-            (
-                ReadResult = ok,
-                ( if BytesRead = FileSize then
-                    Result = ok(!.BM)
-                else
-                    Result = error(io_error(
+            !:BM = bitmap.init(RemainingSize * bits_per_byte),
+            ( if RemainingSize = 0 then
+                Result = ok(!.BM)
+            else
+                read_bitmap(Stream, 0, RemainingSize, !BM, BytesRead,
+                    ReadResult, !IO),
+                (
+                    ReadResult = ok,
+                    ( if BytesRead = RemainingSize then
+                        Result = ok(!.BM)
+                    else
+                        Result = error(io_error(
                         "io.read_binary_file_as_bitmap: incorrect file size"))
+                    )
+                ;
+                    ReadResult = error(Msg),
+                    Result = error(Msg)
                 )
-            ;
-                ReadResult = error(Msg),
-                Result = error(Msg)
             )
         )
     else
@@ -5059,14 +5074,13 @@ file_id(FileName, Result, !IO) :-
 % For C backends, it is a C array of C chars.
 % For other backends, it is a Mercury array of Mercury chars.
 
-:- type buffer.
-:- pragma foreign_type(c, buffer, "char *", [can_pass_as_mercury_type]).
-
     % XXX It would be better to use a char_array type rather than array(char).
     % This is because on the Java and IL backends indexing into an array whose
     % element type is known statically requires less overhead.
 :- type buffer
     --->    buffer(array(char)).
+
+:- pragma foreign_type(c, buffer, "char *", [can_pass_as_mercury_type]).
 
     % XXX Extend the workaround for no `ui' modes in array.m.
 :- inst uniq_buffer for buffer/0
@@ -8989,6 +9003,7 @@ putback_char(input_stream(Stream), Character, !IO) :-
         char        buf[5];
         ML_ssize_t  len;
         len = MR_utf8_encode(buf, Character);
+        // XXX ILSEQ Error if len==0
         for (; len > 0; len--) {
             if (MR_UNGETCH(*mf, buf[len - 1]) == EOF) {
                 Ok = MR_FALSE;
@@ -9560,6 +9575,7 @@ write_char(output_stream(Stream), Character, !IO) :-
         size_t  len;
         size_t  i;
         len = MR_utf8_encode(buf, Character);
+        // XXX ILSEQ Error if len==0
         for (i = 0; i < len; i++) {
             if (MR_PUTCH(*Stream, buf[i]) < 0) {
                 Error = errno;
@@ -12030,7 +12046,7 @@ restore_output_stream(_DummyPred, Stream, ok, !IO) :-
     % StreamId is a unique integer identifying the open.
     % StreamId and Stream are valid only if Error indicates an error occurred.
     %
-:- pred do_open_binary(string::in, string::in, int::out, stream::out,
+:- pred do_open_text(string::in, string::in, int::out, stream::out,
     system_error::out, io::di, io::uo) is det.
 
 :- pragma foreign_proc("C",
@@ -12119,7 +12135,7 @@ restore_output_stream(_DummyPred, Stream, ok, !IO) :-
 
 %---------------------%
 
-:- pred do_open_text(string::in, string::in, int::out, stream::out,
+:- pred do_open_binary(string::in, string::in, int::out, stream::out,
     system_error::out, io::di, io::uo) is det.
 
 :- pragma foreign_proc("C",

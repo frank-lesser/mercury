@@ -267,10 +267,6 @@
             % declarations, since the missing (or invalid) declaration
             % could have been a combined predmode declaration.
 
-    ;       marker_obsolete
-            % Requests warnings if this predicate is used.
-            % Used for pragma(obsolete).
-
     ;       marker_no_detism_warning
             % Requests no warnings about the determinism of this predicate
             % being too loose.
@@ -476,6 +472,9 @@
             % context to allow polymorphism.m to correctly set up the
             % extra type_info and typeclass_info arguments.
 
+    ;       origin_class_method
+            % The predicate is a class method implementation.
+
     ;       origin_transformed(pred_transformation, pred_origin, pred_id)
             % The predicate is a transformed version of another predicate,
             % whose origin and identity are given by the second and third
@@ -510,19 +509,17 @@
             % says whether the predicate is an init, pre_init, get, set,
             % lock, or unlock predicate on that mutable.
 
+    ;       origin_initialise
+            % The predicate implements a standalone initialise declaration
+            % (standalone means that it is NOT created to initialise
+            % a mutable).
+
+    ;       origin_finalise
+            % The predicate implements a standalone finalise declaration.
+
     ;       origin_user(sym_name).
             % The predicate is a normal user-written predicate;
             % the string is its name.
-
-:- type tabling_aux_pred_kind
-    --->    tabling_aux_pred_stats
-    ;       tabling_aux_pred_reset.
-
-:- type solver_type_pred_kind
-    --->    solver_type_to_ground_pred
-    ;       solver_type_to_any_pred
-    ;       solver_type_from_ground_pred
-    ;       solver_type_from_any_pred.
 
 :- type need_to_requantify
     --->    need_to_requantify
@@ -665,6 +662,8 @@
     map(prog_var, string)::out) is det.
 :- pred pred_info_get_assertions(pred_info::in,
     set(assert_id)::out) is det.
+:- pred pred_info_get_obsolete_in_favour_of(pred_info::in,
+    maybe(list(sym_name_and_arity))::out) is det.
 :- pred pred_info_get_instance_method_arg_types(pred_info::in,
     list(mer_type)::out) is det.
 :- pred pred_info_get_clauses_info(pred_info::in,
@@ -715,6 +714,9 @@
 :- pred pred_info_set_var_name_remap(map(prog_var, string)::in,
     pred_info::in, pred_info::out) is det.
 :- pred pred_info_set_assertions(set(assert_id)::in,
+    pred_info::in, pred_info::out) is det.
+:- pred pred_info_set_obsolete_in_favour_of(
+    maybe(list(sym_name_and_arity))::in,
     pred_info::in, pred_info::out) is det.
 :- pred pred_info_set_instance_method_arg_types(list(mer_type)::in,
     pred_info::in, pred_info::out) is det.
@@ -932,6 +934,39 @@ calls_are_fully_qualified(Markers) =
 
 %-----------------------------------------------------------------------------%
 
+% Access stats for the pred_info structure, derived on 2014 dec 13:
+%
+%  i      read      same      diff   same%
+%  1 124287827    348040  31892426   1.08%    procedures
+%  2  72037616     96336   1082541   8.17%    status
+%  3  43651895         0         0            module_name
+%  4  32003757         0       795   0.00%    name
+%  5  25261836         0         0            orig_arity
+%  6  24876447    905599   1098352  45.19%    markers
+%  7  22294552     19444  12496762   0.16%    clauses_info
+%  8  20415273         0         0            arg_types
+%  9  15356498       727        68  91.45%    is_pred_or_func
+% 10  12075408    382680     89618  81.03%    origin
+% 11  11783136   9736724    752983  92.82%    typevarset
+% 12  11128685   4600914   1642568  73.69%    three fields: decl_typevarset,
+%                                             exist_quant_vars and arg_types
+% 13   7871038         0   2700797   0.00%    class_context
+% 14   6629313    100630   1054197   8.71%    goal_type
+% 15   5892199      6544      6726  49.31%    var_name_remap
+% 16   3820195     85054         0 100.00%    tvar_kind_map
+% 17   2752537    404771     23921  94.42%    constraint_map
+% 18   2591016    425209      3483  99.19%    constraint_proof_map
+% 19   1667832         0         0            context
+% 20   1374911         0         0            exist_quant_vars
+% 21    476703    276426    152903  64.39%    external_type_params
+% 22    285538    428650         4 100.00%    unproven_body_constraints
+% 23     22563         0        80   0.00%    existq_tvar_binding
+% 24      3834         0      3797   0.00%    assertions
+% 25        10         0         0            attributes
+% 26         0         0     19439   0.00%    instance_method_arg_types
+% 27         0         0         0            arg_modes_maps
+% 28         0         0         0            inst_graph_info
+
     % The information specific to a predicate, as opposed to a procedure.
     % (Functions count as predicates.)
     %
@@ -1073,6 +1108,15 @@ calls_are_fully_qualified(Markers) =
                 % List of assertions which mention this predicate.
                 psi_assertions                  :: set(assert_id),
 
+                % If this predicate is marked as obsolete, this will be a
+                % "yes(_)" wrapped around a list of the predicate names that
+                % the compiler should suggest as possible replacements.
+                % (Note that the list of possible replacements may be empty.)
+                % In the usual case where this predicate is NOT marked
+                % as obsolete, this will be "no".
+                psi_obsolete_in_favour_of       :: maybe(list(
+                                                    sym_name_and_arity)),
+
                 % If this predicate is a class method implementation, this
                 % list records the argument types before substituting the type
                 % variables for the instance.
@@ -1099,12 +1143,13 @@ pred_info_init(ModuleName, PredSymName, Arity, PredOrFunc, Context,
     ArgModesMaps = [],
     % argument VarNameRemap
     set.init(Assertions),
+    ObsoleteInFavourOf = maybe.no,
     InstanceMethodArgTypes = [],
     PredSubInfo = pred_sub_info(Context, CurUserDecl, GoalType,
         Kinds, ExistQVarBindings, HeadTypeParams,
         ClassProofs, ClassConstraintMap,
         UnprovenBodyConstraints, InstGraphInfo, ArgModesMaps,
-        VarNameRemap, Assertions, InstanceMethodArgTypes),
+        VarNameRemap, Assertions, ObsoleteInFavourOf, InstanceMethodArgTypes),
 
     sym_name_get_module_name_default(PredSymName, ModuleName, PredModuleName),
     PredName = unqualify_name(PredSymName),
@@ -1142,13 +1187,14 @@ pred_info_create(ModuleName, PredSymName, PredOrFunc, Context, Origin, Status,
     ArgModesMaps = [],
     % argument VarNameRemap
     % argument Assertions
+    ObsoleteInFavourOf = maybe.no,
     InstanceMethodArgTypes = [],
 
     PredSubInfo = pred_sub_info(Context, CurUserDecl, GoalType,
         Kinds, ExistQVarBindings, HeadTypeParams,
         ClassProofs, ClassConstraintMap,
         UnprovenBodyConstraints, InstGraphInfo, ArgModesMaps,
-        VarNameRemap, Assertions, InstanceMethodArgTypes),
+        VarNameRemap, Assertions, ObsoleteInFavourOf, InstanceMethodArgTypes),
 
     proc_info_get_varset(ProcInfo, VarSet),
     proc_info_get_vartypes(ProcInfo, VarTypes),
@@ -1187,7 +1233,7 @@ define_new_pred(Origin, Goal0, Goal, ArgVars0, ExtraTypeInfos, InstMap0,
         VarNameRemap, ModuleInfo0, ModuleInfo, PredProcId) :-
     Goal0 = hlds_goal(_GoalExpr, GoalInfo),
     InstMapDelta = goal_info_get_instmap_delta(GoalInfo),
-    instmap.apply_instmap_delta(InstMap0, InstMapDelta, InstMap),
+    apply_instmap_delta(InstMapDelta, InstMap0, InstMap),
 
     % XXX The set of existentially quantified type variables
     % here might not be correct.
@@ -1335,6 +1381,8 @@ pred_info_get_var_name_remap(!.PI, X) :-
     X = !.PI ^ pi_pred_sub_info ^ psi_var_name_remap.
 pred_info_get_assertions(!.PI, X) :-
     X = !.PI ^ pi_pred_sub_info ^ psi_assertions.
+pred_info_get_obsolete_in_favour_of(!.PI, X) :-
+    X = !.PI ^ pi_pred_sub_info ^ psi_obsolete_in_favour_of.
 pred_info_get_instance_method_arg_types(!.PI, X) :-
     X = !.PI ^ pi_pred_sub_info ^ psi_instance_method_arg_types.
 pred_info_get_clauses_info(!.PI, X) :-
@@ -1434,6 +1482,8 @@ pred_info_set_var_name_remap(X, !PI) :-
     ).
 pred_info_set_assertions(X, !PI) :-
     !PI ^ pi_pred_sub_info ^ psi_assertions := X.
+pred_info_set_obsolete_in_favour_of(X, !PI) :-
+    !PI ^ pi_pred_sub_info ^ psi_obsolete_in_favour_of := X.
 pred_info_set_instance_method_arg_types(X, !PI) :-
     !PI ^ pi_pred_sub_info ^ psi_instance_method_arg_types := X.
 pred_info_set_clauses_info(X, !PI) :-
@@ -1441,46 +1491,9 @@ pred_info_set_clauses_info(X, !PI) :-
 pred_info_set_proc_table(X, !PI) :-
     !PI ^ pi_proc_table := X.
 
-% Access stats for the pred_info structure, derived on 2014 dec 13:
-%
-%  i      read      same      diff   same%
-%  0  43651895         0         0            module_name
-%  1  32003757         0       795   0.00%    name
-%  2  25261836         0         0            orig_arity
-%  3  15356498       727        68  91.45%    is_pred_or_func
-%  4   1667832         0         0            context
-%  5  12075408    382680     89618  81.03%    origin
-%  6  72037616     96336   1082541   8.17%    status
-%  7   6629313    100630   1054197   8.71%    goal_type
-%  8  24876447    905599   1098352  45.19%    markers
-%  9        10         0         0            attributes
-% 10  20415273         0         0            arg_types
-% 11  11783136   9736724    752983  92.82%    typevarset
-% 12   3820195     85054         0 100.00%    tvar_kind_map
-% 13   1374911         0         0            exist_quant_vars
-% 14     22563         0        80   0.00%    existq_tvar_binding
-% 15    476703    276426    152903  64.39%    external_type_params
-% 16   7871038         0   2700797   0.00%    class_context
-% 17   2591016    425209      3483  99.19%    constraint_proof_map
-% 18   2752537    404771     23921  94.42%    constraint_map
-% 19    285538    428650         4 100.00%    unproven_body_constraints
-% 20         0         0         0            inst_graph_info
-% 21         0         0         0            arg_modes_maps
-% 22   5892199      6544      6726  49.31%    var_name_remap
-% 23      3834         0      3797   0.00%    assertions
-% 24         0         0     19439   0.00%    instance_method_arg_types
-% 25  22294552     19444  12496762   0.16%    clauses_info
-% 26 124287827    348040  31892426   1.08%    procedures
-% 27  11128685   4600914   1642568  73.69%    three fields: decl_typevarset,
-%                                             exist_quant_vars and arg_types
-
 %-----------------------------------------------------------------------------%
 
 % The non-trivial access predicates.
-
-pred_info_all_procids(PredInfo) = ProcIds :-
-    pred_info_get_proc_table(PredInfo, ProcTable),
-    map.keys(ProcTable, ProcIds).
 
 pred_info_procids(PredInfo) = ValidProcIds :-
     AllProcIds = pred_info_all_procids(PredInfo),
@@ -1491,6 +1504,10 @@ pred_info_procids(PredInfo) = ValidProcIds :-
             proc_info_is_valid_mode(ProcInfo)
         ),
     list.filter(IsValid, AllProcIds, ValidProcIds).
+
+pred_info_all_procids(PredInfo) = ProcIds :-
+    pred_info_get_proc_table(PredInfo, ProcTable),
+    map.keys(ProcTable, ProcIds).
 
 pred_info_non_imported_procids(PredInfo) = ProcIds :-
     pred_info_get_status(PredInfo, pred_status(OldImportStatus)),
@@ -1582,6 +1599,13 @@ pred_info_set_arg_types(X, Y, Z, !PredInfo) :-
     !PredInfo ^ pi_decl_typevarset := X,
     !PredInfo ^ pi_exist_quant_tvars := Y,
     !PredInfo ^ pi_arg_types := Z.
+
+pred_info_get_univ_quant_tvars(PredInfo, UnivQVars) :-
+    pred_info_get_arg_types(PredInfo, ArgTypes),
+    type_vars_list(ArgTypes, ArgTypeVars0),
+    list.sort_and_remove_dups(ArgTypeVars0, ArgTypeVars),
+    pred_info_get_exist_quant_tvars(PredInfo, ExistQVars),
+    list.delete_elems(ArgTypeVars, ExistQVars, UnivQVars).
 
 pred_info_proc_info(PredInfo, ProcId, ProcInfo) :-
     pred_info_get_proc_table(PredInfo, ProcTable),
@@ -1758,13 +1782,6 @@ pred_info_infer_modes(PredInfo) :-
 purity_to_markers(purity_pure, []).
 purity_to_markers(purity_semipure, [marker_is_semipure]).
 purity_to_markers(purity_impure, [marker_is_impure]).
-
-pred_info_get_univ_quant_tvars(PredInfo, UnivQVars) :-
-    pred_info_get_arg_types(PredInfo, ArgTypes),
-    type_vars_list(ArgTypes, ArgTypeVars0),
-    list.sort_and_remove_dups(ArgTypeVars0, ArgTypeVars),
-    pred_info_get_exist_quant_tvars(PredInfo, ExistQVars),
-    list.delete_elems(ArgTypeVars, ExistQVars, UnivQVars).
 
 %-----------------------------------------------------------------------------%
 
@@ -2380,20 +2397,18 @@ marker_list_to_markers(Markers, MarkerSet) :-
 
 :- pred proc_info_head_modes_constraint(proc_info::in, mode_constraint::out)
     is det.
+:- pred proc_info_declared_argmodes(proc_info::in, list(mer_mode)::out) is det.
 
     % See also proc_info_interface_code_model in code_model.m.
     %
 :- pred proc_info_interface_determinism(proc_info::in, determinism::out)
     is det.
 
-    % proc_info_never_succeeds(ProcInfo, Result):
-    %
     % Return Result = yes if the procedure is known to never succeed
     % according to the declared determinism.
     %
 :- pred proc_info_never_succeeds(proc_info::in, bool::out) is det.
 
-:- pred proc_info_declared_argmodes(proc_info::in, list(mer_mode)::out) is det.
 :- pred proc_info_arglives(proc_info::in, module_info::in,
     list(is_live)::out) is det.
 :- pred proc_info_arg_info(proc_info::in, list(arg_info)::out) is det.
@@ -3167,10 +3182,10 @@ proc_info_get_has_user_event(PI, X) :-
     X = PI ^ proc_sub_info ^ psi_proc_has_user_event.
 proc_info_get_has_tail_rec_call(PI, X) :-
     X = PI ^ proc_sub_info ^ psi_proc_has_tail_rec_call.
-proc_info_get_maybe_require_tailrec_info(PI, X) :-
-    X = PI ^ proc_sub_info ^ psi_maybe_require_tailrec.
 proc_info_get_oisu_kind_fors(PI, X) :-
     X = PI ^ proc_sub_info ^ psi_oisu_kind_fors.
+proc_info_get_maybe_require_tailrec_info(PI, X) :-
+    X = PI ^ proc_sub_info ^ psi_maybe_require_tailrec.
 proc_info_get_reg_r_headvars(PI, X) :-
     X = PI ^ proc_sub_info ^ psi_reg_r_headvars.
 proc_info_get_maybe_arg_info(PI, X) :-
@@ -3290,6 +3305,54 @@ proc_info_set_trailing_info(X, !PI) :-
 proc_info_set_mm_tabling_info(X, !PI) :-
     !PI ^ proc_sub_info ^ psi_mm_tabling_info := X.
 
+proc_info_get_structure_sharing(ProcInfo, MaybeSharing) :-
+    MaybeSharing = ProcInfo ^ proc_sub_info ^ psi_structure_sharing
+        ^ maybe_sharing.
+
+proc_info_set_structure_sharing(Sharing, !ProcInfo) :-
+    !ProcInfo ^ proc_sub_info ^ psi_structure_sharing ^ maybe_sharing :=
+        yes(Sharing).
+
+proc_info_get_imported_structure_sharing(ProcInfo, HeadVars, Types, Sharing) :-
+    MaybeImportedSharing = ProcInfo ^ proc_sub_info ^ psi_structure_sharing
+        ^ maybe_imported_sharing,
+    MaybeImportedSharing = yes(ImportedSharing),
+    ImportedSharing = imported_sharing(HeadVars, Types, Sharing).
+
+proc_info_set_imported_structure_sharing(HeadVars, Types, Sharing,
+        !ProcInfo) :-
+    ImportedSharing = imported_sharing(HeadVars, Types, Sharing),
+    MaybeImportedSharing = yes(ImportedSharing),
+    !ProcInfo ^ proc_sub_info ^ psi_structure_sharing
+        ^ maybe_imported_sharing := MaybeImportedSharing.
+
+proc_info_reset_imported_structure_sharing(!ProcInfo) :-
+    !ProcInfo ^ proc_sub_info ^ psi_structure_sharing
+        ^ maybe_imported_sharing := no.
+
+proc_info_get_structure_reuse(ProcInfo, MaybeReuse) :-
+    MaybeReuse = ProcInfo ^ proc_sub_info ^ psi_structure_reuse ^ maybe_reuse.
+
+proc_info_set_structure_reuse(Reuse, !ProcInfo) :-
+    !ProcInfo ^ proc_sub_info ^ psi_structure_reuse ^ maybe_reuse
+        := yes(Reuse).
+
+proc_info_get_imported_structure_reuse(ProcInfo, HeadVars, Types, Reuse) :-
+    MaybeImportedReuse = ProcInfo ^ proc_sub_info ^ psi_structure_reuse
+        ^ maybe_imported_reuse,
+    MaybeImportedReuse = yes(ImportedReuse),
+    ImportedReuse = imported_reuse(HeadVars, Types, Reuse).
+
+proc_info_set_imported_structure_reuse(HeadVars, Types, Reuse, !ProcInfo) :-
+    ImportedReuse = imported_reuse(HeadVars, Types, Reuse),
+    MaybeImportedReuse = yes(ImportedReuse),
+    !ProcInfo ^ proc_sub_info ^ psi_structure_reuse ^ maybe_imported_reuse :=
+        MaybeImportedReuse.
+
+proc_info_reset_imported_structure_reuse(!ProcInfo) :-
+    !ProcInfo ^ proc_sub_info ^ psi_structure_reuse
+        ^ maybe_imported_reuse := no.
+
 proc_info_head_modes_constraint(ProcInfo, HeadModesConstraint) :-
     MaybeHeadModesConstraint = ProcInfo ^ proc_maybe_head_modes_constr,
     (
@@ -3298,13 +3361,6 @@ proc_info_head_modes_constraint(ProcInfo, HeadModesConstraint) :-
         MaybeHeadModesConstraint = no,
         unexpected($pred, "no constraint")
     ).
-
-proc_info_get_initial_instmap(ProcInfo, ModuleInfo, InstMap) :-
-    proc_info_get_headvars(ProcInfo, HeadVars),
-    proc_info_get_argmodes(ProcInfo, ArgModes),
-    mode_list_get_initial_insts(ModuleInfo, ArgModes, InitialInsts),
-    assoc_list.from_corresponding_lists(HeadVars, InitialInsts, InstAL),
-    InstMap = instmap_from_assoc_list(InstAL).
 
 proc_info_declared_argmodes(ProcInfo, ArgModes) :-
     proc_info_get_maybe_declared_argmodes(ProcInfo, MaybeArgModes),
@@ -3358,10 +3414,6 @@ proc_info_arglives(ProcInfo, ModuleInfo, ArgLives) :-
         get_arg_lives(ModuleInfo, Modes, ArgLives)
     ).
 
-proc_info_is_valid_mode(ProcInfo) :-
-    proc_info_get_mode_errors(ProcInfo, ModeErrors),
-    ModeErrors = [].
-
 proc_info_arg_info(ProcInfo, ArgInfo) :-
     proc_info_get_maybe_arg_info(ProcInfo, MaybeArgInfo0),
     (
@@ -3371,53 +3423,12 @@ proc_info_arg_info(ProcInfo, ArgInfo) :-
         unexpected($pred, "arg_info not set")
     ).
 
-proc_info_get_structure_sharing(ProcInfo, MaybeSharing) :-
-    MaybeSharing = ProcInfo ^ proc_sub_info ^ psi_structure_sharing
-        ^ maybe_sharing.
-
-proc_info_set_structure_sharing(Sharing, !ProcInfo) :-
-    !ProcInfo ^ proc_sub_info ^ psi_structure_sharing ^ maybe_sharing :=
-        yes(Sharing).
-
-proc_info_get_imported_structure_sharing(ProcInfo, HeadVars, Types, Sharing) :-
-    MaybeImportedSharing = ProcInfo ^ proc_sub_info ^ psi_structure_sharing
-        ^ maybe_imported_sharing,
-    MaybeImportedSharing = yes(ImportedSharing),
-    ImportedSharing = imported_sharing(HeadVars, Types, Sharing).
-
-proc_info_set_imported_structure_sharing(HeadVars, Types, Sharing,
-        !ProcInfo) :-
-    ImportedSharing = imported_sharing(HeadVars, Types, Sharing),
-    MaybeImportedSharing = yes(ImportedSharing),
-    !ProcInfo ^ proc_sub_info ^ psi_structure_sharing
-        ^ maybe_imported_sharing := MaybeImportedSharing.
-
-proc_info_reset_imported_structure_sharing(!ProcInfo) :-
-    !ProcInfo ^ proc_sub_info ^ psi_structure_sharing
-        ^ maybe_imported_sharing := no.
-
-proc_info_get_structure_reuse(ProcInfo, MaybeReuse) :-
-    MaybeReuse = ProcInfo ^ proc_sub_info ^ psi_structure_reuse ^ maybe_reuse.
-
-proc_info_set_structure_reuse(Reuse, !ProcInfo) :-
-    !ProcInfo ^ proc_sub_info ^ psi_structure_reuse ^ maybe_reuse
-        := yes(Reuse).
-
-proc_info_get_imported_structure_reuse(ProcInfo, HeadVars, Types, Reuse) :-
-    MaybeImportedReuse = ProcInfo ^ proc_sub_info ^ psi_structure_reuse
-        ^ maybe_imported_reuse,
-    MaybeImportedReuse = yes(ImportedReuse),
-    ImportedReuse = imported_reuse(HeadVars, Types, Reuse).
-
-proc_info_set_imported_structure_reuse(HeadVars, Types, Reuse, !ProcInfo) :-
-    ImportedReuse = imported_reuse(HeadVars, Types, Reuse),
-    MaybeImportedReuse = yes(ImportedReuse),
-    !ProcInfo ^ proc_sub_info ^ psi_structure_reuse ^ maybe_imported_reuse :=
-        MaybeImportedReuse.
-
-proc_info_reset_imported_structure_reuse(!ProcInfo) :-
-    !ProcInfo ^ proc_sub_info ^ psi_structure_reuse
-        ^ maybe_imported_reuse := no.
+proc_info_get_initial_instmap(ProcInfo, ModuleInfo, InstMap) :-
+    proc_info_get_headvars(ProcInfo, HeadVars),
+    proc_info_get_argmodes(ProcInfo, ArgModes),
+    mode_list_get_initial_insts(ModuleInfo, ArgModes, InitialInsts),
+    assoc_list.from_corresponding_lists(HeadVars, InitialInsts, InstAL),
+    InstMap = instmap_from_assoc_list(InstAL).
 
 proc_info_ensure_unique_names(!ProcInfo) :-
     proc_info_get_vartypes(!.ProcInfo, VarTypes),
@@ -3642,6 +3653,10 @@ find_lowest_unused_proc_id_2(TrialProcId, ProcTable, CloneProcId) :-
     else
         CloneProcId = TrialProcId
     ).
+
+proc_info_is_valid_mode(ProcInfo) :-
+    proc_info_get_mode_errors(ProcInfo, ModeErrors),
+    ModeErrors = [].
 
 ensure_all_headvars_are_named(!ProcInfo) :-
     proc_info_get_headvars(!.ProcInfo, HeadVars),

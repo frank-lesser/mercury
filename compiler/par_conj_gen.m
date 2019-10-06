@@ -207,9 +207,10 @@ generate_par_conj(Conjuncts, GoalInfo, CodeModel, Code, !CI, !CLD) :-
     set_of_var.to_sorted_list(Nonlocals, Variables),
     get_instmap(!.CLD, InitialInstMap),
     InstMapDelta = goal_info_get_instmap_delta(GoalInfo),
-    instmap.apply_instmap_delta(InitialInstMap, InstMapDelta, Final),
+    apply_instmap_delta(InstMapDelta, InitialInstMap, FinalInstMap),
     get_module_info(!.CI, ModuleInfo),
-    find_outputs(Variables, InitialInstMap, Final, ModuleInfo, [], Outputs),
+    find_outputs(Variables, InitialInstMap, FinalInstMap, ModuleInfo,
+        [], Outputs),
 
     % Reserve a contiguous block on the stack to hold the synchronisation term.
     Contents = list.duplicate(STSize, slot_sync_term),
@@ -356,7 +357,7 @@ MR_threadscope_post_end_par_conj(&MR_sv(%d));
 ",
     Components = [foreign_proc_raw_code(cannot_branch_away,
         proc_does_not_affect_liveness,
-        live_lvals_info(set([SyncTermBaseSlotLval])),
+        live_lvals_info(set.make_singleton_set(SyncTermBaseSlotLval)),
         string.format(CodeTemplate, [i(SyncTermBaseSlot)]))],
     Instr = foreign_proc_code([], Components, proc_will_not_call_mercury,
         no, no, no, no, no, yes, proc_may_duplicate).
@@ -612,8 +613,8 @@ replace_stack_vars_by_parent_sv_lval(Lval0, Lval, !Acc) :-
 
 instr_list_max_stack_ref(Instrs, MaxRef) :-
     instrs_rvals_and_lvals(cord.list(Instrs), RVals, LVals0),
-    LValsInRvalsLists = map(lvals_in_rval, to_sorted_list(RVals)),
-    LValsSets = map(set, LValsInRvalsLists),
+    LValsInRvalsLists = list.map(lvals_in_rval, set.to_sorted_list(RVals)),
+    LValsSets = list.map(set.list_to_set, LValsInRvalsLists),
     LVals = set.union_list(LValsSets) `set.union` LVals0,
     set.fold(max_stack_ref_acc, LVals, 0, MaxRef).
 

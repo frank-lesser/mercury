@@ -57,6 +57,9 @@ prolog.m
 psqueue.m
 queue.m
 random.m
+random.sfc16.m
+random.sfc32.m
+random.sfc64.m
 ranges.m
 rational.m
 rbtree.m

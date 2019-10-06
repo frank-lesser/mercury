@@ -2150,16 +2150,16 @@ module_visibilities_allow_direct_arg(TypeStatus, ArgCond) = AllowDirectArg :-
 is_foreign_type_body_for_target(ForeignType, Target, Assertions) :-
     (
         Target = target_c,
-        ForeignType ^ c = yes(foreign_type_lang_data(_, _, Assertions))
+        ForeignType ^ c = yes(type_details_foreign(_, _, Assertions))
     ;
         Target = target_java,
-        ForeignType ^ java = yes(foreign_type_lang_data(_, _, Assertions))
+        ForeignType ^ java = yes(type_details_foreign(_, _, Assertions))
     ;
         Target = target_csharp,
-        ForeignType ^ csharp = yes(foreign_type_lang_data(_, _, Assertions))
+        ForeignType ^ csharp = yes(type_details_foreign(_, _, Assertions))
     ;
         Target = target_erlang,
-        ForeignType ^ erlang = yes(foreign_type_lang_data(_, _, Assertions))
+        ForeignType ^ erlang = yes(type_details_foreign(_, _, Assertions))
     ).
 
 %---------------------------------------------------------------------------%
@@ -3153,7 +3153,7 @@ setup_decide_du_params(Globals, DirectArgMap, Params) :-
     % Compute ArgPackBits.
     globals.lookup_int_option(Globals, arg_pack_bits, ArgPackBits),
 
-    % Compute AllowDoubleWordInts, AllowPackingInts and AllocPackingDummies.
+    % Compute AllowDoubleWordInts, AllowPackingInts and AllowPackingDummies.
     globals.lookup_bool_option(Globals, allow_double_word_ints,
         AllowDoubleWordInts),
     globals.lookup_bool_option(Globals, allow_packing_ints,
@@ -3170,19 +3170,24 @@ setup_decide_du_params(Globals, DirectArgMap, Params) :-
         AllowPackingMiniTypes),
 
     % Compute MaybeDirectArgs.
+    globals.lookup_bool_option(Globals, highlevel_data, HighLevelData),
     (
         Target = target_c,
+        globals.lookup_bool_option(Globals, allow_direct_args,
+            AllowDirectArgs),
+        % We cannot use direct arg functors in term size grades.
         globals.lookup_bool_option(Globals, record_term_sizes_as_words,
             TermSizeWords),
         globals.lookup_bool_option(Globals, record_term_sizes_as_cells,
             TermSizeCells),
         ( if
+            AllowDirectArgs = yes,
+            HighLevelData = no,
             TermSizeWords = no,
             TermSizeCells = no
         then
             MaybeDirectArgs = direct_args_enabled
         else
-            % We cannot use direct arg functors in term size grades.
             MaybeDirectArgs = direct_args_disabled
         )
     ;
@@ -3194,7 +3199,6 @@ setup_decide_du_params(Globals, DirectArgMap, Params) :-
         MaybeDirectArgs = direct_args_disabled
     ),
 
-    globals.lookup_bool_option(Globals, highlevel_data, HighLevelData),
     (
         HighLevelData = no
     ;

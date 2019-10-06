@@ -50,6 +50,7 @@
 :- import_module hlds.hlds_class.
 :- import_module hlds.hlds_goal.
 :- import_module hlds.hlds_rtti.
+:- import_module hlds.instmap.
 :- import_module hlds.make_hlds.add_clause.
 :- import_module hlds.make_hlds.make_hlds_warn.
 :- import_module hlds.make_hlds.state_var.
@@ -279,7 +280,7 @@ module_add_class_interface(ClassName, ClassParamVars, TypeClassStatus,
     ItemNumber = -1,
     list.foldl3(
         add_class_pred_or_func_decl(ClassName, ClassParamVars,
-            ItemNumber, MaybeItemMercuryStatus, PredStatus, NeedQual),
+            ItemNumber, PredStatus, NeedQual),
         ClassPredOrFuncInfos, !PredProcIds, !ModuleInfo, !Specs),
 
     % Add the mode declarations. Since we have already added the
@@ -308,41 +309,33 @@ classify_class_decls([Decl | Decls], !:PredOrFuncInfos, !:ModeInfos) :-
     ).
 
 :- pred add_class_pred_or_func_decl(sym_name::in, list(tvar)::in,
-    int::in, maybe(item_mercury_status)::in, pred_status::in,
-    need_qualifier::in, class_pred_or_func_info::in,
+    int::in, pred_status::in, need_qualifier::in, class_pred_or_func_info::in,
     list(pred_proc_id)::in, list(pred_proc_id)::out,
     module_info::in, module_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
 add_class_pred_or_func_decl(ClassName, ClassParamVars, ItemNumber,
-        MaybeItemMercuryStatus, PredStatus, NeedQual,
+        PredStatus, NeedQual,
         PredOrFuncInfo, !PredProcIds, !ModuleInfo, !Specs) :-
     PredOrFuncInfo = class_pred_or_func_info(PredName, PredOrFunc,
-        TypesAndModes, WithType, WithInst, MaybeDetism,
+        ArgTypesAndModes, WithType, WithInst, MaybeDetism,
         TypeVarSet, InstVarSet, ExistQVars, Purity, Constraints0, Context),
-    % Any WithType and WithInst annotations should have been expanded
-    % and the type and/or inst put into TypesAndModes by equiv_type.m.
-    expect(unify(WithType, no), $pred, "WithType != no"),
-    expect(unify(WithInst, no), $pred, "WithInst != no"),
-    % XXX This setting of Origin looks suspicious.
-    Origin = origin_user(PredName),
     % XXX kind inference:
     % We set the kinds to `star' at the moment. This will be different
     % when we have a kind system.
-    prog_type.var_list_to_type_list(map.init,
-        ClassParamVars, ClassParamTypes),
+    var_list_to_type_list(map.init, ClassParamVars, ClassParamTypes),
     ImplicitConstraint = constraint(ClassName, ClassParamTypes),
     Constraints0 = constraints(UnivConstraints0, ExistConstraints),
     UnivConstraints = [ImplicitConstraint | UnivConstraints0],
     Constraints = constraints(UnivConstraints, ExistConstraints),
-
-    init_markers(Markers0),
-    add_marker(marker_class_method, Markers0, Markers),
-    module_add_pred_or_func(Origin, Context, ItemNumber,
-        MaybeItemMercuryStatus, PredStatus, NeedQual,
-        PredOrFunc, PredName, TypeVarSet, InstVarSet, ExistQVars,
-        TypesAndModes, Constraints, MaybeDetism, Purity, Markers,
-        MaybePredProcId, !ModuleInfo, !Specs),
+    Attrs = item_compiler_attributes(compiler_origin_class_method),
+    MaybeAttrs = item_origin_compiler(Attrs),
+    PredDecl = item_pred_decl_info(PredName, PredOrFunc,
+        ArgTypesAndModes, WithType, WithInst, MaybeDetism, MaybeAttrs,
+        TypeVarSet, InstVarSet, ExistQVars, Purity, Constraints,
+        Context, ItemNumber),
+    module_add_pred_decl(PredStatus, NeedQual, PredDecl, MaybePredProcId,
+        !ModuleInfo, !Specs),
     (
         MaybePredProcId = no
     ;
@@ -672,17 +665,18 @@ do_produce_instance_method_clauses(InstanceProcDefn, PredOrFunc, PredArity,
         InstanceProcDefn = instance_proc_def_name(InstancePredName),
         % Add the body of the introduced pred.
         % First the goal info, ...
-        goal_info_init(GoalInfo0),
-        goal_info_set_context(Context, GoalInfo0, GoalInfo1),
         set_of_var.list_to_set(HeadVars, NonLocals),
-        goal_info_set_nonlocals(NonLocals, GoalInfo1, GoalInfo2),
         ( if check_marker(Markers, marker_is_impure) then
-            goal_info_set_purity(purity_impure, GoalInfo2, GoalInfo)
+            Purity = purity_impure
         else if check_marker(Markers, marker_is_semipure) then
-            goal_info_set_purity(purity_semipure, GoalInfo2, GoalInfo)
+            Purity = purity_semipure
         else
-            GoalInfo = GoalInfo2
+            Purity = purity_pure
         ),
+        instmap_delta_init_unreachable(DummyInstMapDelta),
+        DummyDetism = detism_erroneous,
+        goal_info_init(NonLocals, DummyInstMapDelta, DummyDetism, Purity,
+            Context, GoalInfo),
         % ... and then the goal itself.
         varset.init(VarSet0),
         make_n_fresh_vars("HeadVar__", PredArity, HeadVars, VarSet0, VarSet),

@@ -14,7 +14,7 @@
 %
 %-----------------------------------------------------------------------------%
 
-:- module structure_reuse.versions.
+:- module transform_hlds.ctgc.structure_reuse.versions.
 :- interface.
 
 :- import_module hlds.
@@ -112,7 +112,7 @@ create_reuse_procedures(!ReuseTable, !ModuleInfo) :-
 
     % Get the list of conditional reuse procedures already created.
     ExistingReusePPIds = bimap.coordinates(!.ReuseTable ^ reuse_version_map),
-    ExistingReusePPIdsSet = set.from_list(ExistingReusePPIds),
+    ExistingReusePPIdsSet = set.list_to_set(ExistingReusePPIds),
 
     map.foldl2(divide_reuse_procs(ExistingReusePPIdsSet),
         !.ReuseTable ^ reuse_info_map, [], CondOrigPPIds, [], UncondOrigPPIds),
@@ -510,8 +510,8 @@ create_fake_reuse_procedure(PPId, NoClobbers, !ModuleInfo) :-
 
     create_fresh_pred_proc_info_copy(PPId, NoClobbers, NewPPId, !ModuleInfo),
     some [!PredInfo, !ProcInfo] (
-        module_info_pred_proc_info(!.ModuleInfo, NewPPId, !:PredInfo,
-            !:ProcInfo),
+        module_info_pred_proc_info(!.ModuleInfo, NewPPId,
+            !:PredInfo, !:ProcInfo),
         proc_info_get_goal(!.ProcInfo, Body),
         Body = hlds_goal(_, GoalInfo0),
         proc_info_get_headvars(!.ProcInfo, HeadVars),
@@ -525,5 +525,5 @@ create_fake_reuse_procedure(PPId, NoClobbers, !ModuleInfo) :-
     ).
 
 %-----------------------------------------------------------------------------%
-:- end_module structure_reuse.versions.
+:- end_module transform_hlds.ctgc.structure_reuse.versions.
 %-----------------------------------------------------------------------------%

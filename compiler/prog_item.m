@@ -40,6 +40,7 @@
 :- import_module bool.
 :- import_module cord.
 :- import_module list.
+:- import_module map.
 :- import_module maybe.
 :- import_module multi_map.
 :- import_module pair.
@@ -110,6 +111,8 @@
     --->    no_version_numbers
     ;       version_numbers(version_numbers).
 
+    % The generic representation of all the different kinds of interface files.
+    % XXX It should be replaced by the kind-specific representations below.
 :- type parse_tree_int
     --->    parse_tree_int(
                 pti_module_name             :: module_name,
@@ -141,6 +144,71 @@
                 pti_imp_items               :: list(item)
             ).
 
+% The representations specific to .int0, .int, .int2 and .int3 files.
+% XXX We should replace the lists of items of various kinds with data
+% structures that encode uniqueness properties, such as "each type constructor
+% may be defined only once". Maps from primary keys such as type_ctors,
+% or symnames/arity pairs in general, would work for this.
+
+    % A version of parse_tree_int specialized to hold the contents of
+    % .int0 files.
+:- type parse_tree_int0
+    --->    parse_tree_int0(
+                pti0_module_name            :: module_name,
+
+                % The context of the `:- module' declaration.
+                pti0_module_name_context    :: prog_context,
+
+                pti0_maybe_version_numbers  :: maybe_version_numbers,
+
+                % The set of modules mentioned in `:- include_module'
+                % declarations in the interface and implementation.
+                pti0_int_included_modules   :: set(module_name),
+                pti0_imp_included_modules   :: set(module_name),
+
+                % The set of modules mentioned in `:- import_module'
+                % declarations in the interface and implementation.
+                pti0_int_imported_modules   :: set(module_name),
+                pti0_int_used_modules       :: set(module_name),
+                pti0_imp_imported_modules   :: set(module_name),
+                pti0_imp_used_modules       :: set(module_name),
+
+                % `:- pragma foreign_import_module' declarations
+                % in the interface and in the implementation.
+                pti0_int_fims               :: set(fim_spec),
+                pti0_imp_fims               :: set(fim_spec),
+
+                % Items of various kinds in the interface.
+                % XXX For the consumers of the .int0 file, in most cases
+                % it makes no difference whether an item was in the parent's
+                % interface or implementation section. We should make that
+                % distinction here ONLY when we have to.
+                pti0_int_type_defns         :: type_ctor_defn_map,
+                pti0_int_inst_defns         :: inst_ctor_defn_map,
+                pti0_int_mode_defns         :: mode_ctor_defn_map,
+                pti0_int_typeclasses        :: list(item_typeclass_info),
+                pti0_int_instances          :: list(item_instance_info),
+                pti0_int_pred_decls         :: list(item_pred_decl_info),
+                pti0_int_mode_decls         :: list(item_mode_decl_info),
+                pti0_int_foreign_enums      :: type_ctor_foreign_enum_map,
+                pti0_int_pragmas            :: list(item_pragma_info),
+                pti0_int_promises           :: list(item_promise_info),
+                % XXX We will probably need a list of item_type_repn_infos.
+
+                % Items of various kinds in the implementation section.
+                pti0_imp_type_defns         :: type_ctor_defn_map,
+                pti0_imp_inst_defns         :: inst_ctor_defn_map,
+                pti0_imp_mode_defns         :: mode_ctor_defn_map,
+                pti0_imp_typeclasses        :: list(item_typeclass_info),
+                pti0_imp_instances          :: list(item_instance_info),
+                pti0_imp_pred_decls         :: list(item_pred_decl_info),
+                pti0_imp_mode_decls         :: list(item_mode_decl_info),
+                pti0_imp_foreign_enums      :: type_ctor_foreign_enum_map,
+                pti0_imp_pragmas            :: list(item_pragma_info),
+                pti0_imp_promises           :: list(item_promise_info)
+                % XXX We will probably need a list of item_type_repn_infos.
+            ).
+
     % A version of parse_tree_int specialized to hold the contents of
     % .int files.
 :- type parse_tree_int1
@@ -168,22 +236,23 @@
                 pti1_imp_fims               :: set(fim_spec),
 
                 % Items of various kinds in the interface.
-                pti1_int_type_defns         :: list(item_type_defn_info),
-                pti1_int_inst_defns         :: list(item_inst_defn_info),
-                pti1_int_mode_defns         :: list(item_mode_defn_info),
+                pti1_type_defns             :: type_ctor_defn_map,
+                pti1_inst_defns             :: inst_ctor_defn_map,
+                pti1_mode_defns             :: mode_ctor_defn_map,
                 pti1_int_typeclasses        :: list(item_typeclass_info),
                 pti1_int_instances          :: list(item_instance_info),
                 pti1_int_pred_decls         :: list(item_pred_decl_info),
                 pti1_int_mode_decls         :: list(item_mode_decl_info),
+                pti1_int_foreign_enum_specs :: type_ctor_foreign_enum_map,
                 pti1_int_pragmas            :: list(item_pragma_info),
                 pti1_int_promises           :: list(item_promise_info),
 
-                pti1_int_type_repns         :: list(item_type_repn_info),
+                pti1_int_type_repns         :: type_ctor_repn_map,
 
                 % Items of various kinds in the implementation.
                 % Should not be needed after we switch to use type_repn items.
-                pti1_imp_type_defns         :: list(item_type_defn_info),
-                pti1_imp_foreign_enum_specs :: list(foreign_enum_spec),
+                pti1_imp_type_defns         :: type_ctor_defn_map,
+                pti1_imp_foreign_enum_specs :: type_ctor_foreign_enum_map,
                 pti1_imp_typeclasses        :: list(item_typeclass_info)
             ).
 
@@ -216,16 +285,16 @@
                 pti2_imp_fims               :: set(fim_spec),
 
                 % Items of various kinds in the interface.
-                pti2_int_type_defns         :: list(item_type_defn_info),
-                pti2_int_inst_defns         :: list(item_inst_defn_info),
-                pti2_int_mode_defns         :: list(item_mode_defn_info),
+                pti2_type_defns             :: type_ctor_defn_map,
+                pti2_inst_defns             :: inst_ctor_defn_map,
+                pti2_mode_defns             :: mode_ctor_defn_map,
                 pti2_int_typeclasses        :: list(item_typeclass_info),
                 pti2_int_instances          :: list(item_instance_info),
-                pti2_int_type_repns         :: list(item_type_repn_info),
+                pti2_int_type_repns         :: type_ctor_repn_map,
 
                 % Items of various kinds in the implementation.
                 % Should not be needed after we switch to use type_repn items.
-                pti2_imp_type_defns         :: list(item_type_defn_info)
+                pti2_imp_type_defns         :: type_ctor_defn_map
             ).
 
     % A version of parse_tree_int specialized to hold the contents of
@@ -246,13 +315,160 @@
                 pti3_imported_modules       :: set(module_name),
 
                 % Items of various kinds in the interface.
-                pti3_type_defns             :: list(item_type_defn_info),
-                pti3_inst_defns             :: list(item_inst_defn_info),
-                pti3_mode_defns             :: list(item_mode_defn_info),
+                pti3_type_defns             :: type_ctor_defn_map,
+                pti3_inst_defns             :: inst_ctor_defn_map,
+                pti3_mode_defns             :: mode_ctor_defn_map,
                 pti3_typeclasses            :: list(item_typeclass_info),
                 pti3_instances              :: list(item_instance_info),
-                pti3_type_repns             :: list(item_type_repn_info)
+                pti3_type_repns             :: type_ctor_repn_map
             ).
+
+%-----------------------------------------------------------------------------%
+%
+% The intended semantics of a type_ctor_defn_map is a map of
+% all the type constructors defined in a given SECTION of a given
+% interface file to all its definitions in that section.
+%
+% There are four intended uses of a type_ctor_defn_map. The most
+% important is the fourth one.
+%
+% One is to eliminate unnecessary items from interface files.
+% For example, library/set.m contains two definitions of the set
+% type constructor: an abstract definition in the publicly documented
+% interface section, and an actual du definition in another interface
+% section that we do not include in the automatically generated
+% documentation but we *do* export to other modules. In situations
+% like this, the abstract definition is redundant. Never including it
+% in an interface file lets that interface file to remain unchanged
+% in the event that the user deletes the abstract definition from
+% the source file as well.
+%
+% The second use is to canonicalize the parts of interface files
+% containing type definitions.
+%
+% The third use is to help deal with sets of definitions that
+% don't make sense. There are many rules that a set of definitions
+% for a given type constructor must meet (such as "there may be at most one
+% definition for a type constructor that is a du, equivalence or solver
+% definition), and bugs may manifest themselves as violations of these rules.
+%
+% We have a choice in when these violations are detected.
+%
+% - If we allow the inclusion of inconsistent sets of type definitions
+%   in interface files, then we must detect and handle these
+%   inconsistencies every time a compiler invocation reads that interface
+%   file. These invocations won't generate error messages for these
+%   inconsistencies since the type constructor won't be local, but
+%   they may generate messages for other "errors" that look like errors
+%   only because the compiler's resolution of the inconsistency (i.e.
+%   its choice of which type definitions to keep and which to throw out)
+%   differs from the programmer's choice.
+%
+% - If we do NOT allow the inclusion of inconsistent sets of type
+%   definitions in interface files, then we must report any violations
+%   at interface file construction time, and make them cause that
+%   construction to fail. Printing such error messages to stdout
+%   instead of the module's .err file is less than ideal, but
+%   this early detection can avoid avalanches of misleading diagnostics
+%   of the kind mentioned in the previous point. It can also save
+%   recompilations. If a module's source file contains inconsistent
+%   definitions for a type constructor, then the programmer will
+%   have to delete the unintended ones. Once this is done, the
+%   interface file will have to be rebuilt. If we allow inconsistent
+%   definitions in the interface file, its new contents will differ
+%   from its old contents, which means that all the compilations
+%   of *other* modules that read the old contents will have been wasted.
+%   If we cause the construction of the interface file to fail instead,
+%   those compilations won't have taken place.
+%
+% We implement the first choice by checking whether each entry in
+% a type_ctor_defn_map makes sense, and generating error messages
+% when they don't. This is done by code in check_parse_tree_type_defns.m.
+%
+% The fourth and most motivating use is that having all the definitions
+% of a type_ctor, *and* all the foreign_enum pragmas that apply to that
+% type_ctor, all together at once will make the code that decides
+% the proper representation of that type significantly simpler.
+%
+% Everything above except the fourth use also applies to the inst_
+% and mode_ctor_defn_maps, though for those, the consistency rules are
+% much simpler: that each inst and mode constructor must have at most one
+% non-abstract definition.
+%
+
+:- type type_ctor_defn_map == map(type_ctor, type_ctor_all_defns).
+
+:- type type_ctor_all_defns
+    --->    type_ctor_all_defns(
+                % Abstract and nonabstract solver type definitions.
+                tcad_abstract_solver    :: list(item_type_defn_info_abstract),
+                tcad_solver             :: list(item_type_defn_info_solver),
+
+                % Abstract and nonabstract nonsolver type definitions.
+                tcad_abstract_std       :: list(item_type_defn_info_abstract),
+                tcad_eqv                :: list(item_type_defn_info_eqv),
+                tcad_du                 :: list(item_type_defn_info_du),
+                tcad_foreign            :: c_java_csharp_erlang(
+                                            list(item_type_defn_info_foreign))
+            ).
+
+:- type type_ctor_maybe_defn
+    --->    type_ctor_maybe_defn(
+                % Abstract and nonabstract solver type definitions.
+                tcmd_abstract_solver    :: maybe(item_type_defn_info_abstract),
+                tcmd_solver             :: maybe(item_type_defn_info_solver),
+
+                % Abstract and nonabstract nonsolver type definitions.
+                tcmd_abstract_std       :: maybe(item_type_defn_info_abstract),
+                tcmd_eqv                :: maybe(item_type_defn_info_eqv),
+                tcmd_du                 :: maybe(item_type_defn_info_du),
+                tcmd_foreign            :: c_java_csharp_erlang(
+                                            maybe(item_type_defn_info_foreign))
+            ).
+
+    % We support foreign type definitions in all four of our target languages,
+    % C, Java, C# and Erlang (though since Erlang is not statically typed,
+    % the only Erlang type name we allow is the empty string). Likewise,
+    % we allow foreign enum declarations in these four languages.
+    %
+    % There are several kinds of info that we may want to store for every
+    % one of these foreign languages. This can be done in instances
+    % of this type, whose fields always contain the info for C, Java, C#
+    % and Erlang (in that order).
+    %
+:- type c_java_csharp_erlang(T)
+    --->    c_java_csharp_erlang(T, T, T, T).
+
+:- type c_j_cs_e_defns ==
+    c_java_csharp_erlang(list(item_type_defn_info_foreign)).
+:- type c_j_cs_e_maybe_defn ==
+    c_java_csharp_erlang(maybe(item_type_defn_info_foreign)).
+:- type c_j_cs_e_enums ==
+    c_java_csharp_erlang(list(item_foreign_enum_info)).
+:- type c_j_cs_e_maybe_enum ==
+    c_java_csharp_erlang(maybe(item_foreign_enum_info)).
+
+% The map key is sym_name_and_arity because we don't have an inst_ctor type.
+:- type inst_ctor_defn_map == map(sym_name_and_arity, inst_ctor_all_defns).
+:- type inst_ctor_all_defns
+    --->    inst_ctor_all_defns(
+                icad_abstract               :: list(item_inst_defn_info),
+                icad_eqv                    :: list(item_inst_defn_info)
+            ).
+
+% The map key is sym_name_and_arity because we don't have a mode_ctor type.
+:- type mode_ctor_defn_map == map(sym_name_and_arity, mode_ctor_all_defns).
+:- type mode_ctor_all_defns
+    --->    mode_ctor_all_defns(
+                mcad_abstract               :: list(item_mode_defn_info),
+                mcad_eqv                    :: list(item_mode_defn_info)
+            ).
+
+:- type type_ctor_foreign_enum_map == map(type_ctor, c_j_cs_e_enums).
+
+:- type type_ctor_repn_map == map(type_ctor, item_type_repn_info).
+
+%-----------------------------------------------------------------------------%
 
 :- type parse_tree_opt
     --->    parse_tree_opt(
@@ -268,13 +484,6 @@
                 pto_fims                    :: list(item_fim),
                 pto_items                   :: list(item)
             ).
-
-:- func convert_parse_tree_int1_to_parse_tree_int(parse_tree_int1)
-    = parse_tree_int.
-:- func convert_parse_tree_int2_to_parse_tree_int(parse_tree_int2)
-    = parse_tree_int.
-:- func convert_parse_tree_int3_to_parse_tree_int(parse_tree_int3)
-    = parse_tree_int.
 
 %-----------------------------------------------------------------------------%
 %
@@ -547,20 +756,26 @@
 
 :- type item_compiler_attributes
     --->    item_compiler_attributes(
-                maybe_allow_export,
-                maybe_is_mutable
+                compiler_origin
             ).
 
-:- type maybe_allow_export
-    --->    do_not_allow_export
-    ;       do_allow_export.
-
-:- type maybe_is_mutable
-    --->    is_not_mutable
-    ;       is_mutable(
-                is_mutable_module_name          :: module_name,
-                is_mutable_name                 :: string,
-                is_mutable_pred_kind            :: mutable_pred_kind
+:- type compiler_origin
+    --->    compiler_origin_initialise
+    ;       compiler_origin_finalise
+    ;       compiler_origin_class_method
+    ;       compiler_origin_solver_type(
+                cost_type_ctor_name             :: sym_name,
+                cost_type_ctor_arity            :: arity,
+                cost_aux_pred_kind              :: solver_type_pred_kind
+            )
+    ;       compiler_origin_mutable(
+                com_module_name                 :: module_name,
+                com_mutable_name                :: string,
+                com_aux_pred_kind               :: mutable_pred_kind
+            )
+    ;       compiler_origin_tabling(
+                cot_pred_spec                   :: simple_call_id,
+                cot_aux_pred_kind               :: tabling_aux_pred_kind
             ).
 
 :- type item
@@ -570,6 +785,8 @@
     ;       item_mode_defn(item_mode_defn_info)
     ;       item_pred_decl(item_pred_decl_info)
     ;       item_mode_decl(item_mode_decl_info)
+    ;       item_foreign_enum(item_foreign_enum_info)
+    ;       item_foreign_export_enum(item_foreign_export_enum_info)
     ;       item_pragma(item_pragma_info)
     ;       item_promise(item_promise_info)
     ;       item_typeclass(item_typeclass_info)
@@ -591,13 +808,26 @@
                 cl_seq_num                      :: int
             ).
 
-:- type item_type_defn_info
+:- type item_type_defn_info == item_type_defn_info_general(type_defn).
+
+:- type item_type_defn_info_abstract
+    == item_type_defn_info_general(type_details_abstract).
+:- type item_type_defn_info_solver
+    == item_type_defn_info_general(type_details_solver).
+:- type item_type_defn_info_eqv
+    == item_type_defn_info_general(type_details_eqv).
+:- type item_type_defn_info_du
+    == item_type_defn_info_general(type_details_du).
+:- type item_type_defn_info_foreign
+    == item_type_defn_info_general(type_details_foreign_generic).
+
+:- type item_type_defn_info_general(T)
     --->    item_type_defn_info(
                 % `:- type ...':
                 % a definition of a type, or a declaration of an abstract type.
                 td_ctor_name                    :: sym_name,
                 td_ctor_args                    :: list(type_param),
-                td_ctor_defn                    :: type_defn,
+                td_ctor_defn                    :: T,
                 td_tvarset                      :: tvarset,
                 td_context                      :: prog_context,
                 td_seq_num                      :: int
@@ -676,6 +906,26 @@
                 pfm_instvarset                  :: inst_varset,
                 pfm_context                     :: prog_context,
                 pfm_seq_num                     :: int
+            ).
+
+:- type item_foreign_enum_info
+    --->    item_foreign_enum_info(
+                fe_language                     :: foreign_language,
+                fe_type_ctor                    :: type_ctor,
+                fe_values                       :: one_or_more(
+                                                        pair(sym_name, string)),
+                fe_context                      :: prog_context,
+                fe_seq_num                      :: int
+            ).
+
+:- type item_foreign_export_enum_info
+    --->    item_foreign_export_enum_info(
+                fee_language                    :: foreign_language,
+                fee_type_ctor                   :: type_ctor,
+                fee_attributes                  :: export_enum_attributes,
+                fee_overrides                   :: assoc_list(sym_name, string),
+                fee_context                     :: prog_context,
+                fee_seq_num                     :: int
             ).
 
 :- type item_pragma_info
@@ -783,6 +1033,8 @@
 
 :- func get_item_context(item) = prog_context.
 
+:- func item_desc_pieces(item) = list(format_component).
+
 %-----------------------------------------------------------------------------%
 %
 % Declarations of relationships between modules.
@@ -810,8 +1062,12 @@
                 incl_seq_num                    :: int
             ).
 
-    % An accumulator version of the above predicate restricted to operate
-    % only on item_includes.
+    % Add the name of the included module to the given set.
+    %
+:- pred add_included_module_name(item_include::in,
+    set(module_name)::in, set(module_name)::out) is det.
+
+    % Add the name of the included module to the given map.
     %
 :- pred get_included_modules_in_item_include_acc(item_include::in,
     module_names_contexts::in, module_names_contexts::out) is det.
@@ -845,11 +1101,23 @@
     % values of a type that makes it clear that they contain information
     % ONLY about use_module declarations, not import_module declarations.
 :- type avail_import_info
-    --->    avail_import_info(module_name, prog_context, int).
+    --->    avail_import_info(
+                aii_module_name     :: module_name,
+                aii_context         :: prog_context,
+                aii_seq_num         :: int
+            ).
 :- type avail_use_info
-    --->    avail_use_info(module_name, prog_context, int).
+    --->    avail_use_info(
+                aui_module_name     :: module_name,
+                aui_context         :: prog_context,
+                aui_seq_num         :: int
+            ).
 
 :- func item_include_module_name(item_include) = module_name.
+
+:- func get_avail_context(item_avail) = prog_context.
+:- func get_import_context(avail_import_info) = prog_context.
+:- func get_use_context(avail_use_info) = prog_context.
 
 :- pred avail_is_import(item_avail::in, avail_import_info::out) is semidet.
 :- pred avail_is_use(item_avail::in, avail_use_info::out) is semidet.
@@ -860,9 +1128,9 @@
 :- pred avail_imports_uses(list(item_avail)::in,
     list(avail_import_info)::out, list(avail_use_info)::out) is det.
 
-:- func item_avail_module_name(item_avail) = module_name.
-:- func avail_import_info_module_name(avail_import_info) = module_name.
-:- func avail_use_info_module_name(avail_use_info) = module_name.
+:- func get_avail_module_name(item_avail) = module_name.
+:- func get_import_module_name(avail_import_info) = module_name.
+:- func get_use_module_name(avail_use_info) = module_name.
 
 :- type item_fim
     --->    item_fim(
@@ -888,16 +1156,8 @@
                 fim_seq_num                     :: int
             ).
 
-:- type fim_spec
-    --->    fim_spec(
-                % The specification of a foreign_import_module declaration,
-                % without information about where it came from, used where
-                % it *does not matter* where it came from.
-                fimspec_lang                    :: foreign_language,
-                fimspec_module_name             :: module_name
-            ).
-
-:- pred fim_spec_to_item(fim_spec::in, item_fim::out) is det.
+:- func fim_item_to_spec(item_fim) = fim_spec.
+:- func fim_spec_to_item(fim_spec) = item_fim.
 
 %-----------------------------------------------------------------------------%
 %
@@ -1268,13 +1528,18 @@
 % Pragmas.
 %
 
+    % XXX We should consider splitting this type into several types, based on
+    %
+    % - whether a pragma may appear in the interface section of a source file;
+    % - whether a pragma may appear in a source file at all,
+    %   or whether it is only used to record the results of analyses
+    %   in automatically generated .int* and/or .*opt files.
+    %
 :- type pragma_type
     --->    pragma_foreign_decl(pragma_info_foreign_decl)
     ;       pragma_foreign_code(pragma_info_foreign_code)
     ;       pragma_foreign_proc(pragma_info_foreign_proc)
     ;       pragma_foreign_proc_export(pragma_info_foreign_proc_export)
-    ;       pragma_foreign_export_enum(pragma_info_foreign_export_enum)
-    ;       pragma_foreign_enum(pragma_info_foreign_enum)
     ;       pragma_external_proc(pragma_info_external_proc)
     ;       pragma_type_spec(pragma_info_type_spec)
     ;       pragma_inline(pred_name_arity)
@@ -1284,7 +1549,7 @@
     ;       pragma_exceptions(pragma_info_exceptions)
     ;       pragma_trailing_info(pragma_info_trailing_info)
     ;       pragma_mm_tabling_info(pragma_info_mm_tabling_info)
-    ;       pragma_obsolete(pred_name_arity)
+    ;       pragma_obsolete(pred_name_arity, list(sym_name_and_arity))
     ;       pragma_no_detism_warning(pred_name_arity)
     ;       pragma_require_tail_recursion(pragma_info_require_tail_recursion)
     ;       pragma_tabled(pragma_info_tabled)
@@ -1308,7 +1573,7 @@
     %
 :- func pragma_allowed_in_interface(pragma_type) = bool.
 
-:- func pragma_context_pieces(pragma_type) = list(format_component).
+:- func pragma_desc_pieces(pragma_type) = list(format_component).
 
     % Foreign language interfacing pragmas.
 
@@ -1349,21 +1614,6 @@
                 exp_language            :: foreign_language,
                 exp_pred_id             :: pred_name_modes_pf,
                 exp_foreign_name        :: string
-            ).
-
-:- type pragma_info_foreign_export_enum
-    --->    pragma_info_foreign_export_enum(
-                export_enum_language   :: foreign_language,
-                export_enum_type_ctor  :: type_ctor,
-                export_enum_attributes :: export_enum_attributes,
-                export_enum_overrides  :: assoc_list(sym_name, string)
-            ).
-
-:- type pragma_info_foreign_enum
-    --->    pragma_info_foreign_enum(
-                foreign_enum_language   :: foreign_language,
-                foreign_enum_type_ctor  :: type_ctor,
-                foreign_enum_values     :: one_or_more(pair(sym_name, string))
             ).
 
 :- type pragma_info_external_proc
@@ -1536,8 +1786,9 @@
 
 :- type foreign_enum_spec
     --->    foreign_enum_spec(
-                pragma_info_foreign_enum,
-                item_maybe_attrs
+                foreign_language,
+                type_ctor,
+                one_or_more(pair(sym_name, string))
             ).
 
     % These types identify procedures in pragmas.
@@ -1816,153 +2067,9 @@
 
 :- import_module parse_tree.prog_foreign.
 
-:- import_module map.
 :- import_module require.
 :- import_module term.
-
-%-----------------------------------------------------------------------------%
-
-convert_parse_tree_int1_to_parse_tree_int(ParseTreeInt1) = ParseTreeInt :-
-    ParseTreeInt1 = parse_tree_int1(ModuleName, ModuleNameContext,
-        MaybeVersionNumbers, IntInclModuleNames, ImpInclModuleNames,
-        IntUsedModuleNames, ImpUsedModuleNames, IntFIMSpecs, ImpFIMSpecs,
-        IntTypeDefns, IntInstDefns, IntModeDefns,
-        IntTypeClasses, IntInstances, IntPredDecls, IntModeDecls,
-        IntPragmas, IntPromises, IntTypeRepns,
-        ImpTypeDefns, ImpForeignEnums, ImpTypeClasses),
-
-    IntIncls = list.map(wrap_include,
-        set.to_sorted_list(IntInclModuleNames)),
-    ImpIncls = list.map(wrap_include,
-        set.to_sorted_list(ImpInclModuleNames)),
-    IntAvails = list.map(wrap_use_avail,
-        set.to_sorted_list(IntUsedModuleNames)),
-    ImpAvails = list.map(wrap_use_avail,
-        set.to_sorted_list(ImpUsedModuleNames)),
-    set.map(fim_spec_to_item, IntFIMSpecs, IntFIMsSet),
-    set.map(fim_spec_to_item, ImpFIMSpecs, ImpFIMsSet),
-    set.to_sorted_list(IntFIMsSet, IntFIMs),
-    set.to_sorted_list(ImpFIMsSet, ImpFIMs),
-
-    IntItems =
-        list.map(wrap_type_defn_item, IntTypeDefns) ++
-        list.map(wrap_inst_defn_item, IntInstDefns) ++
-        list.map(wrap_mode_defn_item, IntModeDefns) ++
-        list.map(wrap_typeclass_item, IntTypeClasses) ++
-        list.map(wrap_instance_item, IntInstances) ++
-        list.map(wrap_pred_decl_item, IntPredDecls) ++
-        list.map(wrap_mode_decl_item, IntModeDecls) ++
-        list.map(wrap_pragma_item, IntPragmas) ++
-        list.map(wrap_promise_item, IntPromises) ++
-        list.map(wrap_type_repn_item, IntTypeRepns),
-    ImpItems =
-        list.map(wrap_type_defn_item, ImpTypeDefns) ++
-        list.map(make_foreign_enum_item, ImpForeignEnums) ++
-        list.map(wrap_typeclass_item, ImpTypeClasses),
-
-    ParseTreeInt = parse_tree_int(ModuleName, ifk_int, ModuleNameContext,
-        MaybeVersionNumbers, IntIncls, ImpIncls, IntAvails, ImpAvails,
-        IntFIMs, ImpFIMs, IntItems, ImpItems).
-
-convert_parse_tree_int2_to_parse_tree_int(ParseTreeInt2) = ParseTreeInt :-
-    ParseTreeInt2 = parse_tree_int2(ModuleName, ModuleNameContext,
-        MaybeVersionNumbers,
-        IntInclModuleNames, IntUsedModuleNames, IntFIMSpecs, ImpFIMSpecs,
-        IntTypeDefns, IntInstDefns, IntModeDefns,
-        IntTypeClasses, IntInstances, IntTypeRepns,
-        ImpTypeDefns),
-
-    IntIncls = list.map(wrap_include,
-        set.to_sorted_list(IntInclModuleNames)),
-    IntAvails = list.map(wrap_use_avail,
-        set.to_sorted_list(IntUsedModuleNames)),
-    set.map(fim_spec_to_item, IntFIMSpecs, IntFIMsSet),
-    set.map(fim_spec_to_item, ImpFIMSpecs, ImpFIMsSet),
-    set.to_sorted_list(IntFIMsSet, IntFIMs),
-    set.to_sorted_list(ImpFIMsSet, ImpFIMs),
-
-    IntItems =
-        list.map(wrap_type_defn_item, IntTypeDefns) ++
-        list.map(wrap_inst_defn_item, IntInstDefns) ++
-        list.map(wrap_mode_defn_item, IntModeDefns) ++
-        list.map(wrap_typeclass_item, IntTypeClasses) ++
-        list.map(wrap_instance_item, IntInstances) ++
-        list.map(wrap_type_repn_item, IntTypeRepns),
-    ImpItems =
-        list.map(wrap_type_defn_item, ImpTypeDefns),
-    ParseTreeInt = parse_tree_int(ModuleName, ifk_int2, ModuleNameContext,
-        MaybeVersionNumbers, IntIncls, [], IntAvails, [],
-        IntFIMs, ImpFIMs, IntItems, ImpItems).
-
-convert_parse_tree_int3_to_parse_tree_int(ParseTreeInt3) = ParseTreeInt :-
-    ParseTreeInt3 = parse_tree_int3(ModuleName, ModuleNameContext,
-        IntInclModuleNames, IntImportModuleNames,
-        IntTypeDefns, IntInstDefns, IntModeDefns,
-        IntTypeClasses, IntInstances, IntTypeRepns),
-
-    MaybeVersionNumbers = no_version_numbers,
-    IntIncls = list.map(wrap_include,
-        set.to_sorted_list(IntInclModuleNames)),
-    IntAvails = list.map(wrap_import_avail,
-        set.to_sorted_list(IntImportModuleNames)),
-    IntItems =
-        list.map(wrap_type_defn_item, IntTypeDefns) ++
-        list.map(wrap_inst_defn_item, IntInstDefns) ++
-        list.map(wrap_mode_defn_item, IntModeDefns) ++
-        list.map(wrap_typeclass_item, IntTypeClasses) ++
-        list.map(wrap_instance_item, IntInstances) ++
-        list.map(wrap_type_repn_item, IntTypeRepns),
-    ParseTreeInt = parse_tree_int(ModuleName, ifk_int3, ModuleNameContext,
-        MaybeVersionNumbers, IntIncls, [], IntAvails, [],
-        [], [], IntItems, []).
-
-:- func wrap_include(module_name) = item_include.
-
-wrap_include(ModuleName) = Include :-
-    Include = item_include(ModuleName, term.context_init, -1).
-
-:- func wrap_import_avail(module_name) = item_avail.
-
-wrap_import_avail(ModuleName) = Avail :-
-    ImportInfo = avail_import_info(ModuleName, term.context_init, -1),
-    Avail = avail_import(ImportInfo).
-
-:- func wrap_use_avail(module_name) = item_avail.
-
-wrap_use_avail(ModuleName) = Avail :-
-    UseInfo = avail_use_info(ModuleName, term.context_init, -1),
-    Avail = avail_use(UseInfo).
-
-:- func wrap_type_defn_item(item_type_defn_info) = item.
-:- func wrap_inst_defn_item(item_inst_defn_info) = item.
-:- func wrap_mode_defn_item(item_mode_defn_info) = item.
-:- func wrap_typeclass_item(item_typeclass_info) = item.
-:- func wrap_instance_item(item_instance_info) = item.
-:- func wrap_pred_decl_item(item_pred_decl_info) = item.
-:- func wrap_mode_decl_item(item_mode_decl_info) = item.
-:- func wrap_pragma_item(item_pragma_info) = item.
-:- func wrap_promise_item(item_promise_info) = item.
-:- func wrap_type_repn_item(item_type_repn_info) = item.
-
-wrap_type_defn_item(X) = item_type_defn(X).
-wrap_inst_defn_item(X) = item_inst_defn(X).
-wrap_mode_defn_item(X) = item_mode_defn(X).
-wrap_typeclass_item(X) = item_typeclass(X).
-wrap_instance_item(X) = item_instance(X).
-wrap_pred_decl_item(X) = item_pred_decl(X).
-wrap_mode_decl_item(X) = item_mode_decl(X).
-wrap_pragma_item(X) = item_pragma(X).
-wrap_promise_item(X) = item_promise(X).
-wrap_type_repn_item(X) = item_type_repn(X).
-
-:- func make_foreign_enum_item(foreign_enum_spec) = item.
-
-make_foreign_enum_item(ForeignEnumSpec) = Item :-
-    ForeignEnumSpec = foreign_enum_spec(FEInfo, MaybeAttrs),
-    Pragma = pragma_foreign_enum(FEInfo),
-    ItemPragmaInfo = item_pragma_info(Pragma, MaybeAttrs,
-        term.context_init, -1),
-    Item = item_pragma(ItemPragmaInfo).
+:- import_module varset.
 
 %-----------------------------------------------------------------------------%
 
@@ -1992,6 +2099,7 @@ make_ims_used_and_imported(ImportLocn, ModuleName, IntFileKind) =
         iou_used_and_imported).
 make_ims_abstract_imported(ModuleName, IntFileKind) =
     ims_abstract_imported(ModuleName, IntFileKind).
+:- pragma no_determinism_warning(make_ims_int3_implementation/2).
 make_ims_int3_implementation(_ModuleName, _IntFileKind) = _ :-
     unexpected($pred,
         "An .int3 file should not have an implementation section").
@@ -2109,6 +2217,12 @@ get_item_context(Item) = Context :-
         Item = item_mode_decl(ItemModeDecl),
         Context = ItemModeDecl ^ pfm_context
     ;
+        Item = item_foreign_enum(ItemForeignEnum),
+        Context = ItemForeignEnum ^ fe_context
+    ;
+        Item = item_foreign_export_enum(ItemForeignExportEnum),
+        Context = ItemForeignExportEnum ^ fee_context
+    ;
         Item = item_pragma(ItemPragma),
         Context = ItemPragma ^ prag_context
     ;
@@ -2134,7 +2248,81 @@ get_item_context(Item) = Context :-
         Context = ItemTypeRepn ^ tr_context
     ).
 
+item_desc_pieces(Item) = Pieces :-
+    (
+        Item = item_clause(_),
+        Pieces = [words("a clause")]
+    ;
+        Item = item_type_defn(_),
+        Pieces = [words("a type definition")]
+    ;
+        Item = item_inst_defn(_),
+        Pieces = [words("an inst definition")]
+    ;
+        Item = item_mode_defn(_),
+        Pieces = [words("a mode definition")]
+    ;
+        Item = item_pred_decl(ItemPredDecl),
+        PorF = ItemPredDecl ^ pf_p_or_f,
+        (
+            PorF = pf_predicate,
+            Pieces = [words("a predicate declaration")]
+        ;
+            PorF = pf_function,
+            Pieces = [words("a function declaration")]
+        )
+    ;
+        Item = item_mode_decl(_),
+        Pieces = [words("a mode declaration")]
+    ;
+        Item = item_foreign_enum(_),
+        Pieces = [pragma_decl("foreign_enum"), words("declaration")]
+    ;
+        Item = item_foreign_export_enum(_),
+        Pieces = [pragma_decl("foreign_export_enum"), words("declaration")]
+    ;
+        Item = item_pragma(ItemPragma),
+        Pieces = pragma_desc_pieces(ItemPragma ^ prag_type)
+    ;
+        Item = item_promise(ItemPromise),
+        PromiseType = ItemPromise ^ prom_type,
+        (
+            PromiseType = promise_type_exclusive,
+            Pieces = [words("an exclusivity promise")]
+        ;
+            PromiseType = promise_type_exhaustive,
+            Pieces = [words("an exhaustivity promise")]
+        ;
+            PromiseType = promise_type_exclusive_exhaustive,
+            Pieces = [words("an exclusivity and exhaustivity promise")]
+        ;
+            PromiseType = promise_type_true,
+            Pieces = [words("an assertion")]
+        )
+    ;
+        Item = item_typeclass(_),
+        Pieces = [words("a typeclass declaration")]
+    ;
+        Item = item_instance(_),
+        Pieces = [words("an instance declaration")]
+    ;
+        Item = item_initialise(_),
+        Pieces = [words("an initialise declaration")]
+    ;
+        Item = item_finalise(_),
+        Pieces = [words("a finalise declaration")]
+    ;
+        Item = item_mutable(_),
+        Pieces = [words("the declaration of a mutable")]
+    ;
+        Item = item_type_repn(_),
+        Pieces = [words("a type representation description")]
+    ).
+
 %-----------------------------------------------------------------------------%
+
+add_included_module_name(Incl, !ModuleNames) :-
+    set.insert(item_include_module_name(Incl), !ModuleNames).
 
 get_included_modules_in_item_include_acc(Incl, !IncludedModuleNames) :-
     Incl = item_include(ModuleName, Context, _SeqNum),
@@ -2145,6 +2333,13 @@ import_or_use_decl_name(use_decl) = "use_module".
 
 item_include_module_name(Incl) = ModuleName :-
     Incl = item_include(ModuleName, _Context, _SeqNum).
+
+get_avail_context(avail_import(avail_import_info(_, Context, _))) = Context.
+get_avail_context(avail_use(avail_use_info(_, Context, _))) = Context.
+
+get_import_context(avail_import_info(_, Context, _)) = Context.
+
+get_use_context(avail_use_info(_, Context, _)) = Context.
 
 avail_is_import(Avail, ImportInfo) :-
     require_complete_switch [Avail]
@@ -2179,7 +2374,7 @@ avail_imports_uses([Avail | Avails], !:Imports, !:Uses) :-
         !:Uses = [AvailUseInfo | !.Uses]
     ).
 
-item_avail_module_name(ItemAvail) = ModuleName :-
+get_avail_module_name(ItemAvail) = ModuleName :-
     (
         ItemAvail = avail_import(AvailImportInfo),
         AvailImportInfo = avail_import_info(ModuleName, _, _)
@@ -2188,13 +2383,17 @@ item_avail_module_name(ItemAvail) = ModuleName :-
         AvailUseInfo = avail_use_info(ModuleName, _, _)
     ).
 
-avail_import_info_module_name(AvailImportInfo) = ModuleName :-
+get_import_module_name(AvailImportInfo) = ModuleName :-
     AvailImportInfo = avail_import_info(ModuleName, _, _).
 
-avail_use_info_module_name(AvailUseInfo) = ModuleName :-
+get_use_module_name(AvailUseInfo) = ModuleName :-
     AvailUseInfo = avail_use_info(ModuleName, _, _).
 
-fim_spec_to_item(FIMSpec, FIM) :-
+fim_item_to_spec(FIM) = FIMSpec :-
+    FIM = item_fim(Lang, ModuleName, _, _),
+    FIMSpec = fim_spec(Lang, ModuleName).
+
+fim_spec_to_item(FIMSpec) = FIM :-
     FIMSpec = fim_spec(Lang, ModuleName),
     FIM = item_fim(Lang, ModuleName, term.context_init, -1).
 
@@ -2264,7 +2463,6 @@ pragma_allowed_in_interface(Pragma) = Allowed :-
         ( Pragma = pragma_foreign_code(_)
         ; Pragma = pragma_foreign_decl(_)
         ; Pragma = pragma_foreign_proc_export(_)
-        ; Pragma = pragma_foreign_export_enum(_)
         ; Pragma = pragma_foreign_proc(_)
         ; Pragma = pragma_external_proc(_)
         ; Pragma = pragma_inline(_)
@@ -2285,11 +2483,7 @@ pragma_allowed_in_interface(Pragma) = Allowed :-
         ),
         Allowed = no
     ;
-        % Note that `direct_arg' must be in the interface iff
-        % the corresponding type definition is in the interface.
-        % This is checked in make_hlds.
-        ( Pragma = pragma_foreign_enum(_)
-        ; Pragma = pragma_obsolete(_)
+        ( Pragma = pragma_obsolete(_, _)
         ; Pragma = pragma_type_spec(_)
         ; Pragma = pragma_termination_info(_)
         ; Pragma = pragma_termination2_info(_)
@@ -2304,68 +2498,59 @@ pragma_allowed_in_interface(Pragma) = Allowed :-
         Allowed = yes
     ).
 
-pragma_context_pieces(Pragma) = ContextPieces :-
+pragma_desc_pieces(Pragma) = Pieces :-
     (
         Pragma = pragma_foreign_code(_),
-        ContextPieces = [pragma_decl("foreign_code"), words("declaration")]
+        Pieces = [pragma_decl("foreign_code"), words("declaration")]
     ;
         Pragma = pragma_foreign_decl(_),
-        ContextPieces = [pragma_decl("foreign_decl"), words("declaration")]
+        Pieces = [pragma_decl("foreign_decl"), words("declaration")]
     ;
         Pragma = pragma_foreign_proc_export(_),
-        ContextPieces = [pragma_decl("foreign_export"), words("declaration")]
-    ;
-        Pragma = pragma_foreign_export_enum(_),
-        ContextPieces = [pragma_decl("foreign_export_enum"),
-            words("declaration")]
+        Pieces = [pragma_decl("foreign_export"), words("declaration")]
     ;
         Pragma = pragma_foreign_proc(_),
-        ContextPieces = [pragma_decl("foreign_proc"), words("declaration")]
+        Pieces = [pragma_decl("foreign_proc"), words("declaration")]
     ;
         Pragma = pragma_external_proc(External),
         External = pragma_info_external_proc(_, _, PorF, _),
         (
             PorF = pf_predicate,
-            ContextPieces = [pragma_decl("external_pred"),
-                words("declaration")]
+            Pieces = [pragma_decl("external_pred"), words("declaration")]
         ;
             PorF = pf_function,
-            ContextPieces = [pragma_decl("external_func"),
-                words("declaration")]
+            Pieces = [pragma_decl("external_func"), words("declaration")]
         )
     ;
         Pragma = pragma_inline(_),
-        ContextPieces = [pragma_decl("inline"), words("declaration")]
+        Pieces = [pragma_decl("inline"), words("declaration")]
     ;
         Pragma = pragma_no_inline(_),
-        ContextPieces = [pragma_decl("no_inline"), words("declaration")]
+        Pieces = [pragma_decl("no_inline"), words("declaration")]
     ;
         Pragma = pragma_consider_used(_),
-        ContextPieces = [pragma_decl("consider_used"), words("declaration")]
+        Pieces = [pragma_decl("consider_used"), words("declaration")]
     ;
         Pragma = pragma_no_detism_warning(_),
-        ContextPieces = [pragma_decl("no_determinism_warning"),
-            words("declaration")]
+        Pieces = [pragma_decl("no_determinism_warning"), words("declaration")]
     ;
         Pragma = pragma_require_tail_recursion(_),
-        ContextPieces = [pragma_decl("require_tail_recursion"),
-            words("declaration")]
+        Pieces = [pragma_decl("require_tail_recursion"), words("declaration")]
     ;
         Pragma = pragma_fact_table(_),
-        ContextPieces = [pragma_decl("fact_table"), words("declaration")]
+        Pieces = [pragma_decl("fact_table"), words("declaration")]
     ;
         Pragma = pragma_tabled(Tabled),
         Tabled = pragma_info_tabled(EvalMethod, _, _, _),
         (
             EvalMethod = eval_memo,
-            ContextPieces = [pragma_decl("memo"), words("declaration")]
+            Pieces = [pragma_decl("memo"), words("declaration")]
         ;
             EvalMethod = eval_loop_check,
-            ContextPieces = [pragma_decl("loop_check"), words("declaration")]
+            Pieces = [pragma_decl("loop_check"), words("declaration")]
         ;
             EvalMethod = eval_minimal(_),
-            ContextPieces = [pragma_decl("minimal_model"),
-                words("declaration")]
+            Pieces = [pragma_decl("minimal_model"), words("declaration")]
         ;
             EvalMethod = eval_table_io(_, _),
             unexpected($pred, "eval_table_io")
@@ -2375,72 +2560,62 @@ pragma_context_pieces(Pragma) = ContextPieces :-
         )
     ;
         Pragma = pragma_promise_pure(_),
-        ContextPieces = [pragma_decl("promise_pure"), words("declaration")]
+        Pieces = [pragma_decl("promise_pure"), words("declaration")]
     ;
         Pragma = pragma_promise_semipure(_),
-        ContextPieces = [pragma_decl("promise_semipure"), words("declaration")]
+        Pieces = [pragma_decl("promise_semipure"), words("declaration")]
     ;
         Pragma = pragma_promise_eqv_clauses(_),
-        ContextPieces = [pragma_decl("promise_equivalent_clauses"),
+        Pieces = [pragma_decl("promise_equivalent_clauses"),
             words("declaration")]
     ;
         Pragma = pragma_unused_args(_),
-        ContextPieces = [pragma_decl("unused_args"), words("declaration")]
+        Pieces = [pragma_decl("unused_args"), words("declaration")]
     ;
         Pragma = pragma_exceptions(_),
-        ContextPieces = [pragma_decl("exceptions"), words("declaration")]
+        Pieces = [pragma_decl("exceptions"), words("declaration")]
     ;
         Pragma = pragma_trailing_info(_),
-        ContextPieces = [pragma_decl("trailing_info"), words("declaration")]
+        Pieces = [pragma_decl("trailing_info"), words("declaration")]
     ;
         Pragma = pragma_mm_tabling_info(_),
-        ContextPieces = [pragma_decl("mm_tabling_info"), words("declaration")]
+        Pieces = [pragma_decl("mm_tabling_info"), words("declaration")]
     ;
         Pragma = pragma_require_feature_set(_),
-        ContextPieces = [pragma_decl("require_feature_set"),
-            words("declaration")]
+        Pieces = [pragma_decl("require_feature_set"), words("declaration")]
     ;
-        Pragma = pragma_foreign_enum(_),
-        ContextPieces = [pragma_decl("foreign_enum"), words("declaration")]
-    ;
-        Pragma = pragma_obsolete(_),
-        ContextPieces = [pragma_decl("obsolete"), words("declaration")]
+        Pragma = pragma_obsolete(_, _),
+        Pieces = [pragma_decl("obsolete"), words("declaration")]
     ;
         Pragma = pragma_type_spec(_),
-        ContextPieces = [pragma_decl("type_spec"), words("declaration")]
+        Pieces = [pragma_decl("type_spec"), words("declaration")]
     ;
         Pragma = pragma_termination_info(_),
-        ContextPieces = [pragma_decl("termination_info"),
-            words("declaration")]
+        Pieces = [pragma_decl("termination_info"), words("declaration")]
     ;
         Pragma = pragma_termination2_info(_),
-        ContextPieces = [pragma_decl("termination2_info"),
-            words("declaration")]
+        Pieces = [pragma_decl("termination2_info"), words("declaration")]
     ;
         Pragma = pragma_terminates(_),
-        ContextPieces = [pragma_decl("terminates"), words("declaration")]
+        Pieces = [pragma_decl("terminates"), words("declaration")]
     ;
         Pragma = pragma_does_not_terminate(_),
-        ContextPieces = [pragma_decl("does_not_terminate"),
-            words("declaration")]
+        Pieces = [pragma_decl("does_not_terminate"), words("declaration")]
     ;
         Pragma = pragma_check_termination(_),
-        ContextPieces = [pragma_decl("check_termination"),
-            words("declaration")]
+        Pieces = [pragma_decl("check_termination"), words("declaration")]
     ;
         Pragma = pragma_structure_sharing(_),
-        ContextPieces = [pragma_decl("structure_sharing"),
-            words("declaration")]
+        Pieces = [pragma_decl("structure_sharing"), words("declaration")]
     ;
         Pragma = pragma_structure_reuse(_),
-        ContextPieces = [pragma_decl("structure_reuse"), words("declaration")]
+        Pieces = [pragma_decl("structure_reuse"), words("declaration")]
     ;
         Pragma = pragma_mode_check_clauses(_),
-        ContextPieces = [pragma_decl("mode_check_clauses"),
-            words("declaration")]
+        Pieces = [pragma_decl("mode_check_clauses"), words("declaration")]
     ;
         Pragma = pragma_oisu(_),
-        ContextPieces = [pragma_decl("oisu"), words("declaration")]
+        Pieces = [pragma_decl("oisu"), words("declaration")]
     ).
 
 %-----------------------------------------------------------------------------%
@@ -2553,6 +2728,8 @@ get_foreign_code_indicators_from_item(Globals, Item, !Info) :-
         ; Item = item_mode_defn(_)
         ; Item = item_pred_decl(_)
         ; Item = item_mode_decl(_)
+        ; Item = item_foreign_enum(_)
+        ; Item = item_foreign_export_enum(_)
         ; Item = item_promise(_)
         ; Item = item_typeclass(_)
         ; Item = item_instance(_)
@@ -2643,11 +2820,6 @@ get_pragma_foreign_code(Globals, Pragma, !Info) :-
             )
         )
     ;
-        ( Pragma = pragma_foreign_enum(_)
-        ; Pragma = pragma_foreign_export_enum(_)
-        )
-        % XXX Should we count these?
-    ;
         ( Pragma = pragma_check_termination(_)
         ; Pragma = pragma_does_not_terminate(_)
         ; Pragma = pragma_exceptions(_)
@@ -2658,7 +2830,7 @@ get_pragma_foreign_code(Globals, Pragma, !Info) :-
         ; Pragma = pragma_no_detism_warning(_)
         ; Pragma = pragma_no_inline(_)
         ; Pragma = pragma_consider_used(_)
-        ; Pragma = pragma_obsolete(_)
+        ; Pragma = pragma_obsolete(_, _)
         ; Pragma = pragma_promise_eqv_clauses(_)
         ; Pragma = pragma_promise_pure(_)
         ; Pragma = pragma_promise_semipure(_)

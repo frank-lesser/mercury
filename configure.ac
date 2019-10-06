@@ -421,6 +421,7 @@ then
         p(b).
 
         :- pred q(t::in, int::out) is det.
+        :- pragma obsolete(q/2, [[p/1]]).
 
         q(T, N) :-
             (
@@ -558,25 +559,17 @@ EOF
         echo $BOOTSTRAP_MC conftest >&AC_FD_CC 2>&1 &&
         $BOOTSTRAP_MC \
             --verbose \
-            --halt-at-warn \
             $link_static_opt conftest \
             --fixed-contiguity-2018-10-19 \
             --no-ssdb \
             </dev/null >&AC_FD_CC 2>&1 &&
         test "`./conftest 2>&1 | tr -d '\015'`" = "Hello, world" &&
-        # Test for the --record-term-sizes-as-words option.
-        # Note that we need to set --grade to an LLDS grade
-        # when doing this test because term size profiling
-        # requires an LLDS grade.
-        # This also tests for the --shlib-linker-install-name-flag,
-        # --warn-known-bad-format-calls and
-        # --warn-insts-without-matching-type options.
         $BOOTSTRAP_MC \
             --grade none.gc \
             --warn-insts-without-matching-type \
             --warn-known-bad-format-calls \
+            --simplest-msg-2019-09-22 \
             --no-detect-libgrades \
-            --record-term-sizes-as-words \
             --output-grade-string \
             --shlib-linker-install-name-flag "-dummy_flag" \
             --ranlib-flags "" \
@@ -5591,6 +5584,7 @@ java/runtime/Constants.java
 java/runtime/Native.java
 library/erlang_conf.hrl
 compiler/COMP_FLAGS
+grade_lib/GRADE_LIB_FLAGS
 library/LIB_FLAGS
 mdbcomp/MDBCOMP_FLAGS
 browser/MDB_FLAGS

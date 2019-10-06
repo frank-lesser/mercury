@@ -280,7 +280,6 @@ write_initial_opt_file(!ModuleInfo, !IO) :-
             gather_opt_export_instances(!IntermodInfo),
             gather_opt_export_types(!IntermodInfo),
             write_intermod_info(!.IntermodInfo, !IO),
-            intermod_info_get_module_info(!.IntermodInfo, !:ModuleInfo),
             io.set_output_stream(OutputStream, _, !IO),
             io.close_output(FileStream, !IO),
             do_maybe_opt_export_entities(!.IntermodInfo, !ModuleInfo)
@@ -336,16 +335,16 @@ gather_opt_export_preds_in_list([], _, _, _, _, _, !IntermodInfo).
 gather_opt_export_preds_in_list([PredId | PredIds], ProcessLocalPreds,
         CollectTypes, InlineThreshold, HigherOrderSizeLimit, Deforestation,
         !IntermodInfo) :-
-    intermod_info_get_module_info(!.IntermodInfo, ModuleInfo0),
-    module_info_get_preds(ModuleInfo0, PredTable0),
-    map.lookup(PredTable0, PredId, PredInfo0),
-    module_info_get_type_spec_info(ModuleInfo0, TypeSpecInfo),
+    intermod_info_get_module_info(!.IntermodInfo, ModuleInfo),
+    module_info_get_preds(ModuleInfo, PredTable),
+    map.lookup(PredTable, PredId, PredInfo),
+    module_info_get_type_spec_info(ModuleInfo, TypeSpecInfo),
     TypeSpecInfo = type_spec_info(_, TypeSpecForcePreds, _, _),
-    pred_info_get_clauses_info(PredInfo0, ClausesInfo0),
+    pred_info_get_clauses_info(PredInfo, ClausesInfo),
     ( if
-        clauses_info_get_explicit_vartypes(ClausesInfo0, ExplicitVarTypes),
+        clauses_info_get_explicit_vartypes(ClausesInfo, ExplicitVarTypes),
         vartypes_is_empty(ExplicitVarTypes),
-        should_opt_export_pred(ModuleInfo0, PredId, PredInfo0,
+        should_opt_export_pred(ModuleInfo, PredId, PredInfo,
             ProcessLocalPreds, TypeSpecForcePreds, InlineThreshold,
             HigherOrderSizeLimit, Deforestation)
     then
@@ -353,36 +352,29 @@ gather_opt_export_preds_in_list([PredId | PredIds], ProcessLocalPreds,
         % Write a declaration to the `.opt' file for
         % `exported_to_submodules' predicates.
         intermod_add_proc(PredId, DoWrite0, !IntermodInfo),
-        clauses_info_get_clauses_rep(ClausesInfo0, ClausesRep0, ItemNumbers0),
+        clauses_info_get_clauses_rep(ClausesInfo, ClausesRep, _ItemNumbers),
         (
             DoWrite0 = yes,
-            get_clause_list_for_replacement(ClausesRep0, Clauses0),
-            gather_entities_to_opt_export_in_clauses(Clauses0, Clauses,
-                DoWrite, !IntermodInfo),
-            set_clause_list(Clauses, ClausesRep)
+            get_clause_list_for_replacement(ClausesRep, Clauses),
+            gather_entities_to_opt_export_in_clauses(Clauses, DoWrite,
+                !IntermodInfo)
         ;
             DoWrite0 = no,
-            ClausesRep = ClausesRep0,
             DoWrite = no
         ),
         (
             DoWrite = yes,
-            clauses_info_set_clauses_rep(ClausesRep, ItemNumbers0,
-                ClausesInfo0, ClausesInfo),
-            pred_info_set_clauses_info(ClausesInfo, PredInfo0, PredInfo),
-            map.det_update(PredId, PredInfo, PredTable0, PredTable),
-            module_info_set_preds(PredTable, ModuleInfo0, ModuleInfo),
-            intermod_info_get_preds(!.IntermodInfo, Preds0),
             ( if pred_info_pragma_goal_type(PredInfo) then
-                % pragma foreign_decls must be written since their contents
-                % could be used by pragma foreign_procs.
-                intermod_info_set_write_header(!IntermodInfo)
+                % The foreign code of this predicate may refer to entities
+                % in the foreign language that defined in a foreign module
+                % that is imported by a foreign_import_module declaration.
+                intermod_info_set_need_foreign_import_modules(!IntermodInfo)
             else
                 true
             ),
-            set.insert(PredId, Preds0, Preds),
-            intermod_info_set_preds(Preds, !IntermodInfo),
-            intermod_info_set_module_info(ModuleInfo, !IntermodInfo)
+            intermod_info_get_pred_clauses(!.IntermodInfo, PredClauses0),
+            set.insert(PredId, PredClauses0, PredClauses),
+            intermod_info_set_pred_clauses(PredClauses, !IntermodInfo)
         ;
             DoWrite = no,
             % Remove any items added for the clauses for this predicate.
@@ -489,24 +481,20 @@ may_opt_export_pred(PredId, PredInfo, TypeSpecForcePreds) :-
 proc_eval_method_is_normal(ProcInfo) :-
     proc_info_get_eval_method(ProcInfo, eval_normal).
 
-:- pred gather_entities_to_opt_export_in_clauses(
-    list(clause)::in, list(clause)::out,
+:- pred gather_entities_to_opt_export_in_clauses(list(clause)::in,
     bool::out, intermod_info::in, intermod_info::out) is det.
 
-gather_entities_to_opt_export_in_clauses([], [], yes, !IntermodInfo).
-gather_entities_to_opt_export_in_clauses([Clause0 | Clauses0],
-        [Clause | Clauses], DoWrite, !IntermodInfo) :-
-    Goal0 = Clause0 ^ clause_body,
-    gather_entities_to_opt_export_in_goal(Goal0, Goal,
-        DoWrite1, !IntermodInfo),
-    Clause = Clause0 ^ clause_body := Goal,
+gather_entities_to_opt_export_in_clauses([], yes, !IntermodInfo).
+gather_entities_to_opt_export_in_clauses([Clause | Clauses], DoWrite,
+        !IntermodInfo) :-
+    Goal = Clause ^ clause_body,
+    gather_entities_to_opt_export_in_goal(Goal, DoWrite1, !IntermodInfo),
     (
         DoWrite1 = yes,
-        gather_entities_to_opt_export_in_clauses(Clauses0, Clauses,
-            DoWrite, !IntermodInfo)
+        gather_entities_to_opt_export_in_clauses(Clauses, DoWrite,
+            !IntermodInfo)
     ;
         DoWrite1 = no,
-        Clauses = Clauses0,
         DoWrite = no
     ).
 
@@ -588,35 +576,31 @@ goal_contains_one_branched_goal([Goal | Goals], FoundBranch0) :-
     % Go over the goal of an exported proc looking for proc decls, types,
     % insts and modes that we need to write to the optfile.
     %
-:- pred gather_entities_to_opt_export_in_goal(hlds_goal::in, hlds_goal::out,
-    bool::out, intermod_info::in, intermod_info::out) is det.
-
-gather_entities_to_opt_export_in_goal(Goal0, Goal, DoWrite, !IntermodInfo) :-
-    Goal0 = hlds_goal(GoalExpr0, GoalInfo),
-    gather_entities_to_opt_export_in_goal_expr(GoalExpr0, GoalExpr,
-        DoWrite, !IntermodInfo),
-    Goal = hlds_goal(GoalExpr, GoalInfo).
-
-:- pred gather_entities_to_opt_export_in_goal_expr(
-    hlds_goal_expr::in, hlds_goal_expr::out, bool::out,
+:- pred gather_entities_to_opt_export_in_goal(hlds_goal::in, bool::out,
     intermod_info::in, intermod_info::out) is det.
 
-gather_entities_to_opt_export_in_goal_expr(GoalExpr0, GoalExpr,
-        DoWrite, !IntermodInfo) :-
+gather_entities_to_opt_export_in_goal(Goal, DoWrite, !IntermodInfo) :-
+    Goal = hlds_goal(GoalExpr, _GoalInfo),
+    gather_entities_to_opt_export_in_goal_expr(GoalExpr, DoWrite,
+        !IntermodInfo).
+
+:- pred gather_entities_to_opt_export_in_goal_expr(hlds_goal_expr::in,
+    bool::out, intermod_info::in, intermod_info::out) is det.
+
+gather_entities_to_opt_export_in_goal_expr(GoalExpr, DoWrite,
+        !IntermodInfo) :-
     (
-        GoalExpr0 = unify(LVar, RHS0, Mode, Kind, UnifyContext),
+        GoalExpr = unify(_LVar, RHS, _Mode, _Kind, _UnifyContext),
         % Export declarations for preds used in higher order pred constants
         % or function calls.
-        module_qualify_unify_rhs(RHS0, RHS, DoWrite, !IntermodInfo),
-        GoalExpr = unify(LVar, RHS, Mode, Kind, UnifyContext)
+        gather_entities_to_opt_export_in_unify_rhs(RHS, DoWrite,
+            !IntermodInfo)
     ;
-        GoalExpr0 = plain_call(PredId, _, _, _, _, _),
+        GoalExpr = plain_call(PredId, _, _, _, _, _),
         % Ensure that the called predicate will be exported.
-        intermod_add_proc(PredId, DoWrite, !IntermodInfo),
-        GoalExpr = GoalExpr0
+        intermod_add_proc(PredId, DoWrite, !IntermodInfo)
     ;
-        GoalExpr0 = generic_call(CallType, _, _, _, _),
-        GoalExpr = GoalExpr0,
+        GoalExpr = generic_call(CallType, _, _, _, _),
         (
             CallType = higher_order(_, _, _, _),
             DoWrite = yes
@@ -628,8 +612,7 @@ gather_entities_to_opt_export_in_goal_expr(GoalExpr0, GoalExpr,
             DoWrite = no
         )
     ;
-        GoalExpr0 = call_foreign_proc(Attrs, _, _, _, _, _, _),
-        GoalExpr = GoalExpr0,
+        GoalExpr = call_foreign_proc(Attrs, _, _, _, _, _, _),
         % Inlineable exported pragma_foreign_code goals cannot use any
         % non-exported types, so we just write out the clauses.
         MaybeMayDuplicate = get_may_duplicate(Attrs),
@@ -647,103 +630,83 @@ gather_entities_to_opt_export_in_goal_expr(GoalExpr0, GoalExpr,
             DoWrite = yes
         )
     ;
-        GoalExpr0 = conj(ConjType, Goals0),
-        gather_entities_to_opt_export_in_goals(Goals0, Goals,
-            DoWrite, !IntermodInfo),
-        GoalExpr = conj(ConjType, Goals)
+        GoalExpr = conj(_ConjType, Goals),
+        gather_entities_to_opt_export_in_goals(Goals, DoWrite, !IntermodInfo)
     ;
-        GoalExpr0 = disj(Goals0),
-        gather_entities_to_opt_export_in_goals(Goals0, Goals,
-            DoWrite, !IntermodInfo),
-        GoalExpr = disj(Goals)
+        GoalExpr = disj(Goals),
+        gather_entities_to_opt_export_in_goals(Goals, DoWrite, !IntermodInfo)
     ;
-        GoalExpr0 = switch(Var, CanFail, Cases0),
-        gather_entities_to_opt_export_in_cases(Cases0, Cases,
-            DoWrite, !IntermodInfo),
-        GoalExpr = switch(Var, CanFail, Cases)
+        GoalExpr = switch(_Var, _CanFail, Cases),
+        gather_entities_to_opt_export_in_cases(Cases, DoWrite, !IntermodInfo)
     ;
-        GoalExpr0 = if_then_else(Vars, Cond0, Then0, Else0),
-        gather_entities_to_opt_export_in_goal(Cond0, Cond,
-            DoWrite1, !IntermodInfo),
-        gather_entities_to_opt_export_in_goal(Then0, Then,
-            DoWrite2, !IntermodInfo),
-        gather_entities_to_opt_export_in_goal(Else0, Else,
-            DoWrite3, !IntermodInfo),
-        bool.and_list([DoWrite1, DoWrite2, DoWrite3], DoWrite),
-        GoalExpr = if_then_else(Vars, Cond, Then, Else)
+        GoalExpr = if_then_else(_Vars, Cond, Then, Else),
+        gather_entities_to_opt_export_in_goal(Cond, DoWrite1, !IntermodInfo),
+        gather_entities_to_opt_export_in_goal(Then, DoWrite2, !IntermodInfo),
+        gather_entities_to_opt_export_in_goal(Else, DoWrite3, !IntermodInfo),
+        bool.and_list([DoWrite1, DoWrite2, DoWrite3], DoWrite)
     ;
-        GoalExpr0 = negation(SubGoal0),
-        gather_entities_to_opt_export_in_goal(SubGoal0, SubGoal,
-            DoWrite, !IntermodInfo),
-        GoalExpr = negation(SubGoal)
+        GoalExpr = negation(SubGoal),
+        gather_entities_to_opt_export_in_goal(SubGoal, DoWrite, !IntermodInfo)
     ;
-        GoalExpr0 = scope(Reason, SubGoal0),
+        GoalExpr = scope(_Reason, SubGoal),
         % Mode analysis hasn't been run yet, so we don't know yet whether
         % from_ground_term_construct scopes actually satisfy their invariants,
         % specifically the invariant that say they contain no calls or
         % higher-order constants. We therefore cannot special-case them here.
-        gather_entities_to_opt_export_in_goal(SubGoal0, SubGoal,
-            DoWrite, !IntermodInfo),
-        GoalExpr = scope(Reason, SubGoal)
+        %
+        % XXX Actually it wouldn't be hard to arrange to get this code to run
+        % *after* mode analysis.
+        gather_entities_to_opt_export_in_goal(SubGoal, DoWrite, !IntermodInfo)
     ;
-        GoalExpr0 = shorthand(ShortHand0),
+        GoalExpr = shorthand(ShortHand),
         (
-            ShortHand0 = atomic_goal(GoalType, Outer, Inner, MaybeOutputVars,
-                MainGoal0, OrElseGoals0, OrElseInners),
-            gather_entities_to_opt_export_in_goal(MainGoal0, MainGoal,
+            ShortHand = atomic_goal(_GoalType, _Outer, _Inner,
+                _MaybeOutputVars, MainGoal, OrElseGoals, _OrElseInners),
+            gather_entities_to_opt_export_in_goal(MainGoal,
                 DoWriteMain, !IntermodInfo),
-            gather_entities_to_opt_export_in_goals(OrElseGoals0, OrElseGoals,
+            gather_entities_to_opt_export_in_goals(OrElseGoals,
                 DoWriteOrElse, !IntermodInfo),
-            bool.and(DoWriteMain, DoWriteOrElse, DoWrite),
-            ShortHand = atomic_goal(GoalType, Outer, Inner, MaybeOutputVars,
-                MainGoal, OrElseGoals, OrElseInners)
+            bool.and(DoWriteMain, DoWriteOrElse, DoWrite)
         ;
-            ShortHand0 = try_goal(_MaybeIO, _ResultVar, _SubGoal0),
+            ShortHand = try_goal(_MaybeIO, _ResultVar, _SubGoal),
             % hlds_out_goal.m does not write out `try' goals properly.
-            DoWrite = no,
-            ShortHand = ShortHand0
+            DoWrite = no
         ;
-            ShortHand0 = bi_implication(_, _),
+            ShortHand = bi_implication(_, _),
             % These should have been expanded out by now.
             unexpected($pred, "bi_implication")
-        ),
-        GoalExpr = shorthand(ShortHand)
+        )
     ).
 
-:- pred gather_entities_to_opt_export_in_goals(hlds_goals::in, hlds_goals::out,
-    bool::out, intermod_info::in, intermod_info::out) is det.
+:- pred gather_entities_to_opt_export_in_goals(list(hlds_goal)::in, bool::out,
+    intermod_info::in, intermod_info::out) is det.
 
-gather_entities_to_opt_export_in_goals([], [], yes, !IntermodInfo).
-gather_entities_to_opt_export_in_goals([Goal0 | Goals0], [Goal | Goals],
-        !:DoWrite, !IntermodInfo) :-
-    gather_entities_to_opt_export_in_goal(Goal0, Goal,
-        !:DoWrite, !IntermodInfo),
+gather_entities_to_opt_export_in_goals([], yes, !IntermodInfo).
+gather_entities_to_opt_export_in_goals([Goal | Goals], !:DoWrite,
+        !IntermodInfo) :-
+    gather_entities_to_opt_export_in_goal(Goal, !:DoWrite, !IntermodInfo),
     (
         !.DoWrite = yes,
-        gather_entities_to_opt_export_in_goals(Goals0, Goals, !:DoWrite,
+        gather_entities_to_opt_export_in_goals(Goals, !:DoWrite,
             !IntermodInfo)
     ;
-        !.DoWrite = no,
-        Goals = Goals0
+        !.DoWrite = no
     ).
 
-:- pred gather_entities_to_opt_export_in_cases(list(case)::in, list(case)::out,
-    bool::out, intermod_info::in, intermod_info::out) is det.
+:- pred gather_entities_to_opt_export_in_cases(list(case)::in, bool::out,
+    intermod_info::in, intermod_info::out) is det.
 
-gather_entities_to_opt_export_in_cases([], [], yes, !IntermodInfo).
-gather_entities_to_opt_export_in_cases([Case0 | Cases0], [Case | Cases],
-        !:DoWrite, !IntermodInfo) :-
-    Case0 = case(MainConsId, OtherConsIds, Goal0),
-    gather_entities_to_opt_export_in_goal(Goal0, Goal,
-        !:DoWrite, !IntermodInfo),
-    Case = case(MainConsId, OtherConsIds, Goal),
+gather_entities_to_opt_export_in_cases([], yes, !IntermodInfo).
+gather_entities_to_opt_export_in_cases([Case | Cases], !:DoWrite,
+        !IntermodInfo) :-
+    Case = case(_MainConsId, _OtherConsIds, Goal),
+    gather_entities_to_opt_export_in_goal(Goal, !:DoWrite, !IntermodInfo),
     (
         !.DoWrite = yes,
-        gather_entities_to_opt_export_in_cases(Cases0, Cases,
-            !:DoWrite, !IntermodInfo)
+        gather_entities_to_opt_export_in_cases(Cases, !:DoWrite,
+            !IntermodInfo)
     ;
-        !.DoWrite = no,
-        Cases = Cases0
+        !.DoWrite = no
     ).
 
     % intermod_add_proc/4 tries to do what ever is necessary to ensure that the
@@ -792,14 +755,17 @@ intermod_do_add_proc(PredId, DoWrite, !IntermodInfo) :-
         DoWrite = yes
     else if
         % Don't write the caller to the `.opt' file if it calls a pred
-        % without mode or determinism decls, because we'd need to include
-        % the mode decls for the callee in the `.opt' file and (since
-        % writing the `.opt' file happens before mode inference) we can't
-        % do that because we don't know what the modes are.
+        % without mode or determinism decls, because then we would need
+        % to include the mode decls for the callee in the `.opt' file and
+        % (since writing the `.opt' file happens before mode inference)
+        % we can't do that because we don't know what the modes are.
         %
         % XXX This prevents intermodule optimizations in such cases,
         % which is a pity.
-
+        %
+        % XXX Actually it wouldn't be hard to arrange to get this code to run
+        % *after* mode analysis, so this restriction is likely to be
+        % unnecessary.
         (
             check_marker(Markers, marker_infer_modes)
         ;
@@ -894,41 +860,32 @@ intermod_do_add_proc(PredId, DoWrite, !IntermodInfo) :-
     % For function calls and higher-order terms, call add_proc
     % so that the predicate or function will be exported if necessary.
     %
-:- pred module_qualify_unify_rhs(unify_rhs::in, unify_rhs::out, bool::out,
+:- pred gather_entities_to_opt_export_in_unify_rhs(unify_rhs::in, bool::out,
     intermod_info::in, intermod_info::out) is det.
 
-module_qualify_unify_rhs(RHS0, RHS, DoWrite, !IntermodInfo) :-
+gather_entities_to_opt_export_in_unify_rhs(RHS, DoWrite, !IntermodInfo) :-
     (
-        RHS0 = rhs_var(_),
-        RHS = RHS0,
+        RHS = rhs_var(_),
         DoWrite = yes
     ;
-        RHS0 = rhs_lambda_goal(Purity, HOGroundness, PorF, EvalMethod,
-            NonLocals, QuantVars, Modes, Detism, Goal0),
-        gather_entities_to_opt_export_in_goal(Goal0, Goal,
-            DoWrite, !IntermodInfo),
-        RHS = rhs_lambda_goal(Purity, HOGroundness, PorF, EvalMethod,
-            NonLocals, QuantVars, Modes, Detism, Goal)
+        RHS = rhs_lambda_goal(_Purity, _HOGroundness, _PorF, _EvalMethod,
+            _NonLocals, _QuantVars, _Modes, _Detism, Goal),
+        gather_entities_to_opt_export_in_goal(Goal, DoWrite, !IntermodInfo)
     ;
-        RHS0 = rhs_functor(Functor, _Exist, _Vars),
-        RHS = RHS0,
+        RHS = rhs_functor(Functor, _Exist, _Vars),
         % Is this a higher-order predicate or higher-order function term?
         ( if Functor = closure_cons(ShroudedPredProcId, _) then
             % Yes, the unification creates a higher-order term.
             % Make sure that the predicate/function is exported.
-
             proc(PredId, _) = unshroud_pred_proc_id(ShroudedPredProcId),
             intermod_add_proc(PredId, DoWrite, !IntermodInfo)
         else
             % It is an ordinary constructor, or a constant of a builtin type,
             % so just leave it alone.
             %
-            % Constructors are module qualified by post_typecheck.m.
-            %
             % Function calls and higher-order function applications
             % are transformed into ordinary calls and higher-order calls
             % by post_typecheck.m, so they cannot occur here.
-
             DoWrite = yes
         )
     ).
@@ -944,8 +901,8 @@ gather_opt_export_instances(!IntermodInfo) :-
     map.foldl(gather_opt_export_instances_in_class(ModuleInfo), Instances,
         !IntermodInfo).
 
-:- pred gather_opt_export_instances_in_class(module_info::in, class_id::in,
-    list(hlds_instance_defn)::in,
+:- pred gather_opt_export_instances_in_class(module_info::in,
+    class_id::in, list(hlds_instance_defn)::in,
     intermod_info::in, intermod_info::out) is det.
 
 gather_opt_export_instances_in_class(ModuleInfo, ClassId, InstanceDefns,
@@ -1204,9 +1161,9 @@ gather_opt_export_types_in_type_defn(TypeCtor, TypeDefn0, !IntermodInfo) :-
                 MaybeForeign0 = yes(ForeignTypeBody0),
                 have_foreign_type_for_backend(Target, ForeignTypeBody0, yes)
             then
-                % The header code must be written since it could be used
-                % by the foreign type.
-                intermod_info_set_write_header(!IntermodInfo),
+                % The foreign type may be defined in one of the foreign
+                % modules we import.
+                intermod_info_set_need_foreign_import_modules(!IntermodInfo),
                 resolve_foreign_type_body_overloading(ModuleInfo, TypeCtor,
                     ForeignTypeBody0, ForeignTypeBody, !IntermodInfo),
                 MaybeForeign = yes(ForeignTypeBody),
@@ -1221,9 +1178,9 @@ gather_opt_export_types_in_type_defn(TypeCtor, TypeDefn0, !IntermodInfo) :-
             hlds_data.set_type_defn_body(TypeBody, TypeDefn0, TypeDefn)
         ;
             TypeBody0 = hlds_foreign_type(ForeignTypeBody0),
-            % The header code must be written since it could be used
-            % by the foreign type.
-            intermod_info_set_write_header(!IntermodInfo),
+            % The foreign type may be defined in one of the foreign
+            % modules we import.
+            intermod_info_set_need_foreign_import_modules(!IntermodInfo),
             resolve_foreign_type_body_overloading(ModuleInfo, TypeCtor,
                 ForeignTypeBody0, ForeignTypeBody, !IntermodInfo),
             TypeBody = hlds_foreign_type(ForeignTypeBody),
@@ -1318,11 +1275,11 @@ resolve_foreign_type_body_overloading_2(ModuleInfo, TypeCtor,
         MaybeForeignTypeLangData = no
     ;
         MaybeForeignTypeLangData0 =
-            yes(foreign_type_lang_data(Body, MaybeUserEqComp0, Assertions)),
+            yes(type_details_foreign(Body, MaybeUserEqComp0, Assertions)),
         resolve_unify_compare_overloading(ModuleInfo, TypeCtor,
             MaybeUserEqComp0, MaybeUserEqComp, !IntermodInfo),
         MaybeForeignTypeLangData =
-            yes(foreign_type_lang_data(Body, MaybeUserEqComp, Assertions))
+            yes(type_details_foreign(Body, MaybeUserEqComp, Assertions))
     ).
 
 :- pred resolve_unify_compare_overloading(module_info::in,
@@ -1403,14 +1360,14 @@ write_intermod_info(IntermodInfo, !IO) :-
     mercury_output_bracketed_sym_name(ModuleName, !IO),
     io.write_string(".\n", !IO),
 
-    intermod_info_get_preds(IntermodInfo, Preds),
+    intermod_info_get_pred_clauses(IntermodInfo, PredClauses),
     intermod_info_get_pred_decls(IntermodInfo, PredDecls),
     intermod_info_get_instances(IntermodInfo, Instances),
     ( if
         % If none of these item types need writing, nothing else
         % needs to be written.
 
-        set.is_empty(Preds),
+        set.is_empty(PredClauses),
         set.is_empty(PredDecls),
         Instances = [],
         module_info_get_type_table(ModuleInfo, TypeTable),
@@ -1441,8 +1398,8 @@ some_type_needs_to_be_written([_ - TypeDefn | TypeCtorDefns], NeedWrite) :-
 :- pred write_intermod_info_body(intermod_info::in, io::di, io::uo) is det.
 
 write_intermod_info_body(IntermodInfo, !IO) :-
-    IntermodInfo = intermod_info(_, WritePredPredIdSet, WriteDeclPredIdSet,
-        Instances, Types, ModuleInfo, WriteHeader),
+    IntermodInfo = intermod_info(ModuleInfo, _,
+        WritePredPredIdSet, WriteDeclPredIdSet, Instances, Types, WriteHeader),
     set.to_sorted_list(WritePredPredIdSet, WritePredPredIds),
     set.to_sorted_list(WriteDeclPredIdSet, WriteDeclPredIds),
 
@@ -1470,20 +1427,20 @@ write_intermod_info_body(IntermodInfo, !IO) :-
     intermod_write_classes(OutInfo, ModuleInfo, !IO),
     intermod_write_instances(OutInfo, Instances, !IO),
     (
-        WriteHeader = yes,
+        WriteHeader = do_need_foreign_import_modules,
         module_info_get_foreign_import_modules(ModuleInfo,
             ForeignImportModules),
         ForeignImports =
-            get_all_foreign_import_module_infos(ForeignImportModules),
+            get_all_fim_specs(ForeignImportModules),
         ( if set.is_empty(ForeignImports) then
             true
         else
             io.nl(!IO),
-            set.fold(mercury_output_foreign_import_module_info,
+            set.fold(mercury_output_fim_spec,
                 ForeignImports, !IO)
         )
     ;
-        WriteHeader = no
+        WriteHeader = do_not_need_foreign_import_modules
     ),
     generate_order_pred_infos(ModuleInfo, WriteDeclPredIds,
         DeclOrderPredInfos),
@@ -1592,7 +1549,7 @@ intermod_write_type(OutInfo, TypeCtor - TypeDefn, !IO) :-
     then
         (
             MaybeC = yes(DataC),
-            DataC = foreign_type_lang_data(CForeignType,
+            DataC = type_details_foreign(CForeignType,
                 CMaybeUserEqComp, AssertionsC),
             CDetailsForeign = type_details_foreign(c(CForeignType),
                 CMaybeUserEqComp, AssertionsC),
@@ -1606,7 +1563,7 @@ intermod_write_type(OutInfo, TypeCtor - TypeDefn, !IO) :-
         ),
         (
             MaybeJava = yes(DataJava),
-            DataJava = foreign_type_lang_data(JavaForeignType,
+            DataJava = type_details_foreign(JavaForeignType,
                 JavaMaybeUserEqComp, AssertionsJava),
             JavaDetailsForeign = type_details_foreign(java(JavaForeignType),
                 JavaMaybeUserEqComp, AssertionsJava),
@@ -1620,7 +1577,7 @@ intermod_write_type(OutInfo, TypeCtor - TypeDefn, !IO) :-
         ),
         (
             MaybeCSharp = yes(DataCSharp),
-            DataCSharp = foreign_type_lang_data(CSharpForeignType,
+            DataCSharp = type_details_foreign(CSharpForeignType,
                 CSharpMaybeUserEqComp, AssertionsCSharp),
             CSharpDetailsForeign = type_details_foreign(
                 csharp(CSharpForeignType),
@@ -1635,7 +1592,7 @@ intermod_write_type(OutInfo, TypeCtor - TypeDefn, !IO) :-
         ),
         (
             MaybeErlang = yes(DataErlang),
-            DataErlang = foreign_type_lang_data(ErlangForeignType,
+            DataErlang = type_details_foreign(ErlangForeignType,
                 ErlangMaybeUserEqComp, AssertionsErlang),
             ErlangDetailsForeign = type_details_foreign(
                 erlang(ErlangForeignType),
@@ -1668,14 +1625,9 @@ intermod_write_type(OutInfo, TypeCtor - TypeDefn, !IO) :-
             ForeignEnumVals = [HeadForeignEnumVal | TailForeignEnumVals],
             OoMForeignEnumVals =
                 one_or_more(HeadForeignEnumVal, TailForeignEnumVals),
-            FEInfo = pragma_info_foreign_enum(Lang, TypeCtor,
-                OoMForeignEnumVals),
-            ForeignPragma = pragma_foreign_enum(FEInfo),
-            % The pragma's origin isn't printed, so what origin we pass here
-            % doesn't matter.
-            ForeignItemPragma = item_pragma_info(ForeignPragma,
-                item_origin_user, Context, -1),
-            ForeignItem = item_pragma(ForeignItemPragma),
+            ItemForeignEnum = item_foreign_enum_info(Lang, TypeCtor,
+                OoMForeignEnumVals, Context, -1),
+            ForeignItem = item_foreign_enum(ItemForeignEnum),
             mercury_output_item(MercInfo, ForeignItem, !IO)
         )
     else
@@ -2055,9 +2007,6 @@ should_output_marker(marker_is_semipure, no).
 should_output_marker(marker_class_method, no).
 should_output_marker(marker_class_instance_method, no).
 should_output_marker(marker_named_class_instance_method, no).
-    % The warning for calls to local obsolete predicates should appear
-    % once in the defining module, not in importing modules.
-should_output_marker(marker_obsolete, no).
 should_output_marker(marker_no_detism_warning, no).
 should_output_marker(marker_user_marked_inline, yes).
 should_output_marker(marker_user_marked_no_inline, yes).
@@ -3120,60 +3069,79 @@ old_status_to_write(status_external(Status)) =
 
 %---------------------------------------------------------------------------%
 
+:- type maybe_need_foreign_import_modules
+    --->    do_not_need_foreign_import_modules
+    ;       do_need_foreign_import_modules.
+
     % A collection of stuff to go in the .opt file.
     %
 :- type intermod_info
     --->    intermod_info(
-                % Modules to import.
-                im_modules              :: set(module_name),
-
-                % Preds to output clauses for.
-                im_preds                :: set(pred_id),
-
-                % Preds to output decls for.
-                im_pred_decls           :: set(pred_id),
-
-                % Instances declarations to write.
-                im_instances            :: assoc_list(class_id,
-                                            hlds_instance_defn),
-
-                % Type declarations to write.
-                im_types                :: assoc_list(type_ctor,
-                                            hlds_type_defn),
-
+                % The initial ModuleInfo. Readonly.
                 im_module_info          :: module_info,
 
-                % Do the pragma foreign_decls for the module need writing,
-                % yes if there are pragma foreign_procs being exported.
-                im_write_foreign_header :: bool
+                % The modules that the .opt file will need to import.
+                % XXX Or use?
+                im_modules              :: set(module_name),
+
+                % The ids of the predicates (and functions) whose
+                % definitions (i.e. clauses) we want to put into the
+                % .opt file.
+                im_pred_clauses         :: set(pred_id),
+
+                % The ids of the predicates (and functions) whose
+                % type and mode declarations we want to put into the
+                % .opt file.
+                im_pred_decls           :: set(pred_id),
+
+                % The instance definitions we want to put into the .opt file.
+                im_instance_defns       :: assoc_list(class_id,
+                                            hlds_instance_defn),
+
+                % The type definitions we want to put into the .opt file.
+                im_type_defns           :: assoc_list(type_ctor,
+                                            hlds_type_defn),
+
+                % Is there anything we want to put into the .opt file
+                % that may refer to foreign language entities that may need
+                % access to foreign_import_modules to resolve?
+                %
+                % If no, we don't need to include any of the
+                % foreign_import_modules declarations in the module
+                % in the .opt file.
+                %
+                % If yes, we need to include all of them in the .opt file,
+                % since we have no info about which fim defines what.
+                im_need_foreign_imports :: maybe_need_foreign_import_modules
             ).
 
 :- pred init_intermod_info(module_info::in, intermod_info::out) is det.
 
 init_intermod_info(ModuleInfo, IntermodInfo) :-
     set.init(Modules),
-    set.init(Procs),
-    set.init(ProcDecls),
-    Instances = [],
-    Types = [],
-    IntermodInfo = intermod_info(Modules, Procs, ProcDecls, Instances, Types,
-        ModuleInfo, no).
+    set.init(PredClauses),
+    set.init(PredDecls),
+    InstanceDefns = [],
+    TypeDefns = [],
+    IntermodInfo = intermod_info(ModuleInfo, Modules, PredClauses, PredDecls,
+        InstanceDefns, TypeDefns, do_not_need_foreign_import_modules).
 
+:- pred intermod_info_get_module_info(intermod_info::in, module_info::out)
+    is det.
 :- pred intermod_info_get_modules(intermod_info::in, set(module_name)::out)
     is det.
-:- pred intermod_info_get_preds(intermod_info::in, set(pred_id)::out) is det.
+:- pred intermod_info_get_pred_clauses(intermod_info::in, set(pred_id)::out)
+    is det.
 :- pred intermod_info_get_pred_decls(intermod_info::in, set(pred_id)::out)
     is det.
 :- pred intermod_info_get_instances(intermod_info::in,
     assoc_list(class_id, hlds_instance_defn)::out) is det.
 :- pred intermod_info_get_types(intermod_info::in,
     assoc_list(type_ctor, hlds_type_defn)::out) is det.
-:- pred intermod_info_get_module_info(intermod_info::in, module_info::out)
-    is det.
 
 :- pred intermod_info_set_modules(set(module_name)::in,
     intermod_info::in, intermod_info::out) is det.
-:- pred intermod_info_set_preds(set(pred_id)::in,
+:- pred intermod_info_set_pred_clauses(set(pred_id)::in,
     intermod_info::in, intermod_info::out) is det.
 :- pred intermod_info_set_pred_decls(set(pred_id)::in,
     intermod_info::in, intermod_info::out) is det.
@@ -3184,38 +3152,34 @@ init_intermod_info(ModuleInfo, IntermodInfo) :-
     intermod_info::in, intermod_info::out) is det.
 %:- pred intermod_info_set_insts(set(inst_id)::in,
 %   intermod_info::in, intermod_info::out) is det.
-:- pred intermod_info_set_module_info(module_info::in,
-    intermod_info::in, intermod_info::out) is det.
-:- pred intermod_info_set_write_header(intermod_info::in,
+:- pred intermod_info_set_need_foreign_import_modules(intermod_info::in,
     intermod_info::out) is det.
 
+intermod_info_get_module_info(IntermodInfo, X) :-
+    X = IntermodInfo ^ im_module_info.
 intermod_info_get_modules(IntermodInfo, X) :-
     X = IntermodInfo ^ im_modules.
-intermod_info_get_preds(IntermodInfo, X) :-
-    X = IntermodInfo ^ im_preds.
+intermod_info_get_pred_clauses(IntermodInfo, X) :-
+    X = IntermodInfo ^ im_pred_clauses.
 intermod_info_get_pred_decls(IntermodInfo, X) :-
     X = IntermodInfo ^ im_pred_decls.
 intermod_info_get_instances(IntermodInfo, X) :-
-    X = IntermodInfo ^ im_instances.
+    X = IntermodInfo ^ im_instance_defns.
 intermod_info_get_types(IntermodInfo, X) :-
-    X = IntermodInfo ^ im_types.
-intermod_info_get_module_info(IntermodInfo, X) :-
-    X = IntermodInfo ^ im_module_info.
+    X = IntermodInfo ^ im_type_defns.
 
-intermod_info_set_modules(Modules, !IntermodInfo) :-
-    !IntermodInfo ^ im_modules := Modules.
-intermod_info_set_preds(Procs, !IntermodInfo) :-
-    !IntermodInfo ^ im_preds := Procs.
-intermod_info_set_pred_decls(ProcDecls, !IntermodInfo) :-
-    !IntermodInfo ^ im_pred_decls := ProcDecls.
-intermod_info_set_instances(Instances, !IntermodInfo) :-
-    !IntermodInfo ^ im_instances := Instances.
-intermod_info_set_types(Types, !IntermodInfo) :-
-    !IntermodInfo ^ im_types := Types.
-intermod_info_set_module_info(ModuleInfo, !IntermodInfo) :-
-    !IntermodInfo ^ im_module_info := ModuleInfo.
-intermod_info_set_write_header(!IntermodInfo) :-
-    !IntermodInfo ^ im_write_foreign_header := yes.
+intermod_info_set_modules(X, !IntermodInfo) :-
+    !IntermodInfo ^ im_modules := X.
+intermod_info_set_pred_clauses(X, !IntermodInfo) :-
+    !IntermodInfo ^ im_pred_clauses := X.
+intermod_info_set_pred_decls(X, !IntermodInfo) :-
+    !IntermodInfo ^ im_pred_decls := X.
+intermod_info_set_instances(X, !IntermodInfo) :-
+    !IntermodInfo ^ im_instance_defns := X.
+intermod_info_set_types(X, !IntermodInfo) :-
+    !IntermodInfo ^ im_type_defns := X.
+intermod_info_set_need_foreign_import_modules(!IntermodInfo) :-
+    !IntermodInfo ^ im_need_foreign_imports := do_need_foreign_import_modules.
 
 %---------------------------------------------------------------------------%
 
@@ -3252,7 +3216,7 @@ write_trans_opt_file(ModuleInfo, !IO) :-
         % into the .trans_opt file.
 
         module_info_get_valid_pred_ids(ModuleInfo, PredIds),
-        PredIdsSet = set.from_list(PredIds),
+        PredIdsSet = set.list_to_set(PredIds),
         module_info_get_structure_reuse_preds(ModuleInfo, ReusePredsSet),
         PredIdsNoReusePredsSet = set.difference(PredIdsSet, ReusePredsSet),
         PredIdsNoReuseVersions = set.to_sorted_list(PredIdsNoReusePredsSet),

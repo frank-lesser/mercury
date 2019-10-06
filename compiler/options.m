@@ -156,6 +156,7 @@
     ;       halt_at_warn
     ;       halt_at_syntax_errors
     ;       halt_at_auto_parallel_failure
+    ;       halt_at_invalid_interface
     ;       warn_singleton_vars
     ;       warn_overlapping_scopes
     ;       warn_det_decls_too_lax
@@ -207,6 +208,7 @@
     ;       warn_suspicious_foreign_procs
     ;       warn_suspicious_foreign_code
     ;       warn_state_var_shadowing
+    ;       warn_suspected_occurs_check_failure
     ;       inform_inferred
     ;       inform_inferred_types
     ;       inform_inferred_modes
@@ -502,6 +504,7 @@
     ;       unboxed_int64s
     ;       unboxed_no_tag_types
     ;       arg_pack_bits
+    ;       allow_direct_args
     ;       allow_double_word_fields
     ;       allow_double_word_ints          % XXX bootstrapping option
     ;       allow_packing_dummies           % XXX bootstrapping option
@@ -1176,6 +1179,10 @@ option_defaults_2(warning_option, [
     halt_at_warn                        -   bool(no),
     halt_at_syntax_errors               -   bool(no),
     halt_at_auto_parallel_failure       -   bool(no),
+    % XXX TYPE_REPN We should set this to "yes" once we require
+    % the installed compiler to ensure that what it puts into
+    % interface files won't generate any errors.
+    halt_at_invalid_interface           -   bool(no),
 
     % IMPORTANT NOTE:
     % if you add any new warning options, or if you change the default
@@ -1239,6 +1246,7 @@ option_defaults_2(warning_option, [
     warn_suspicious_foreign_procs       -   bool(no),
     warn_suspicious_foreign_code        -   bool(no),
     warn_state_var_shadowing            -   bool(yes),
+    warn_suspected_occurs_check_failure -   bool(yes),
     inform_inferred                     -   bool_special,
     inform_inferred_types               -   bool(yes),
     inform_inferred_modes               -   bool(yes),
@@ -1486,6 +1494,7 @@ option_defaults_2(compilation_model_option, [
     arg_pack_bits                       -   int(-1),
                                         % -1 is a special value which means use
                                         % all word bits for argument packing.
+    allow_direct_args                   -   bool(yes),
     allow_double_word_fields            -   bool(yes),
     allow_double_word_ints              -   bool(no),
     allow_packing_dummies               -   bool(no),
@@ -2092,6 +2101,7 @@ long_option("warn-accumulator-swaps",   warn_accumulator_swaps).
 long_option("halt-at-warn",             halt_at_warn).
 long_option("halt-at-syntax-errors",    halt_at_syntax_errors).
 long_option("halt-at-auto-parallel-failure", halt_at_auto_parallel_failure).
+long_option("halt-at-invalid-interface",    halt_at_invalid_interface).
 long_option("warn-singleton-variables", warn_singleton_vars).
 long_option("warn-singleton-vars",      warn_singleton_vars).
 long_option("warn-overlapping-scopes",  warn_overlapping_scopes).
@@ -2163,6 +2173,10 @@ long_option("warn-unresolved-polymorphism", warn_unresolved_polymorphism).
 long_option("warn-suspicious-foreign-procs", warn_suspicious_foreign_procs).
 long_option("warn-suspicious-foreign-code", warn_suspicious_foreign_code).
 long_option("warn-state-var-shadowing", warn_state_var_shadowing).
+long_option("warn-suspected-occurs-failure",
+                                        warn_suspected_occurs_check_failure).
+long_option("warn-suspected-occurs-check-failure",
+                                        warn_suspected_occurs_check_failure).
 long_option("inform-inferred",          inform_inferred).
 long_option("inform-inferred-types",    inform_inferred_types).
 long_option("inform-inferred-modes",    inform_inferred_modes).
@@ -2459,6 +2473,7 @@ long_option("unboxed-float",        unboxed_float).
 long_option("unboxed-int64s",       unboxed_int64s).
 long_option("unboxed-no-tag-types", unboxed_no_tag_types).
 long_option("arg-pack-bits",        arg_pack_bits).
+long_option("allow-direct-args",    allow_direct_args).
 long_option("allow-double-word-fields", allow_double_word_fields).
 long_option("allow-double-word-ints", allow_double_word_ints).
 long_option("allow-packing-dummies", allow_packing_dummies).
@@ -3099,6 +3114,10 @@ long_option("builtin-lt-gt-2018-10-08",
                                     compiler_sufficiently_recent).
 long_option("fixed-contiguity-2018-10-19",
                                     compiler_sufficiently_recent).
+long_option("simplest-msg-2019-09-22",
+                                    compiler_sufficiently_recent).
+long_option("unqual-foreign-enums-in-int-files-2019-10-04",
+                                    compiler_sufficiently_recent).
 long_option("experiment",           experiment).
 long_option("experiment1",          experiment1).
 long_option("experiment2",          experiment2).
@@ -3451,6 +3470,7 @@ non_style_warning_options = [
     warn_stubs,
     warn_table_with_inline,
     warn_non_term_special_preds,
+    warn_suspected_occurs_check_failure,
     inform_inferred_types
 ].
 
@@ -3779,7 +3799,7 @@ inconsequential_options(InconsequentialOptions) :-
     assoc_list.keys(InternalUseOptions, InternalUseKeys),
     assoc_list.keys(BuildSystemOptions, BuildSystemKeys),
     Keys = WarningKeys ++ VerbosityKeys ++ InternalUseKeys ++ BuildSystemKeys,
-    InconsequentialOptions = set.from_list(Keys).
+    InconsequentialOptions = set.list_to_set(Keys).
 
 %---------------------------------------------------------------------------%
 
@@ -3826,6 +3846,11 @@ options_help_warning -->
         "\tThis option causes the compiler to halt immediately",
         "\tafter syntax checking and not do any semantic checking",
         "\tif it finds any syntax errors in the program.",
+% --halt-at-invalid-interface is a temporary developer-only option.
+%       "--halt-at-invalid-interface",
+%       "\tThis option causes the compiler to halt immediately",
+%       "\tif it finds that an automatically generated interface file",
+%       "\thas invalid contents.",
 %       "--halt-at-auto-parallel-failure",
 %       "\tThis option causes the compiler to halt if it cannot perform",
 %       "\tan auto-parallelization requested by a feedback file.",
@@ -4001,6 +4026,10 @@ options_help_warning -->
         "\tpragmas.",
         "--no-warn-state-var-shadowing",
         "\tDo not warn about one state variable shadowing another.",
+        "--no-warn-suspected-occurs-check-failure",
+        "\tDo not warn about code that looks like it unifies a variable",
+        "\twith a term that contains that same variable. Such code cannot",
+        "\tsucceed because it fails what is called the `occurs check'.",
         "--no-inform-inferred",
         "\tDo not generate messages about inferred types or modes.",
         "--no-inform-inferred-types",
@@ -5060,6 +5089,11 @@ options_help_compilation_model -->
 %       "(This option is not for general use.)",
 %       "\tThe number of bits in a word in which to pack constructor"
 %       "arguments.",
+
+        % This is a developer only option.
+%       "--allow-direct-args",
+%       "(This option is not for general use.)",
+%       "\tAllow the direct arg optimization.",
 
         % This is a developer only option.
 %       "--no-allow-double-word-fields",

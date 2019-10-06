@@ -272,7 +272,7 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
     ;       parse_tree_eqv_type(type_details_eqv)
     ;       parse_tree_solver_type(type_details_solver)
     ;       parse_tree_abstract_type(type_details_abstract)
-    ;       parse_tree_foreign_type(type_details_foreign).
+    ;       parse_tree_foreign_type(type_details_foreign_generic).
 
 :- type type_details_du
     --->    type_details_du(
@@ -326,13 +326,6 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
                 solver_canonical    :: maybe_canonical
             ).
 
-:- type type_details_foreign
-    --->    type_details_foreign(
-                foreign_lang_type   :: foreign_language_type,
-                foreign_canonical   :: maybe_canonical,
-                foreign_assertions  :: foreign_type_assertions
-            ).
-
     % The `is_solver_type' type specifies whether a type is a "solver" type,
     % for which `any' insts are interpreted as "don't know", or a non-solver
     % type for which `any' is the same as `bound(...)'.
@@ -345,11 +338,35 @@ cons_id_is_const_struct(ConsId, ConstNum) :-
             % The inst `any' is not always `bound' for this type
             % (i.e. the type was declared with `:- solver type ...').
 
-    % A foreign_language_type represents a type that is defined in a
-    % foreign language and accessed in Mercury (most likely through
-    % `pragma foreign_type').
+    % The reason why we make LangType a parameter of type_details_foreign
+    % is the fact that we need information about type names defined in
+    % foreign languages in two kinds of circumstances.
     %
-:- type foreign_language_type
+    % The first kind is when we are handling a single specific
+    % `pragma foreign_type' item. In this case, we need to use a single type
+    % to represent a declaration that could be for any foreign language.
+    % In this case, we use type_details_foreign(generic_language_foreign_type),
+    % which can represent a type name for any foreign language.
+    %
+    % The other kind is when we want to gather all the definitions for
+    % a given type constructor in a given foreign language, such as C.
+    % In this case, we use type_details_foreign(c_foreign_type), which
+    % which can represent a type name only for the chosen foreign language.
+    %
+:- type type_details_foreign(LangType)
+    --->    type_details_foreign(
+                foreign_lang_type   :: LangType,
+                foreign_canonical   :: maybe_canonical,
+                foreign_assertions  :: foreign_type_assertions
+            ).
+
+:- type type_details_foreign_generic ==
+    type_details_foreign(generic_language_foreign_type).
+
+    % A generic_language_foreign_type represents a type that is
+    % defined in a given foreign language using `pragma foreign_type'.
+    %
+:- type generic_language_foreign_type
     --->    c(c_foreign_type)
     ;       java(java_foreign_type)
     ;       csharp(csharp_foreign_type)
@@ -1424,7 +1441,8 @@ determinism_components(detism_failure,   can_fail,    at_most_zero).
 :- implementation.
 
 less_pure(P1, P2) :-
-    worst_purity(P1, P2) \= P2.
+    WP = worst_purity(P1, P2),
+    WP \= P2.
 
     % worst_purity/3 could be written more compactly, but this definition
     % guarantees us a determinism error if we add to type `purity'. We also
@@ -1461,19 +1479,64 @@ best_purity(purity_impure, purity_impure) = purity_impure.
 
 :- interface.
 
+    % The kinds of auxiliary predicates we may need to generate
+    % to implement a mutable.
+    %
+    % The first group represent the public predicates, the predicates
+    % that user programs may call. The usual (non-constant) kind of mutable
+    % will have the standard get and set predicates, and if attached
+    % to the I/O state, will have the I/O get and set predicates as well.
+    % Constant mutables will have the constant get and set predicates instead
+    % (see below).
+    %
+    % The second group represent the private predicates, the predicates
+    % that user programs should not call (and which are not documented).
+    % The unsafe get and set predicates may be needed to implement the other,
+    % user-visible get and set predicates, and the lock and unlock predicates
+    % have the same role. The initialization predicate is called by the
+    % implementation itself at program startup, and it may need the help
+    % of the preinit predicate.
+    %
+    % Note that we need a set predicate even for constant mutables.
+    % The reason is that the init predicate needs to do two things:
+    % execute arbitrary Mercury code (call functions etc) to generate
+    % the initial (and for constant mutables, also final) value of the mutable,
+    % and then store this value in persistent storage. However, even if
+    % we could create an item that contains both Mercury code and backend
+    % (e.g. C) code, which is currently not possible, this would require
+    % the second part to be a foreign_proc goal. Such goals include a reference
+    % to the predicate they implement. That predicate would be equivalent
+    % to the set predicate.
+    %
+    % In these circumstances, avoiding the need for a set predicate
+    % would require significant changes to the structures of items.
+    % It is much simpler to use a predicate and give it a name that
+    % makes it clear people that shouldn't use it.
+    %
 :- type mutable_pred_kind
     --->    mutable_pred_std_get
     ;       mutable_pred_std_set
     ;       mutable_pred_io_get
     ;       mutable_pred_io_set
-    ;       mutable_pred_unsafe_get
-    ;       mutable_pred_unsafe_set
     ;       mutable_pred_constant_get
     ;       mutable_pred_constant_secret_set
+
+    ;       mutable_pred_unsafe_get
+    ;       mutable_pred_unsafe_set
     ;       mutable_pred_lock
     ;       mutable_pred_unlock
     ;       mutable_pred_pre_init
     ;       mutable_pred_init.
+
+:- type tabling_aux_pred_kind
+    --->    tabling_aux_pred_stats
+    ;       tabling_aux_pred_reset.
+
+:- type solver_type_pred_kind
+    --->    solver_type_to_ground_pred
+    ;       solver_type_to_any_pred
+    ;       solver_type_from_ground_pred
+    ;       solver_type_from_any_pred.
 
 %---------------------------------------------------------------------------%
 %
@@ -1568,6 +1631,7 @@ best_purity(purity_impure, purity_impure) = purity_impure.
     % of the disable_warnings scope.
 :- type goal_warning
     --->    goal_warning_singleton_vars
+    ;       goal_warning_occurs_check
     ;       goal_warning_non_tail_recursive_calls
     ;       goal_warning_suspicious_recursion.
 
