@@ -57,7 +57,6 @@
 :- import_module hlds.hlds_pred.
 :- import_module hlds.make_hlds.add_class.
 :- import_module hlds.make_hlds.add_clause.
-:- import_module hlds.make_hlds.add_foreign_proc.
 :- import_module hlds.make_hlds.add_mode.
 :- import_module hlds.make_hlds.add_mutable_aux_preds.
 :- import_module hlds.make_hlds.add_pragma.
@@ -641,8 +640,8 @@ add_pred_decl(SectionItem, !ModuleInfo, !Specs) :-
         Pieces = [words("Error: you cannot declare a"),
             words(pred_or_func_to_full_str(PredOrFunc)),
             words("whose name is a variable."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs]
     else
         SectionInfo = sec_info(ItemMercuryStatus, NeedQual),
@@ -666,8 +665,8 @@ add_mode_decl(StatusItem, !ModuleInfo, !Specs) :-
     ( if PredName = "" then
         Pieces = [words("Error: you cannot declare a mode"),
             words("for a predicate whose name is a variable."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs]
     else
         (
@@ -736,48 +735,39 @@ add_clause(StatusItem, !ModuleInfo, !QualInfo, !Specs) :-
     ItemClauseInfo = item_clause_info(PredSymName, PredOrFunc, Args, Origin,
         VarSet, MaybeBodyGoal, Context, SeqNum),
 
-    PredName = unqualify_name(PredSymName),
-    ( if PredName = "" then
-        Pieces = [words("Error: you cannot define a clause for a"),
-            words(pred_or_func_to_full_str(PredOrFunc)),
-            words("whose name is a variable."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
-        !:Specs = [Spec | !.Specs]
-    else
+    (
+        ItemMercuryStatus = item_defined_in_this_module(ItemExport),
         (
-            ItemMercuryStatus = item_defined_in_this_module(ItemExport),
+            ItemExport = item_export_anywhere,
             (
-                ItemExport = item_export_anywhere,
-                (
-                    Origin = item_origin_user,
-                    list.length(Args, Arity),
+                Origin = item_origin_user,
+                list.length(Args, Arity),
 
-                    % There is no point printing out the qualified name
-                    % since that information is already in the context.
-                    ClauseId = simple_call_id_to_string(PredOrFunc,
-                        sym_name_arity(unqualified(PredName), Arity)),
-                    error_is_exported(Context,
-                        [words("clause for " ++ ClauseId)], !Specs)
-                ;
-                    Origin = item_origin_compiler(_CompilerAttrs)
-                )
+                % There is no point printing out the qualified name
+                % since that information is already in the context.
+                UnqualPredSymName = unqualified(unqualify_name(PredSymName)),
+                ClauseId = simple_call_id_to_string(PredOrFunc,
+                    sym_name_arity(UnqualPredSymName, Arity)),
+                error_is_exported(Context, [words("clause for " ++ ClauseId)],
+                    !Specs)
             ;
-                ( ItemExport = item_export_nowhere
-                ; ItemExport = item_export_only_submodules
-                )
+                Origin = item_origin_compiler(_CompilerAttrs)
             )
         ;
-            ItemMercuryStatus = item_defined_in_other_module(_)
-            % Clauses defined in other modules are NOT an error; they can be
-            % imported from optimization files.
-        ),
-        % At this stage we only need know that it is not a promise declaration.
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        module_add_clause(VarSet, PredOrFunc, PredSymName, Args, MaybeBodyGoal,
-            PredStatus, Context, yes(SeqNum), goal_type_none,
-            !ModuleInfo, !QualInfo, !Specs)
-    ).
+            ( ItemExport = item_export_nowhere
+            ; ItemExport = item_export_only_submodules
+            )
+        )
+    ;
+        ItemMercuryStatus = item_defined_in_other_module(_)
+        % Clauses defined in other modules are NOT an error; they can be
+        % imported from optimization files.
+    ),
+    % At this stage we only need know that it is not a promise declaration.
+    item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+    module_add_clause(VarSet, PredOrFunc, PredSymName, Args, MaybeBodyGoal,
+        PredStatus, Context, yes(SeqNum), goal_type_none,
+        !ModuleInfo, !QualInfo, !Specs).
 
 %---------------------------------------------------------------------------%
 
@@ -939,8 +929,8 @@ implement_initialise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
             words("used in"), decl("initialise"), words("declaration"),
             words("does not have a corresponding"),
             decl("pred"), words("declaration."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ;
         PredIds = [PredId],
@@ -956,8 +946,8 @@ implement_initialise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
                 words("used in initialise declaration"),
                 words("has invalid signature."), nl],
             % TODO: provide verbose error information here.
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+                Context, Pieces),
             !:Specs = [Spec | !.Specs]
         )
     ;
@@ -966,8 +956,8 @@ implement_initialise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
             qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
             words("used in initialise declaration"),
             words("matches multiple pred declarations."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ).
 
@@ -999,8 +989,8 @@ implement_finalise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
             words("used in"), decl("finalise"), words("declaration"),
             words("does not have a corresponding"),
             decl("pred"), words("declaration."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ;
         PredIds = [PredId],
@@ -1015,8 +1005,8 @@ implement_finalise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
                 qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
                 words("used in"), decl("finalise"),
                 words("declaration has invalid signature."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+                Context, Pieces),
             !:Specs = [Spec | !.Specs]
         )
     ;
@@ -1025,8 +1015,8 @@ implement_finalise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
             qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
             words("used in"), decl("finalise"), words("declaration"),
             words("has multiple"), decl("pred"), words("declarations."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ).
 
@@ -1067,16 +1057,15 @@ is_valid_init_or_final_pred(PredInfo, ExpectedHeadModes) :-
 
 make_and_add_pragma_foreign_proc_export(SymName, HeadModes, CName,
         Origin, Context, !ModuleInfo, !Specs) :-
+    Attrs = item_compiler_attributes(Origin),
+    PEOrigin = item_origin_compiler(Attrs),
     module_info_get_globals(!.ModuleInfo, Globals),
     globals.get_target(Globals, CompilationTarget),
     ExportLang = target_lang_to_foreign_export_lang(CompilationTarget),
     PredNameModesPF = pred_name_modes_pf(SymName, HeadModes, pf_predicate),
-    FPEInfo =
-        pragma_info_foreign_proc_export(ExportLang, PredNameModesPF, CName),
-    Attrs = item_compiler_attributes(Origin),
-    PEOrigin = item_origin_compiler(Attrs),
-    add_pragma_foreign_proc_export(PEOrigin, FPEInfo, Context,
-        !ModuleInfo, !Specs).
+    FPEInfo = pragma_info_foreign_proc_export(PEOrigin, ExportLang,
+        PredNameModesPF, CName),
+    add_pragma_foreign_proc_export(FPEInfo, Context, !ModuleInfo, !Specs).
 
 %---------------------------------------------------------------------------%
 

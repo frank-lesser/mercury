@@ -354,8 +354,8 @@ module_qualify_item(InInt, Item0, Item, !Info, !Specs) :-
             ; RepInfo0 = tcrepn_fits_in_n_bits(_, _)
             ; RepInfo0 = tcrepn_is_word_aligned_ptr
             ; RepInfo0 = tcrepn_has_direct_arg_functors(_)
-            ; RepInfo0 = tcrepn_maybe_foreign(_, _)
             ; RepInfo0 = tcrepn_du(_)
+            ; RepInfo0 = tcrepn_foreign(_)
             ),
             RepInfo = RepInfo0
         ;
@@ -372,9 +372,9 @@ module_qualify_item(InInt, Item0, Item, !Info, !Specs) :-
         Item = item_type_repn(ItemTypeRepnInfo)
     ;
         Item0 = item_pragma(ItemPragma0),
-        ItemPragma0 = item_pragma_info(Pragma0, Origin, Context, SeqNum),
+        ItemPragma0 = item_pragma_info(Pragma0, Context, SeqNum),
         qualify_pragma(InInt, Context, Pragma0, Pragma, !Info, !Specs),
-        ItemPragma = item_pragma_info(Pragma, Origin, Context, SeqNum),
+        ItemPragma = item_pragma_info(Pragma, Context, SeqNum),
         Item = item_pragma(ItemPragma)
     ).
 
@@ -1152,7 +1152,8 @@ qualify_pragma(InInt, Context, Pragma0, Pragma, !Info, !Specs) :-
         ; Pragma0 = pragma_inline(_)
         ; Pragma0 = pragma_no_inline(_)
         ; Pragma0 = pragma_consider_used(_)
-        ; Pragma0 = pragma_obsolete(_, _)
+        ; Pragma0 = pragma_obsolete_pred(_)
+        ; Pragma0 = pragma_obsolete_proc(_)
         ; Pragma0 = pragma_no_detism_warning(_)
         ; Pragma0 = pragma_require_tail_recursion(_)
         ; Pragma0 = pragma_unused_args(_)
@@ -1213,15 +1214,15 @@ qualify_pragma(InInt, Context, Pragma0, Pragma, !Info, !Specs) :-
         Pragma = pragma_tabled(TabledInfo)
     ;
         Pragma0 = pragma_foreign_proc_export(FPEInfo0),
-        FPEInfo0 = pragma_info_foreign_proc_export(Lang, PredNameModesPF0,
-            CFunc),
+        FPEInfo0 = pragma_info_foreign_proc_export(Origin, Lang,
+            PredNameModesPF0, CFunc),
         PredNameModesPF0 = pred_name_modes_pf(Name, Modes0, PredOrFunc),
         ErrorContext = mqec_pragma(Context, Pragma0),
         qualify_mode_list(InInt, ErrorContext, Modes0, Modes,
             !Info, !Specs),
         PredNameModesPF = pred_name_modes_pf(Name, Modes, PredOrFunc),
-        FPEInfo = pragma_info_foreign_proc_export(Lang, PredNameModesPF,
-            CFunc),
+        FPEInfo = pragma_info_foreign_proc_export(Origin, Lang,
+            PredNameModesPF, CFunc),
         Pragma = pragma_foreign_proc_export(FPEInfo)
     ;
         Pragma0 = pragma_type_spec(TypeSpecInfo0),
@@ -1255,26 +1256,26 @@ qualify_pragma(InInt, Context, Pragma0, Pragma, !Info, !Specs) :-
     ;
         Pragma0 = pragma_structure_sharing(SharingInfo0),
         SharingInfo0 = pragma_info_structure_sharing(PredNameModesPF0,
-            Vars, Types, Sharing),
+            HeadVars, HeadVarTypes, VarSet, TVarSet, MaybeSharing),
         PredNameModesPF0 = pred_name_modes_pf(SymName, ModeList0, PredOrFunc),
         ErrorContext = mqec_pragma(Context, Pragma0),
         qualify_mode_list(InInt, ErrorContext, ModeList0, ModeList,
             !Info, !Specs),
         PredNameModesPF = pred_name_modes_pf(SymName, ModeList, PredOrFunc),
         SharingInfo = pragma_info_structure_sharing(PredNameModesPF,
-            Vars, Types, Sharing),
+            HeadVars, HeadVarTypes, VarSet, TVarSet, MaybeSharing),
         Pragma = pragma_structure_sharing(SharingInfo)
     ;
         Pragma0 = pragma_structure_reuse(ReuseInfo0),
         ReuseInfo0 = pragma_info_structure_reuse(PredNameModesPF0,
-            Vars, Types, ReuseTuples),
+            HeadVars, HeadVarTypes, VarSet, TVarSet, MaybeReuse),
         PredNameModesPF0 = pred_name_modes_pf(SymName, ModeList0, PredOrFunc),
         ErrorContext = mqec_pragma(Context, Pragma0),
         qualify_mode_list(InInt, ErrorContext, ModeList0, ModeList,
             !Info, !Specs),
         PredNameModesPF = pred_name_modes_pf(SymName, ModeList, PredOrFunc),
         ReuseInfo = pragma_info_structure_reuse(PredNameModesPF,
-            Vars, Types, ReuseTuples),
+            HeadVars, HeadVarTypes, VarSet, TVarSet, MaybeReuse),
         Pragma = pragma_structure_reuse(ReuseInfo)
     ;
         Pragma0 = pragma_termination2_info(Term2Info0),

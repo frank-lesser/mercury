@@ -528,6 +528,7 @@
 :- import_module hlds.hlds_inst_mode.
 :- import_module hlds.make_hlds.add_clause.
 :- import_module hlds.make_hlds.add_foreign_proc.
+:- import_module hlds.make_hlds.add_pragma.
 :- import_module hlds.make_hlds_error.
 :- import_module libs.
 :- import_module libs.globals.
@@ -621,9 +622,8 @@ check_mutable(ItemMutable, ItemExport, ModuleInfo, !Specs) :-
     then
         TrailPieces = [words("Error: trailed"), decl("mutable"),
             words("declaration in non-trailing grade."), nl],
-        TrailMsg = simple_msg(Context, [always(TrailPieces)]),
-        TrailSpec = error_spec(severity_error,
-            phase_parse_tree_to_hlds, [TrailMsg]),
+        TrailSpec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+            Context, TrailPieces),
         !:Specs = [TrailSpec | !.Specs]
     else
         true
@@ -855,8 +855,8 @@ invalid_inst_in_mutable(ModuleInfo, Context, InstVarSet, ParentInsts, Inst,
         [], [nl_indent_delta(1)], [nl_indent_delta(-1)], Inst),
     Pieces = [words("Error:") | ParentPieces] ++
         [words("the inst") | InstPieces] ++ ProblemPieces ++ [nl],
-    Msg = simple_msg(Context, [always(Pieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
 :- pred named_parents_to_pieces(list(inst_id)::in,
@@ -1789,14 +1789,14 @@ add_initialise_for_mutable(ModuleName, MutableName, SymName, Arity,
     % predicates as part of the source-to-source transformation for mutable
     % variables. These predicates *must* be impure in order to prevent the
     % compiler optimizing them away.
-    module_info_new_user_init_pred(SymName, Arity, CName, !ModuleInfo),
-    PredNameModesPF = pred_name_modes_pf(SymName, [], pf_predicate),
-    FPEInfo = pragma_info_foreign_proc_export(Lang, PredNameModesPF, CName),
     Attrs = item_compiler_attributes(compiler_origin_mutable(ModuleName,
         MutableName, mutable_pred_init)),
     Origin = item_origin_compiler(Attrs),
-    add_pragma_foreign_proc_export(Origin, FPEInfo, Context,
-        !ModuleInfo, !Specs).
+    module_info_new_user_init_pred(SymName, Arity, CName, !ModuleInfo),
+    PredNameModesPF = pred_name_modes_pf(SymName, [], pf_predicate),
+    FPEInfo = pragma_info_foreign_proc_export(Origin, Lang,
+        PredNameModesPF, CName),
+    add_pragma_foreign_proc_export(FPEInfo, Context, !ModuleInfo, !Specs).
 
 %---------------------------------------------------------------------------%
 
@@ -1854,8 +1854,8 @@ get_global_name_from_foreign_names(ModuleInfo, Context,
             words("specified for the"),
             fixed(compilation_target_string(CompilationTarget)),
             words("backend."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs],
 
         % This works for Erlang as well.

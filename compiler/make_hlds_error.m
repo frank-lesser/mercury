@@ -30,6 +30,7 @@
 :- import_module parse_tree.prog_item.
 
 :- import_module list.
+:- import_module maybe.
 
 %-----------------------------------------------------------------------------%
 
@@ -37,8 +38,9 @@
     prog_context::in, prog_context::in, list(format_component)::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-:- pred report_undefined_pred_or_func_error(sym_name::in,
-    arity::in, list(arity)::in, prog_context::in, list(format_component)::in,
+:- pred report_undefined_pred_or_func_error(maybe(pred_or_func)::in,
+    sym_name::in, arity::in, list(arity)::in, prog_context::in,
+    list(format_component)::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
     % Similar to report_undeclared_mode_error, but gives less information.
@@ -57,7 +59,7 @@
     % Emit an error reporting that something should not have occurred in
     % a module interface.
     %
-:- pred error_is_exported(prog_context::in, format_components::in,
+:- pred error_is_exported(prog_context::in, list(format_component)::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
     % Check for invalid pragmas in interface sections.
@@ -79,7 +81,6 @@
 :- import_module parse_tree.prog_util.
 
 :- import_module bool.
-:- import_module maybe.
 :- import_module set.
 :- import_module string.
 
@@ -110,7 +111,7 @@ report_multiple_def_error(Name, Arity, DefType, Context, OrigContext,
         words("multiply defined."), nl],
     FirstDeclPieces = [words("Here is the previous definition of"),
         fixed(DefType), SNA, suffix("."), nl],
-    SecondDeclMsg = simple_msg(SecondContext, [always(SecondDeclPieces)]),
+    SecondDeclMsg = simplest_msg(SecondContext, SecondDeclPieces),
     FirstDeclMsg = error_msg(yes(FirstContext), treat_as_first, 0,
         [always(FirstDeclPieces)]),
     (
@@ -118,18 +119,28 @@ report_multiple_def_error(Name, Arity, DefType, Context, OrigContext,
         ExtraMsgs = []
     ;
         ExtraPieces = [_ | _],
-        ExtraMsgs = [simple_msg(SecondContext, [always(ExtraPieces)])]
+        ExtraMsgs = [simplest_msg(SecondContext, ExtraPieces)]
     ),
     Spec = error_spec(severity_error, phase_parse_tree_to_hlds,
         [SecondDeclMsg, FirstDeclMsg] ++ ExtraMsgs),
     !:Specs = [Spec | !.Specs].
 
-report_undefined_pred_or_func_error(Name, Arity, OtherArities, Context,
-        DescPieces, !Specs) :-
+report_undefined_pred_or_func_error(MaybePorF, Name, Arity, OtherArities,
+        Context, DescPieces, !Specs) :-
+    (
+        MaybePorF = no,
+        PredOrFuncPieces = [decl("pred"), words("or"), decl("func")]
+    ;
+        MaybePorF = yes(pf_predicate),
+        PredOrFuncPieces = [decl("pred")]
+    ;
+        MaybePorF = yes(pf_function),
+        PredOrFuncPieces = [decl("func")]
+    ),
     MainPieces = [words("Error:") | DescPieces] ++ [words("for"),
         unqual_sym_name_and_arity(sym_name_arity(Name, Arity)),
-        words("without corresponding"), decl("pred"), words("or"),
-        decl("func"), words("declaration."), nl],
+        words("without corresponding")] ++ PredOrFuncPieces ++
+        [words("declaration."), nl],
     (
         OtherArities = [],
         OtherArityPieces = []
@@ -141,16 +152,16 @@ report_undefined_pred_or_func_error(Name, Arity, OtherArities, Context,
             list_to_pieces(OtherArityStrs) ++
             [suffix("."), nl]
     ),
-    Msg = simple_msg(Context, [always(MainPieces ++ OtherArityPieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Context, MainPieces ++ OtherArityPieces),
     !:Specs = [Spec | !.Specs].
 
 report_undefined_mode_error(Name, Arity, Context, DescPieces, !Specs) :-
     Pieces = [words("Error:") | DescPieces] ++ [words("for"),
         qual_sym_name_and_arity(sym_name_arity(Name, Arity)),
         words("specifies non-existent mode.")],
-    Msg = simple_msg(Context, [always(Pieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
 %----------------------------------------------------------------------------%
@@ -193,7 +204,7 @@ maybe_report_undefined_pred_error(ModuleInfo, Name, Arity, PredOrFunc, Status,
             simple_call(simple_call_id(PredOrFunc, Name, Arity)), nl,
             words("without corresponding"),
             decl(PredOrFuncStr), words("declaration."), nl],
-        MainMsg = simple_msg(Context, [always(MainPieces)]),
+        MainMsg = simplest_msg(Context, MainPieces),
 
         module_info_get_predicate_table(ModuleInfo, PredicateTable),
         predicate_table_lookup_pf_sym(PredicateTable,
@@ -226,8 +237,7 @@ maybe_report_undefined_pred_error(ModuleInfo, Name, Arity, PredOrFunc, Status,
                         list.map(wrap_int_fixed, OtherAritiesList))] ++
                     [suffix("."), nl]
             ),
-            OtherAritiesMsg = simple_msg(Context,
-                [always(OtherAritiesPieces)]),
+            OtherAritiesMsg = simplest_msg(Context, OtherAritiesPieces),
             Spec = error_spec(severity_error, phase_parse_tree_to_hlds,
                 [MainMsg, OtherAritiesMsg])
         ),
@@ -271,28 +281,22 @@ wrap_int_fixed(N) = int_fixed(N).
 error_is_exported(Context, ItemPieces, !Specs) :-
     Pieces = [words("Error:")] ++ ItemPieces ++
         [words("in module interface."), nl],
-    Msg = simple_msg(Context, [always(Pieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
 %----------------------------------------------------------------------------%
 
 report_if_pragma_is_wrongly_in_interface(ItemMercuryStatus, ItemPragmaInfo,
         !Specs) :-
-    ItemPragmaInfo = item_pragma_info(Pragma, MaybeAttrs, Context, _SeqNum),
+    ItemPragmaInfo = item_pragma_info(Pragma, Context, _SeqNum),
     ( if
         % Is the pragma in the interface?
         ItemMercuryStatus = item_defined_in_this_module(ItemExport),
         ItemExport = item_export_anywhere,
 
         % Is the pragma *wrongly* in the interface?
-        pragma_allowed_in_interface(Pragma) = no,
-
-        % Is there any point in generating an error message about the pragma?
-        % If the pragma was created by the compiler, then the *real* problem
-        % is whatever bug in the compiler caused it to *create* this pragma,
-        % and the user cannot do anything about that bug.
-        MaybeAttrs = item_origin_user
+        pragma_allowed_in_interface(Pragma) = no
     then
         ContextPieces = pragma_desc_pieces(Pragma),
         error_is_exported(Context, ContextPieces, !Specs)

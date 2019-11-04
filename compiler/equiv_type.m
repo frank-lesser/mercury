@@ -674,7 +674,7 @@ replace_in_instance_info(ModuleName, MaybeRecord, TypeEqvMap, _InstEqvMap,
 
 replace_in_pragma_info(ModuleName, MaybeRecord, TypeEqvMap, _InstEqvMap,
         Info0, Info, !RecompInfo, !UsedModules, []) :-
-    Info0 = item_pragma_info(Pragma0, Origin, Context, SeqNum),
+    Info0 = item_pragma_info(Pragma0, Context, SeqNum),
     (
         Pragma0 = pragma_type_spec(TypeSpecInfo0),
         TypeSpecInfo0 = pragma_info_type_spec(PredName, NewName, Arity,
@@ -744,7 +744,8 @@ replace_in_pragma_info(ModuleName, MaybeRecord, TypeEqvMap, _InstEqvMap,
         ; Pragma0 = pragma_mm_tabling_info(_)
         ; Pragma0 = pragma_mode_check_clauses(_)
         ; Pragma0 = pragma_no_inline(_)
-        ; Pragma0 = pragma_obsolete(_, _)
+        ; Pragma0 = pragma_obsolete_pred(_)
+        ; Pragma0 = pragma_obsolete_proc(_)
         ; Pragma0 = pragma_no_detism_warning(_)
         ; Pragma0 = pragma_promise_eqv_clauses(_)
         ; Pragma0 = pragma_promise_pure(_)
@@ -763,7 +764,7 @@ replace_in_pragma_info(ModuleName, MaybeRecord, TypeEqvMap, _InstEqvMap,
         ),
         Pragma = Pragma0
     ),
-    Info = item_pragma_info(Pragma, Origin, Context, SeqNum).
+    Info = item_pragma_info(Pragma, Context, SeqNum).
 
 :- pred replace_in_mutable_info(module_name::in, maybe_record_sym_name_use::in,
     type_eqv_map::in, inst_eqv_map::in,
@@ -935,7 +936,7 @@ replace_in_type_repn(MaybeRecord, TypeEqvMap, _InstEqvMap, TypeCtor,
         ; TypeRepn0 = tcrepn_is_word_aligned_ptr    % XXX should not generate
         ; TypeRepn0 = tcrepn_has_direct_arg_functors(_)
         ; TypeRepn0 = tcrepn_du(_)
-        ; TypeRepn0 = tcrepn_maybe_foreign(_, _)
+        ; TypeRepn0 = tcrepn_foreign(_)
         ),
         TypeRepn = TypeRepn0,
         ContainsCirc = no

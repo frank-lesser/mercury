@@ -38,6 +38,12 @@
 :- pred output_parse_tree_opt(globals::in, string::in, parse_tree_opt::in,
     io::di, io::uo) is det.
 
+:- pred output_parse_tree_plain_opt(globals::in, string::in,
+    parse_tree_plain_opt::in, io::di, io::uo) is det.
+
+:- pred output_parse_tree_trans_opt(globals::in, string::in,
+    parse_tree_trans_opt::in, io::di, io::uo) is det.
+
 %---------------------------------------------------------------------------%
 
 :- pred mercury_output_parse_tree_src(merc_out_info::in,
@@ -48,6 +54,16 @@
 
 :- pred mercury_output_parse_tree_opt(merc_out_info::in,
     parse_tree_opt::in, io::di, io::uo) is det.
+
+%---------------------------------------------------------------------------%
+
+:- pred mercury_output_parse_tree_plain_opt(merc_out_info::in,
+    parse_tree_plain_opt::in, io::di, io::uo) is det.
+
+:- pred mercury_output_parse_tree_trans_opt(merc_out_info::in,
+    parse_tree_trans_opt::in, io::di, io::uo) is det.
+
+%---------------------------------------------------------------------------%
 
 :- pred mercury_output_raw_compilation_unit(merc_out_info::in,
     raw_compilation_unit::in, io::di, io::uo) is det.
@@ -162,6 +178,14 @@ output_parse_tree_opt(Globals, OutputFileName, ParseTreeOpt, !IO) :-
     output_some_parse_tree(Globals, OutputFileName,
         mercury_output_parse_tree_opt, ParseTreeOpt, !IO).
 
+output_parse_tree_plain_opt(Globals, OutputFileName, ParseTreePlainOpt, !IO) :-
+    output_some_parse_tree(Globals, OutputFileName,
+        mercury_output_parse_tree_plain_opt, ParseTreePlainOpt, !IO).
+
+output_parse_tree_trans_opt(Globals, OutputFileName, ParseTreeTransOpt, !IO) :-
+    output_some_parse_tree(Globals, OutputFileName,
+        mercury_output_parse_tree_trans_opt, ParseTreeTransOpt, !IO).
+
 :- type output_parse_tree(PT) == pred(merc_out_info, PT, io, io).
 :- inst output_parse_tree == (pred(in, in, di, uo) is det).
 
@@ -264,6 +288,79 @@ mercury_output_parse_tree_opt(Info, ParseTree, !IO) :-
     list.foldl(mercury_output_item_use(Info), Use, !IO),
     list.foldl(mercury_output_item_foreign_import_module, FIMs, !IO),
     mercury_output_items(Info, Items, !IO).
+
+mercury_output_parse_tree_plain_opt(Info, ParseTree, !IO) :-
+    ParseTree = parse_tree_plain_opt(ModuleName, _Context,
+        Uses, FIMs, TypeDefns, ForeignEnums, InstDefns, ModeDefns,
+        TypeClasses, Instances, PredDecls, ModeDecls,
+        PredMarkers, TypeSpecs, Clauses,
+        UnusedArgs, Terms, Term2s, Exceptions, Trailings, MMTablings,
+        Sharings, Reuses),
+    Lang = get_output_lang(Info),
+    io.write_string(":- module ", !IO),
+    mercury_output_bracketed_sym_name(ModuleName, !IO),
+    io.write_string(".\n", !IO),
+    list.foldl(mercury_output_item_use(Info), Uses, !IO),
+    list.foldl(mercury_output_item_type_defn(Info), TypeDefns, !IO),
+    list.foldl(mercury_output_item_foreign_enum(Info), ForeignEnums, !IO),
+    list.foldl(mercury_output_item_inst_defn(Info), InstDefns, !IO),
+    list.foldl(mercury_output_item_mode_defn(Info), ModeDefns, !IO),
+    list.foldl(mercury_output_item_typeclass(Info), TypeClasses, !IO),
+    list.foldl(mercury_output_item_instance(Info), Instances, !IO),
+    % XXX FIMs should be output just after Uses, but the existing code
+    % whose output we want to compare the output of this code to
+    % prints them in this position.
+    list.foldl(mercury_output_item_foreign_import_module, FIMs, !IO),
+    list.foldl(mercury_output_item_pred_decl(Info), PredDecls, !IO),
+    list.foldl(mercury_output_item_mode_decl(Info), ModeDecls, !IO),
+    list.foldl(mercury_output_item_pred_marker,
+        list.map(project_pragma_type, PredMarkers), !IO),
+    list.foldl(mercury_output_pragma_type_spec(print_name_only, Lang),
+        list.map(project_pragma_type, TypeSpecs), !IO),
+    list.foldl(mercury_output_item_clause(Info), Clauses, !IO),
+
+    list.foldl(mercury_output_pragma_unused_args,
+        list.map(project_pragma_type, UnusedArgs), !IO),
+    list.foldl(write_pragma_termination_info(Lang),
+        list.map(project_pragma_type, Terms), !IO),
+    list.foldl(write_pragma_termination2_info(Lang),
+        list.map(project_pragma_type, Term2s), !IO),
+    list.foldl(mercury_output_pragma_exceptions,
+        list.map(project_pragma_type, Exceptions), !IO),
+    list.foldl(mercury_output_pragma_trailing_info,
+        list.map(project_pragma_type, Trailings), !IO),
+    list.foldl(mercury_output_pragma_mm_tabling_info,
+        list.map(project_pragma_type, MMTablings), !IO),
+    list.foldl(mercury_output_pragma_mm_tabling_info,
+        list.map(project_pragma_type, MMTablings), !IO),
+    list.foldl(write_pragma_structure_sharing_info(Lang),
+        list.map(project_pragma_type, Sharings), !IO),
+    list.foldl(write_pragma_structure_reuse_info(Lang),
+        list.map(project_pragma_type, Reuses), !IO).
+
+mercury_output_parse_tree_trans_opt(Info, ParseTree, !IO) :-
+    ParseTree = parse_tree_trans_opt(ModuleName, _Context,
+        Terms, Term2s, Exceptions, Trailings, MMTablings, Sharings, Reuses),
+    Lang = get_output_lang(Info),
+    io.write_string(":- module ", !IO),
+    mercury_output_bracketed_sym_name(ModuleName, !IO),
+    io.write_string(".\n", !IO),
+    list.foldl(write_pragma_termination_info(Lang),
+        list.map(project_pragma_type, Terms), !IO),
+    list.foldl(write_pragma_termination2_info(Lang),
+        list.map(project_pragma_type, Term2s), !IO),
+    list.foldl(mercury_output_pragma_exceptions,
+        list.map(project_pragma_type, Exceptions), !IO),
+    list.foldl(mercury_output_pragma_trailing_info,
+        list.map(project_pragma_type, Trailings), !IO),
+    list.foldl(mercury_output_pragma_mm_tabling_info,
+        list.map(project_pragma_type, MMTablings), !IO),
+    list.foldl(mercury_output_pragma_mm_tabling_info,
+        list.map(project_pragma_type, MMTablings), !IO),
+    list.foldl(write_pragma_structure_sharing_info(Lang),
+        list.map(project_pragma_type, Sharings), !IO),
+    list.foldl(write_pragma_structure_reuse_info(Lang),
+        list.map(project_pragma_type, Reuses), !IO).
 
 mercury_output_raw_compilation_unit(Info, CompUnit, !IO) :-
     CompUnit = raw_compilation_unit(ModuleName, _Context, ItemBlocks),
@@ -1677,21 +1774,9 @@ mercury_output_item_type_repn(_Info, ItemTypeRepn, !IO) :-
         mercury_output_du_type_repn(DuRepn, !IO),
         io.write_string(")", !IO)
     ;
-        RepnInfo = tcrepn_maybe_foreign(LangsTypeRepns, MaybeDuRepn),
-        io.write_string("maybe_foreign_type_repn([", !IO),
-        LangsTypeRepns = one_or_more(HeadLangTypeRepn, TailLangsTypeRepns),
-        mercury_output_foreign_langs_types(HeadLangTypeRepn,
-            TailLangsTypeRepns, !IO),
-        io.write_string("], ", !IO),
-        (
-            MaybeDuRepn = no,
-            io.write_string("no_du_repn", !IO)
-        ;
-            MaybeDuRepn = yes(DuRepn),
-            io.write_string("du_repn(", !IO),
-            mercury_output_du_type_repn(DuRepn, !IO),
-            io.write_string(")", !IO)
-        ),
+        RepnInfo = tcrepn_foreign(MaybeCJCsERepn),
+        io.write_string("foreign_type_repn(", !IO),
+        mercury_output_c_j_cs_e_repn(MaybeCJCsERepn, !IO),
         io.write_string(")", !IO)
     ),
     io.write_string(").\n", !IO).
@@ -1715,61 +1800,84 @@ mercury_output_du_type_repn(DuRepn, !IO) :-
     % with structured indentation and limited length lines.
     (
         DuRepn = dur_notag(NotagRepn),
-        NotagRepn = notag_repn(FunctorName),
+        NotagRepn = notag_repn(FunctorName, MaybeCJCsERepn),
         io.write_string("notag(", !IO),
         term_io.quote_string(FunctorName, !IO),
+        io.write_string(",\n", !IO),
+        mercury_output_c_j_cs_e_repn(MaybeCJCsERepn, !IO),
         io.write_string(")", !IO)
     ;
         DuRepn = dur_direct_dummy(DummyRepn),
-        DummyRepn = direct_dummy_repn(FunctorName),
+        DummyRepn = direct_dummy_repn(FunctorName, MaybeCJCsERepnOrEnum),
         io.write_string("direct_dummy(", !IO),
         term_io.quote_string(FunctorName, !IO),
+        io.write_string(",\n", !IO),
+        mercury_output_c_j_cs_e_repn_or_enum(MaybeCJCsERepnOrEnum, !IO),
         io.write_string(")", !IO)
     ;
         DuRepn = dur_enum(EnumRepn),
-        EnumRepn = enum_repn(FunctorNames, ForeignEnums),
+        EnumRepn = enum_repn(Functor1, Functor2, OtherFunctors,
+            MaybeCJCsERepnOrEnum),
         io.write_string("enum(", !IO),
-        io.write_string("[", !IO),
-        FunctorNames = one_or_more(HeadFunctorName, TailFunctorNames),
-        mercury_output_enum_functor_names(HeadFunctorName, TailFunctorNames,
-            !IO),
-        io.write_string("]", !IO),
+        mercury_output_enum_functor_name(Functor1, !IO),
+        io.write_string(",\n", !IO),
+        mercury_output_enum_functor_name(Functor2, !IO),
+        io.write_string(",\n", !IO),
         (
-            ForeignEnums = []
+            OtherFunctors = [],
+            io.write_string("[]", !IO)
         ;
-            ForeignEnums = [HeadForeignEnums | TailForeignEnums],
-            io.write_string(", [", !IO),
-            mercury_output_foreign_langs_enums(HeadForeignEnums,
-                TailForeignEnums, !IO),
+            OtherFunctors = [HeadFunctor | TailFunctors],
+            io.write_string("[", !IO),
+            mercury_output_enum_functor_names(HeadFunctor, TailFunctors, !IO),
             io.write_string("]", !IO)
         ),
+        io.write_string(",\n", !IO),
+        mercury_output_c_j_cs_e_repn_or_enum(MaybeCJCsERepnOrEnum, !IO),
         io.write_string(")", !IO)
     ;
-        DuRepn = dur_gen(GenDuRepn),
+        DuRepn = dur_gen_more_functors(MoreFunctors),
+        MoreFunctors = gen_du_repn_more_functors(Functor1, Functor2,
+            OtherFunctors, MaybeCJCsERepn),
+        io.write_string("gen_du(\n", !IO),
+        mercury_output_gen_du_functor(Functor1, ",\n", !IO),
+        mercury_output_gen_du_functor(Functor2, ",\n", !IO),
         (
-            GenDuRepn = gen_du_repn_more_functors(Functors),
-            Functors = one_or_more(HeadFunctor, TailFunctors),
-            io.write_string("gen_du([\n", !IO),
-            mercury_output_gen_du_functors(HeadFunctor, TailFunctors, !IO),
-            io.write_string("])", !IO)
+            OtherFunctors = [],
+            io.write_string("[],\n", !IO)
         ;
-            GenDuRepn = gen_du_repn_only_functor(FunctorName,
-                OnlyFunctorArgs64, OnlyFunctorArgs32),
-            io.write_string("gen_du_only_functor(", !IO),
-            term_io.quote_string(FunctorName, !IO),
-            io.write_string(",\n", !IO),
-            mercury_output_only_functor_args(OnlyFunctorArgs64, !IO),
-            io.write_string(",\n", !IO),
-            mercury_output_only_functor_args(OnlyFunctorArgs32, !IO),
-            io.write_string(")", !IO)
-        )
+            OtherFunctors = [HeadFunctor | TailFunctors],
+            io.write_string("[", !IO),
+            mercury_output_gen_du_functors(HeadFunctor, TailFunctors, !IO),
+            io.write_string("],\n", !IO)
+        ),
+        mercury_output_c_j_cs_e_repn(MaybeCJCsERepn, !IO),
+        io.write_string(")", !IO)
+    ;
+        DuRepn = dur_gen_only_functor(OnlyFunctor),
+        OnlyFunctor = gen_du_repn_only_functor(FunctorName,
+            OnlyFunctorArgs64, OnlyFunctorArgs32, MaybeCJCsERepn),
+        io.write_string("gen_du_only_functor(", !IO),
+        term_io.quote_string(FunctorName, !IO),
+        io.write_string(",\n", !IO),
+        mercury_output_only_functor_args(OnlyFunctorArgs64, !IO),
+        io.write_string(",\n", !IO),
+        mercury_output_only_functor_args(OnlyFunctorArgs32, !IO),
+        io.write_string(",\n", !IO),
+        mercury_output_c_j_cs_e_repn(MaybeCJCsERepn, !IO),
+        io.write_string(")", !IO)
     ).
+
+:- pred mercury_output_enum_functor_name(string::in, io::di, io::uo) is det.
+
+mercury_output_enum_functor_name(FunctorName, !IO) :-
+    term_io.quote_string(FunctorName, !IO).
 
 :- pred mercury_output_enum_functor_names(string::in, list(string)::in,
     io::di, io::uo) is det.
 
 mercury_output_enum_functor_names(FunctorName, FunctorNames, !IO) :-
-    term_io.quote_string(FunctorName, !IO),
+    mercury_output_enum_functor_name(FunctorName, !IO),
     (
         FunctorNames = []
     ;
@@ -1779,61 +1887,128 @@ mercury_output_enum_functor_names(FunctorName, FunctorNames, !IO) :-
             !IO)
     ).
 
-:- pred mercury_output_foreign_langs_enums(
-    pair(foreign_language, one_or_more(string))::in,
-    assoc_list(foreign_language, one_or_more(string))::in,
+:- pred mercury_output_c_j_cs_e_repn_or_enum(c_j_cs_e_enum_repn::in,
     io::di, io::uo) is det.
 
-mercury_output_foreign_langs_enums(LangEnums, LangsEnums, !IO) :-
-    LangEnums = Lang - Enums,
-    Enums = one_or_more(HeadEnum, TailEnums),
-    simple_foreign_language_string(Lang, LangStr),
-    io.format("%s([", [s(LangStr)], !IO),
-    mercury_output_enum_functor_names(HeadEnum, TailEnums, !IO),
-    io.write_string("])", !IO),
+mercury_output_c_j_cs_e_repn_or_enum(MaybeCJCsERepnOrEnum, !IO) :-
+    MaybeCJCsERepnOrEnum = c_java_csharp_erlang(MaybeRepnOrEnumC,
+        MaybeRepnOrEnumJava, MaybeRepnOrEnumCsharp, MaybeRepnOrEnumErlang),
+    io.write_string("[", !IO),
+    some [!Separator] (
+        !:Separator = "",
+        (
+            MaybeRepnOrEnumC = no
+        ;
+            MaybeRepnOrEnumC = yes(RepnOrEnumC),
+            mercury_output_foreign_lang_type_repn_or_enum(lang_c,
+                RepnOrEnumC, !IO),
+            !:Separator = ",\n"
+        ),
+        (
+            MaybeRepnOrEnumJava = no
+        ;
+            MaybeRepnOrEnumJava = yes(RepnOrEnumJava),
+            io.write_string(!.Separator, !IO),
+            mercury_output_foreign_lang_type_repn_or_enum(lang_java,
+                RepnOrEnumJava, !IO), !:Separator = ",\n"
+        ),
+        (
+            MaybeRepnOrEnumCsharp = no
+        ;
+            MaybeRepnOrEnumCsharp = yes(RepnOrEnumCsharp),
+            io.write_string(!.Separator, !IO),
+            mercury_output_foreign_lang_type_repn_or_enum(lang_csharp,
+                RepnOrEnumCsharp, !IO),
+            !:Separator = ",\n"
+        ),
+        (
+            MaybeRepnOrEnumErlang = no
+        ;
+            MaybeRepnOrEnumErlang = yes(RepnOrEnumErlang),
+            io.write_string(!.Separator, !IO),
+            mercury_output_foreign_lang_type_repn_or_enum(lang_erlang,
+                RepnOrEnumErlang, !IO)
+        )
+    ),
+    io.write_string("]", !IO).
+
+:- pred mercury_output_c_j_cs_e_repn(c_j_cs_e_repn::in,
+    io::di, io::uo) is det.
+
+mercury_output_c_j_cs_e_repn(MaybeCJCsERepn, !IO) :-
+    MaybeCJCsERepn = c_java_csharp_erlang(MaybeRepnC, MaybeRepnJava, 
+        MaybeRepnCsharp, MaybeRepnErlang),
+    io.write_string("[", !IO),
+    some [!Separator] (
+        !:Separator = "",
+        (
+            MaybeRepnC = no
+        ;
+            MaybeRepnC = yes(RepnC),
+            mercury_output_foreign_lang_type_repn(lang_c, RepnC, !IO),
+            !:Separator = ",\n"
+        ),
+        (
+            MaybeRepnJava = no
+        ;
+            MaybeRepnJava = yes(RepnJava),
+            io.write_string(!.Separator, !IO),
+            mercury_output_foreign_lang_type_repn(lang_java, RepnJava, !IO),
+            !:Separator = ",\n"
+        ),
+        (
+            MaybeRepnCsharp = no
+        ;
+            MaybeRepnCsharp = yes(RepnCsharp),
+            io.write_string(!.Separator, !IO),
+            mercury_output_foreign_lang_type_repn(lang_csharp, RepnCsharp,
+                !IO),
+            !:Separator = ",\n"
+        ),
+        (
+            MaybeRepnErlang = no
+        ;
+            MaybeRepnErlang = yes(RepnErlang),
+            io.write_string(!.Separator, !IO),
+            mercury_output_foreign_lang_type_repn(lang_erlang, RepnErlang, !IO)
+        )
+    ),
+    io.write_string("]", !IO).
+
+:- pred mercury_output_foreign_lang_type_repn_or_enum(foreign_language::in,
+    enum_foreign_repn::in, io::di, io::uo) is det.
+
+mercury_output_foreign_lang_type_repn_or_enum(Lang, TypeRepnOrEnum, !IO) :-
     (
-        LangsEnums = []
+        TypeRepnOrEnum = enum_foreign_type(TypeRepn),
+        io.write_string("foreign_type(", !IO),
+        mercury_output_foreign_lang_type_repn(Lang, TypeRepn, !IO),
+        io.write_string(")", !IO)
     ;
-        LangsEnums = [HeadLangEnums | TailLangsEnums],
-        io.write_string(", ", !IO),
-        mercury_output_foreign_langs_enums(HeadLangEnums, TailLangsEnums,
-            !IO)
+        TypeRepnOrEnum = enum_foreign_enum(Enums),
+        Enums = one_or_more(HeadEnum, TailEnums),
+        simple_foreign_language_string(Lang, LangStr),
+        io.format("foreign_enum(%s, [", [s(LangStr)], !IO),
+        mercury_output_enum_functor_names(HeadEnum, TailEnums, !IO),
+        io.write_string("])", !IO)
     ).
 
-:- pred mercury_output_foreign_langs_types(
-    pair(foreign_language, foreign_type_repn)::in,
-    list(pair(foreign_language, foreign_type_repn))::in, io::di, io::uo) is det.
+:- pred mercury_output_foreign_lang_type_repn(foreign_language::in,
+    foreign_type_repn::in, io::di, io::uo) is det.
 
-mercury_output_foreign_langs_types(LangTypeRepn, LangsTypeRepns, !IO) :-
-    LangTypeRepn = Lang - TypeRepn,
+mercury_output_foreign_lang_type_repn(Lang, TypeRepn, !IO) :-
     TypeRepn = foreign_type_repn(ForeignTypeName, ForeignTypeAssertions),
     ForeignTypeAssertions = foreign_type_assertions(Assertions),
     set.to_sorted_list(Assertions, AssertionsList),
-    (
-        ( Lang = lang_c, LangStr = "c"
-        ; Lang = lang_csharp, LangStr = "csharp"
-        ; Lang = lang_java, LangStr = "java"
-        ),
-        io.format("%s(\"%s\", [", [s(LangStr), s(ForeignTypeName)], !IO),
-        io.write_list(AssertionsList, ", ",
-            mercury_output_foreign_type_assertion, !IO),
-        io.write_string("])", !IO)
-    ;
-        Lang = lang_erlang,
-        LangStr = "erlang",
-        io.format("%s([", [s(LangStr)], !IO),
-        io.write_list(AssertionsList, ", ",
-            mercury_output_foreign_type_assertion, !IO),
-        io.write_string("])", !IO)
+    ( Lang = lang_c, LangStr = "c"
+    ; Lang = lang_java, LangStr = "java"
+    ; Lang = lang_csharp, LangStr = "csharp"
+    ; Lang = lang_erlang, LangStr = "erlang"
     ),
-    (
-        LangsTypeRepns = []
-    ;
-        LangsTypeRepns = [HeadLangTypeRepn | TailLangsTypeRepns],
-        io.write_string(", ", !IO),
-        mercury_output_foreign_langs_types(HeadLangTypeRepn,
-            TailLangsTypeRepns, !IO)
-    ).
+    io.format("%s(\"%s\", [", [s(LangStr), s(ForeignTypeName)], !IO),
+    io.write_list(AssertionsList, ", ",
+        mercury_output_foreign_type_assertion, !IO),
+    io.write_string("])", !IO).
 
 %---------------------%
 

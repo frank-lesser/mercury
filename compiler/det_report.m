@@ -139,6 +139,7 @@
 :- import_module mdbcomp.prim_data.
 :- import_module mdbcomp.sym_name.
 :- import_module parse_tree.mercury_to_mercury.
+:- import_module parse_tree.parse_tree_out_info.
 :- import_module parse_tree.parse_tree_out_term.
 :- import_module parse_tree.prog_data_pragma.
 :- import_module parse_tree.prog_detism.
@@ -406,8 +407,8 @@ check_determinism_of_main(PredInfo, ProcInfo, !Specs) :-
             unqual_sym_name_and_arity(sym_name_arity(unqualified("main"), 2)),
             words("must be"), quote("det"), words("or"), quote("cc_multi"),
             suffix("."), nl],
-        Spec = error_spec(severity_error, phase_detism_check,
-            [simple_msg(ProcContext, [always(Pieces)])]),
+        Spec = simplest_spec(severity_error, phase_detism_check,
+            ProcContext, Pieces),
         !:Specs = [Spec | !.Specs]
     else
         true
@@ -445,7 +446,8 @@ check_for_multisoln_func(PredProcId, PredInfo, ProcInfo, ModuleInfo, !Specs) :-
         proc_info_get_inst_varset(ProcInfo, InstVarSet),
         PredProcId = proc(PredId, _ProcId),
         PredModePieces = describe_one_pred_name_mode(ModuleInfo,
-            should_not_module_qualify, PredId, InstVarSet, PredArgModes),
+            output_mercury, should_not_module_qualify, PredId,
+            InstVarSet, PredArgModes),
         MainPieces = [words("Error: invalid determinism for")]
             ++ PredModePieces ++ [suffix(":"), nl,
             words("the primary mode of a function cannot be"),
@@ -460,7 +462,7 @@ check_for_multisoln_func(PredProcId, PredInfo, ProcInfo, ModuleInfo, !Specs) :-
         true
     ).
 
-:- func func_primary_mode_det_msg = format_components.
+:- func func_primary_mode_det_msg = list(format_component).
 
 func_primary_mode_det_msg = [words("In Mercury,"),
     words("a function is supposed to be a true mathematical function"),
@@ -481,7 +483,7 @@ det_check_lambda(DeclaredDetism, InferredDetism, Goal, GoalInfo, InstMap0,
         det_info_get_pred_proc_id(!.DetInfo, PredProcId),
         Context = goal_info_get_context(GoalInfo),
         det_info_get_module_info(!.DetInfo, ModuleInfo),
-        PredPieces = describe_one_proc_name_mode(ModuleInfo,
+        PredPieces = describe_one_proc_name_mode(ModuleInfo, output_mercury,
             should_not_module_qualify, PredProcId),
         Pieces = [words("In")] ++ PredPieces ++ [suffix(":"), nl,
             words("Determinism error in lambda expression."), nl,
@@ -504,14 +506,14 @@ det_check_lambda(DeclaredDetism, InferredDetism, Goal, GoalInfo, InstMap0,
     ).
 
 :- pred report_determinism_problem(pred_proc_id::in, module_info::in,
-    format_components::in, determinism::in, determinism::in,
+    list(format_component)::in, determinism::in, determinism::in,
     list(error_msg)::out) is det.
 
 report_determinism_problem(PredProcId, ModuleInfo, MessagePieces,
         DeclaredDetism, InferredDetism, Msgs) :-
     module_info_proc_info(ModuleInfo, PredProcId, ProcInfo),
     proc_info_get_context(ProcInfo, Context),
-    ProcPieces = describe_one_proc_name_mode(ModuleInfo,
+    ProcPieces = describe_one_proc_name_mode(ModuleInfo, output_mercury,
         should_not_module_qualify, PredProcId),
     Pieces = [words("In")] ++ ProcPieces ++ [suffix(":"), nl] ++
         MessagePieces ++ [nl] ++
@@ -1504,8 +1506,7 @@ generate_error_not_switch_on_required_var(RequiredVar, ScopeWord,
         words(ScopeWord), fixed("[" ++ RequiredVarStr ++ "]"), words("scope"),
         words("is not a switch on"), quote(RequiredVarStr), suffix("."), nl],
     Context = goal_info_get_context(ScopeGoalInfo),
-    Msg = simple_msg(Context, [always(Pieces)]),
-    Spec = error_spec(severity_error, phase_detism_check, [Msg]),
+    Spec = simplest_spec(severity_error, phase_detism_check, Context, Pieces),
     det_info_add_error_spec(Spec, !DetInfo).
 
 %-----------------------------------------------------------------------------%
@@ -1874,7 +1875,7 @@ det_report_call_context(Context, CallUnifyContext, DetInfo, PredId, ProcId,
         map.lookup(ProcTable, ProcId, ProcInfo),
         proc_info_declared_argmodes(ProcInfo, ArgModes),
         proc_info_get_inst_varset(ProcInfo, InstVarSet),
-        PredPieces = describe_one_pred_name_mode(ModuleInfo,
+        PredPieces = describe_one_pred_name_mode(ModuleInfo, output_mercury,
             should_module_qualify, PredId, InstVarSet, ArgModes),
         StartingPieces = [words("Call to") | PredPieces]
     ).
@@ -1986,7 +1987,8 @@ failing_context_description(ModuleInfo, VarSet, FailingContext) = Msg :-
     ;
         FailingGoal = generic_call_goal(GenericCall),
         hlds_goal.generic_call_to_id(GenericCall, GenericCallId),
-        Pieces = [words(capitalize(generic_call_id_to_string(GenericCallId))),
+        GenericCallIdString = generic_call_id_to_string(GenericCallId),
+        Pieces = [words(capitalize_first(GenericCallIdString)),
             words("can fail.")]
     ;
         FailingGoal = negated_goal,

@@ -124,63 +124,83 @@
 %
 
     % Convert the string to a list of characters (code points).
-    % The reverse mode of the predicate throws an exception if
-    % the list of characters contains a null character.
     %
-    % NOTE: In the future we may also throw an exception if the list contains
-    % a surrogate code point.
+    % In the forward mode:
+    % If strings use UTF-8 encoding then each code unit in an ill-formed
+    % sequence is replaced by U+FFFD REPLACEMENT CHARACTER in the list.
+    % If strings use UTF-16 encoding then each unpaired surrogate code point
+    % is returned as a separate code point in the list.
     %
+    % The reverse mode of the predicate throws an exception if the list
+    % contains a null character or code point that cannot be encoded in a
+    % string (namely, surrogate code points cannot be encoded in UTF-8
+    % strings).
+    %
+    % The reverse mode of to_char_list/2 is deprecated because the implied
+    % ability to round trip convert a string to a list then back to the same
+    % string does not hold in the presence of ill-formed code unit sequences.
+    %
+%:- pragma obsolete_proc(to_char_list(uo, in), [from_char_list/2]).
 :- func to_char_list(string) = list(char).
 :- pred to_char_list(string, list(char)).
 :- mode to_char_list(in, out) is det.
 :- mode to_char_list(uo, in) is det.
 
-    % Convert the string to a list of characters (code points) in reverse order.
-    % The reverse mode of the predicate throws an exception if
-    % the list of characters contains a null character.
+    % Convert the string to a list of characters (code points) in reverse
+    % order.
     %
-    % NOTE: In the future we may also throw an exception if the list contains
-    % a surrogate code point.
+    % In the forward mode:
+    % If strings use UTF-8 encoding then each code unit in an ill-formed
+    % sequence is replaced by U+FFFD REPLACEMENT CHARACTER in the list.
+    % If strings use UTF-16 encoding then each unpaired surrogate code point
+    % is returned as a separate code point in the list.
     %
+    % The reverse mode of the predicate throws an exception if the list
+    % contains a null character or code point that cannot be encoded in a
+    % string (namely, surrogate code points cannot be encoded in UTF-8
+    % strings).
+    %
+    % The reverse mode of to_rev_char_list/2 is deprecated because the implied
+    % ability to round trip convert a string to a list then back to the same
+    % string does not hold in the presence of ill-formed code unit sequences.
+    %
+%:- pragma obsolete_proc(to_rev_char_list(uo, in), [from_rev_char_list/2]).
 :- func to_rev_char_list(string) = list(char).
 :- pred to_rev_char_list(string, list(char)).
 :- mode to_rev_char_list(in, out) is det.
 :- mode to_rev_char_list(uo, in) is det.
 
     % Convert a list of characters (code points) to a string.
-    % Throws an exception if the list of characters contains a null character.
+    % Throws an exception if the list contains a null character or code point
+    % that cannot be encoded in a string (namely, surrogate code points cannot
+    % be encoded in UTF-8 strings).
     %
-    % NOTE: In the future we may also throw an exception if the list contains
-    % a surrogate code point.
+    % The reverse mode of from_char_list/2 is deprecated because the implied
+    % ability to round trip convert a string to a list then back to the same
+    % string does not hold in the presence of ill-formed code unit sequences.
     %
+%:- pragma obsolete_proc(from_char_list(out, in), [to_char_list/2]).
 :- func from_char_list(list(char)::in) = (string::uo) is det.
 :- pred from_char_list(list(char), string).
 :- mode from_char_list(in, uo) is det.
 :- mode from_char_list(out, in) is det.
 
     % As above, but fail instead of throwing an exception if the list contains
-    % a null character.
-    %
-    % NOTE: In the future we may also throw an exception if the list contains
-    % a surrogate code point.
+    % a null character or code point that cannot be encoded in a string.
     %
 :- pred semidet_from_char_list(list(char)::in, string::uo) is semidet.
 
     % Same as from_char_list, except that it reverses the order
     % of the characters.
-    % Throws an exception if the list of characters contains a null character.
-    %
-    % NOTE: In the future we may also throw an exception if the list contains
-    % a surrogate code point.
+    % Throws an exception if the list contains a null character or code point
+    % that cannot be encoded in a string (namely, surrogate code points cannot
+    % be encoded in UTF-8 strings).
     %
 :- func from_rev_char_list(list(char)::in) = (string::uo) is det.
 :- pred from_rev_char_list(list(char)::in, string::uo) is det.
 
     % As above, but fail instead of throwing an exception if the list contains
-    % a null character.
-    %
-    % NOTE: In the future we may also throw an exception if the list contains
-    % a surrogate code point.
+    % a null character or code point that cannot be encoded in a string.
     %
 :- pred semidet_from_rev_char_list(list(char)::in, string::uo) is semidet.
 
@@ -228,29 +248,31 @@
 
     % index(String, Index, Char):
     %
-    % `Char' is the character (code point) in `String', beginning at the
-    % code unit `Index'. Fails if `Index' is out of range (negative, or
-    % greater than or equal to the length of `String').
+    % If `Index' is the initial code unit offset of a well-formed code unit
+    % sequence in `String' then `Char' is the code point encoded by that
+    % sequence.
     %
-    % Calls error/1 if an illegal sequence is detected.
+    % Otherwise, if `Index' is in range, `Char' is either a U+FFFD REPLACEMENT
+    % CHARACTER (when strings are UTF-8 encoded) or the unpaired surrogate
+    % code point at `Index' (when strings are UTF-16 encoded).
+    %
+    % Fails if `Index' is out of range (negative, or greater than or equal to
+    % the length of `String').
     %
 :- pred index(string::in, int::in, char::uo) is semidet.
 
     % det_index(String, Index, Char):
     %
-    % `Char' is the character (code point) in `String', beginning at the
-    % code unit `Index'.
-    % Calls error/1 if `Index' is out of range (negative, or greater than
-    % or equal to the length of `String'), or if an illegal sequence is
-    % detected.
+    % Like index/3 but throws an exception if `Index' is out of range
+    % (negative, or greater than or equal to the length of `String').
     %
 :- func det_index(string, int) = char.
 :- pred det_index(string::in, int::in, char::uo) is det.
 
     % unsafe_index(String, Index, Char):
     %
-    % `Char' is the character (code point) in `String', beginning at the
-    % code unit `Index'.
+    % Like index/3 but does not check that `Index' is in range.
+    %
     % WARNING: behavior is UNDEFINED if `Index' is out of range
     % (negative, or greater than or equal to the length of `String').
     % This version is constant time, whereas det_index
@@ -271,35 +293,52 @@
 
     % index_next(String, Index, NextIndex, Char):
     %
-    % Like `index'/3 but also returns the position of the code unit
-    % that follows the code point beginning at `Index',
-    % i.e. NextIndex = Index + num_code_units_to_encode(Char).
+    % If `Index' is the initial code unit offset of a well-formed code unit
+    % sequence in `String' then `Char' is the code point encoded by that
+    % sequence, and `NextIndex' is the offset immediately following that
+    % sequence.
+    %
+    % Otherwise, if `Index' is in range, `Char' is either a U+FFFD REPLACEMENT
+    % CHARACTER (when strings are UTF-8 encoded) or the unpaired surrogate
+    % code point at `Index' (when strings are UTF-16 encoded), and `NextIndex'
+    % is Index + 1.
+    %
+    % Fails if `Index' is out of range (negative, or greater than or equal to
+    % the length of `String').
     %
 :- pred index_next(string::in, int::in, int::out, char::uo) is semidet.
 
     % unsafe_index_next(String, Index, NextIndex, Char):
     %
-    % `Char' is the character (code point) in `String', beginning at the
-    % code unit `Index'. `NextIndex' is the offset following the encoding
-    % of `Char'. Fails if `Index' is equal to the length of `String'.
+    % Like index_next/4 but does not check that `Index' is in range.
+    % Fails if `Index' is equal to the length of `String'.
+    %
     % WARNING: behavior is UNDEFINED if `Index' is out of range
     % (negative, or greater than the length of `String').
     %
 :- pred unsafe_index_next(string::in, int::in, int::out, char::uo) is semidet.
 
-    % prev_index(String, Index, CharIndex, Char):
+    % prev_index(String, Index, PrevIndex, Char):
     %
-    % `Char' is the character (code point) in `String' immediately _before_
-    % the code unit `Index'. Fails if `Index' is out of range (non-positive,
-    % or greater than the length of `String').
+    % If `Index - 1' is the final code unit offset of a well-formed sequence in
+    % `String' then `Char' is the code point encoded by that sequence, and
+    % `PrevIndex' is the initial code unit offset of that sequence.
+    %
+    % Otherwise, if `Index' is in range, `Char' is either a U+FFFD REPLACEMENT
+    % CHARACTER (when strings are UTF-8 encoded) or the unpaired surrogate
+    % code point at `Index - 1' (when strings are UTF-16 encoded), and
+    % `PrevIndex' is `Index - 1'.
+    %
+    % Fails if `Index' is out of range (non-positive, or greater than the
+    % length of `String').
     %
 :- pred prev_index(string::in, int::in, int::out, char::uo) is semidet.
 
-    % unsafe_prev_index(String, Index, CharIndex, Char):
+    % unsafe_prev_index(String, Index, PrevIndex, Char):
     %
-    % `Char' is the character (code point) in `String' immediately _before_
-    % the code unit `Index'. `CharIndex' is the offset of the beginning of
-    % `Char'. Fails if `Index' is zero.
+    % Like prev_index/4 but does not check that `Index' is in range.
+    % Fails if `Index' is zero.
+    %
     % WARNING: behavior is UNDEFINED if `Index' is out of range
     % (negative, or greater than the length of `String').
     %
@@ -388,6 +427,11 @@
 
     % Determine the number of code points in a string.
     %
+    % Each valid code point, and each code unit that is part of an ill-formed
+    % sequence, contributes one to the result.
+    % (This matches the number of steps it would take to iterate over the
+    % string using string.index_next or string.prev_index.)
+    %
     % NOTE The names of this predicate and several other predicates
     % may be changed in the future to refer to code_points, not codepoints,
     % for consistency with predicate names that talk about code_units.
@@ -400,17 +444,23 @@
     %
 :- func count_utf8_code_units(string) = int.
 
-    % codepoint_offset(String, StartOffset, CodePointCount, CodePointOffset):
+    % codepoint_offset(String, StartOffset, Count, Offset):
     %
-    % Return the offset into `String' where, starting from `StartOffset',
-    % `CodePointCount' code points are skipped. Fails if either `StartOffset'
-    % or `CodePointOffset' are out of range.
+    % Let `S' be the substring of `String' from code unit `StartOffset' to the
+    % end of the string. `Offset' is code unit offset after advancing `Count'
+    % steps in `S', where each step skips over either:
+    %  - one encoding of a Unicode code point, or
+    %  - one code unit that is part of an ill-formed sequence.
+    %
+    % Fails if `StartOffset' is out of range (negative, or greater than the
+    % length of `String'), or if there are fewer than `Count' steps possible
+    % in `S'.
     %
 :- pred codepoint_offset(string::in, int::in, int::in, int::out) is semidet.
 
-    % codepoint_offset(String, CodePointCount, CodePointOffset):
+    % codepoint_offset(String, Count, Offset):
     %
-    % Same as `codepoint_offset(String, 0, CodePointCount, CodePointOffset)'.
+    % Same as `codepoint_offset(String, 0, Count, Offset)'.
     %
 :- pred codepoint_offset(string::in, int::in, int::out) is semidet.
 
@@ -477,8 +527,8 @@
 
     % all_match(TestPred, String):
     %
-    % True if TestPred is true when applied to each character (code point) in
-    % String or if String is the empty string.
+    % True iff `String' is empty or contains only code points that satisfy
+    % `TestPred'.
     %
 :- pred all_match(pred(char)::in(pred(in) is semidet), string::in) is semidet.
 
@@ -488,9 +538,33 @@
     %
 :- pred contains_char(string::in, char::in) is semidet.
 
+    % compare_substrings(Res, X, StartX, Y, StartY, Length):
+    %
+    % Compare two substrings by code unit order. The two substrings are
+    % the substring of `X' between `StartX' and `StartX + Length', and
+    % the substring of `Y' between `StartY' and `StartY + Length'.
+    % `StartX', `StartY' and `Length' are all in terms of code units.
+    %
+    % Fails if `StartX' or `StartX + Length' are not within [0, length(X)],
+    % or if `StartY' or `StartY + Length' are not within [0, length(Y)],
+    % or if `Length' is negative.
+    %
+:- pred compare_substrings(comparison_result::uo, string::in, int::in,
+    string::in, int::in, int::in) is semidet.
+
+    % unsafe_compare_substrings(Res, X, StartX, Y, StartY, Length):
+    %
+    % Same as compare_between/4 but without range checks.
+    % WARNING: if any of `StartX', `StartY', `StartX + Length' or
+    % `StartY + Length' are out of range, or if `Length' is negative,
+    % then the behaviour is UNDEFINED. Use with care!
+    %
+:- pred unsafe_compare_substrings(comparison_result::uo, string::in, int::in,
+    string::in, int::in, int::in) is det.
+
     % compare_ignore_case_ascii(Res, X, Y):
     %
-    % Compare two strings by code point order, ignoring the case of letters
+    % Compare two strings by code unit order, ignoring the case of letters
     % (A-Z, a-z) in the ASCII range.
     % Equivalent to `compare(Res, to_lower(X), to_lower(Y))'
     % but more efficient.
@@ -501,7 +575,7 @@
     % prefix_length(Pred, String):
     %
     % The length (in code units) of the maximal prefix of `String' consisting
-    % entirely of characters (code points) satisfying Pred.
+    % entirely of code points satisfying `Pred'.
     %
 :- func prefix_length(pred(char)::in(pred(in) is semidet), string::in)
     = (int::out) is det.
@@ -509,7 +583,7 @@
     % suffix_length(Pred, String):
     %
     % The length (in code units) of the maximal suffix of `String' consisting
-    % entirely of characters (code points) satisfying Pred.
+    % entirely of code points satisfying `Pred'.
     %
 :- func suffix_length(pred(char)::in(pred(in) is semidet), string::in)
     = (int::out) is det.
@@ -527,6 +601,8 @@
     % `Index' is the code unit position in `String' where the first
     % occurrence of `SubString' occurs such that 'Index' is greater than or
     % equal to `BeginAt'. Indices start at zero.
+    % Fails if `BeginAt' is negative or greater than
+    % length(String) - length(SubString).
     %
 :- pred sub_string_search_start(string::in, string::in, int::in, int::out)
     is semidet.
@@ -540,16 +616,34 @@
     %
 :- func append(string::in, string::in) = (string::uo) is det.
 
+    % append(S1, S2, S3):
+    %
+    % Append two strings together. S3 consists of the code units of S1
+    % followed by the code units of S2, in order.
+    %
+    % An ill-formed code unit sequence at the end of S1 may join with an
+    % ill-formed code unit sequence at the start of S2 to produce a valid
+    % encoding of a code point in S3.
+    %
+    % The append(out, out, in) mode is deprecated because it does not match
+    % the semantics of the forwards modes in the presence of ill-formed code
+    % unit sequences. Use nondet_append/3 instead.
+    %
+%:- pragma obsolete_proc(append(out, out, in), [nondet_append/3]).
 :- pred append(string, string, string).
 :- mode append(in, in, in) is semidet.  % implied
 :- mode append(in, uo, in) is semidet.
 :- mode append(in, in, uo) is det.
+:- mode append(uo, in, in) is semidet.
 :- mode append(out, out, in) is multi.
-% The following mode is semidet in the sense that it doesn't succeed more
-% than once - but it does create a choice-point, which means that the
-% compiler can't deduce that it is semidet. (It is also inefficient.)
-% Use remove_suffix instead.
-% :- mode append(out, in, in) is semidet.
+
+    % nondet_append(S1, S2, S3):
+    %
+    % Non-deterministically return S1 and S2, where S1 ++ S2 = S3.
+    % S3 is split after each code point or code unit in an ill-formed sequence.
+    %
+:- pred nondet_append(string, string, string).
+:- mode nondet_append(out, out, in) is multi.
 
     % S1 ++ S2 = S :- append(S1, S2, S).
     %
@@ -576,8 +670,13 @@
 % Splitting up strings.
 %
 
-    % first_char(String, Char, Rest) is true iff Char is the first character
-    % (code point) of String, and Rest is the remainder.
+    % first_char(String, Char, Rest) is true iff `String' begins with a
+    % well-formed code unit sequence, `Char' is the code point encoded by
+    % that sequence, and `Rest' is the rest of `String' after that sequence.
+    %
+    % The (uo, in, in) mode throws an exception if `Char' cannot be encoded in
+    % a string, or if `Char' is a surrogate code point (for consistency with
+    % the other modes).
     %
     % WARNING: first_char makes a copy of Rest because the garbage collector
     % doesn't handle references into the middle of an object, at least not the
@@ -595,8 +694,8 @@
 
     % split(String, Index, LeftSubstring, RightSubstring):
     %
-    % Split a string into two substrings, at the code unit `Index'.
-    % (If `Count' is out of the range [0, length of `String'], it is treated
+    % Split a string into two substrings at the code unit offset `Index'.
+    % (If `Index' is out of the range [0, length of `String'], it is treated
     % as if it were the nearest end-point of that range.)
     %
 :- pred split(string::in, int::in, string::out, string::out) is det.
@@ -672,11 +771,23 @@
     % between_codepoints(String, Start, End, Substring):
     %
     % `Substring' is the part of `String' between the code point positions
-    % `Start' and `End'.
-    % (If `Start' is out of the range [0, length of `String'], it is treated
-    % as if it were the nearest end-point of that range.
-    % If `End' is out of the range [`Start', length of `String'],
-    % it is treated as if it were the nearest end-point of that range.)
+    % `Start' and `End'. The result is equivalent to:
+    %
+    %   between(String, StartOffset, EndOffset, Substring)
+    %
+    % where:
+    %
+    %   StartOffset is from codepoint_offset(String, Start, StartOffset)
+    %     if Start is in [0, count_codepoints(String)],
+    %   StartOffset = 0 if Start < 0,
+    %   StartOffset = length(String) otherwise;
+    %
+    %   EndOffset is from codepoint_offset(String, End, EndOffset)
+    %     if End is in [0, count_codepoints(String)],
+    %   EndOffset = 0 if End < 0,
+    %   EndOffset = length(String) otherwise.
+    %
+    % between/4 will enforce StartOffset =< EndOffset.
     %
 :- func between_codepoints(string::in, int::in, int::in)
     = (string::uo) is det.
@@ -757,6 +868,7 @@
     % prefix(String, Prefix) is true iff Prefix is a prefix of String.
     % Same as append(Prefix, _, String).
     %
+%:- pragma obsolete_proc(prefix(in, out)).
 :- pred prefix(string, string).
 :- mode prefix(in, in) is semidet.
 :- mode prefix(in, out) is multi.
@@ -764,6 +876,7 @@
     % suffix(String, Suffix) is true iff Suffix is a suffix of String.
     % Same as append(_, Suffix, String).
     %
+%:- pragma obsolete_proc(suffix(in, out)).
 :- pred suffix(string, string).
 :- mode suffix(in, in) is semidet.
 :- mode suffix(in, out) is multi.
@@ -773,12 +886,16 @@
     % This is a synonym for append(Prefix, Suffix, String) but with the
     % arguments in a more convenient order for use with higher-order code.
     %
+    % WARNING: the argument order differs from remove_suffix.
+    %
 :- pred remove_prefix(string::in, string::in, string::out) is semidet.
 
     % det_remove_prefix(Prefix, String, Suffix):
     %
     % This is a synonym for append(Prefix, Suffix, String) but with the
     % arguments in a more convenient order for use with higher-order code.
+    %
+    % WARNING: the argument order differs from remove_suffix.
     %
 :- pred det_remove_prefix(string::in, string::in, string::out) is det.
 
@@ -789,8 +906,10 @@
 
     % remove_suffix(String, Suffix, Prefix):
     %
-    % The same as append(Prefix, Suffix, String) except that this is semidet
-    % whereas append(out, in, in) is nondet.
+    % The same as append(Prefix, Suffix, String).
+    %
+    % WARNING: the argument order differs from both remove_prefix and
+    % remove_suffix_if_present.
     %
 :- pred remove_suffix(string::in, string::in, string::out) is semidet.
 
@@ -798,10 +917,16 @@
     % remove_suffix, except it throws an exception if String does not end
     % with Suffix.
     %
+    % WARNING: the argument order differs from both remove_prefix and
+    % remove_suffix_if_present.
+    %
 :- func det_remove_suffix(string, string) = string.
 
     % remove_suffix_if_present(Suffix, String) returns `String' minus `Suffix'
     % if `String' ends with `Suffix', and `String' if it doesn't.
+    %
+    % WARNING: the argument order differs from remove_suffix and
+    % det_remove_suffix.
     %
 :- func remove_suffix_if_present(string, string) = string.
 
@@ -968,8 +1093,15 @@
     % foldl(Closure, String, !Acc):
     %
     % `Closure' is an accumulator predicate which is to be called for each
-    % character (code point) of the string `String' in turn. The initial
-    % value of the accumulator is `!.Acc' and the final value is `!:Acc'.
+    % character (code point) of the string `String' in turn.
+    % If `String' contains ill-formed sequences, `Closure' is called for each
+    % code unit in an ill-formed sequence. If strings use UTF-8 encoding,
+    % U+FFFD is passed to `Closure' in place of each such code unit.
+    % If strings use UTF-16 encoding, each code unit in an ill-formed sequence
+    % is an unpaired surrogate code point, which will be passed to `Closure'.
+    %
+    % The initial value of the accumulator is `!.Acc' and the final value is
+    % `!:Acc'.
     % (foldl(Closure, String, !Acc)  is equivalent to
     %   to_char_list(String, Chars),
     %   list.foldl(Closure, Chars, !Acc)
@@ -1221,7 +1353,15 @@
 
     % char_to_string(Char, String):
     %
-    % Converts a character (code point) to a string, or vice versa.
+    % Converts a character to a string, or vice versa.
+    % True if `String' is the well-formed string that encodes the code point
+    % `Char'; or, if strings are UTF-16 encoded, `Char' is a surrogate code
+    % point and `String' is the string that contains only that surrogate code
+    % point. Otherwise, `char_to_string(Char, String)' is false.
+    %
+    % Throws an exception if `Char' is the null character or a code point that
+    % cannot be encoded in a string (namely, surrogate code points cannot be
+    % encoded in UTF-8 strings).
     %
 :- func char_to_string(char::in) = (string::uo) is det.
 :- pred char_to_string(char, string).
@@ -1434,6 +1574,7 @@
 :- include_module parse_runtime.
 :- include_module to_string.
 
+:- import_module bool.
 :- import_module int.
 :- import_module pair.
 :- import_module require.
@@ -1494,26 +1635,6 @@
 % Conversions between strings and lists of characters.
 %
 
-% XXX ILSEQ Behaviour on ill-formed sequences differs by target language.
-%   - C: stops at first ill-formed sequence from the right
-%   - C#: unpaired surrogates are replaced by U+FFFD
-%   - Java: unpaired surrogates are returned as-is
-%
-% Perhaps we need versions of to_char_list/to_rev_char_list with choice of
-% action on ill-formed sequences:
-%   - throw an exception
-%   - ignore
-%   - replace with U+FFFD
-%
-% Replacing with U+FFFD is only necessary for UTF-8. Unpaired surrogates in
-% UTF-16 can represent themselves since they are just code points.
-%
-% For users that want round-trip conversion of potentially invalid UTF-8,
-% one possibility would be to map bytes in ill-formed sequences to chars
-% in the low surrogate range U+DC80..U+DCFF, see
-% https://hyperreal.org/~est/utf-8b/releases/utf-8b-20060413043934/kuhn-utf-8b.html
-% A simpler possibility is to introduce a char_or_code_unit type.
-
 to_char_list(S) = Cs :-
     to_char_list(S, Cs).
 
@@ -1526,83 +1647,21 @@ to_char_list(Str::uo, CharList::in) :-
 
 :- pred do_to_char_list(string::in, list(char)::out) is det.
 
-:- pragma foreign_proc("C",
-    do_to_char_list(Str::in, CharList::out),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, no_sharing],
-"{
-    MR_Integer pos = strlen(Str);
-    int c;
-
-    CharList = MR_list_empty_msg(MR_ALLOC_ID);
-    for (;;) {
-        c = MR_utf8_prev_get(Str, &pos);
-        if (c <= 0) {
-            break;
-        }
-        CharList = MR_char_list_cons_msg((MR_UnsignedChar) c, CharList,
-            MR_ALLOC_ID);
-    }
-}").
-:- pragma foreign_proc("C#",
-    do_to_char_list(Str::in, CharList::out),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, no_sharing],
-"
-    list.List_1 lst = list.empty_list();
-    for (int i = Str.Length - 1; i >= 0; i--) {
-        int c;
-        char c2 = Str[i];
-        if (System.Char.IsLowSurrogate(c2)) {
-            try {
-                char c1 = Str[i - 1];
-                c = System.Char.ConvertToUtf32(c1, c2);
-                i--;
-            } catch (System.ArgumentOutOfRangeException) {
-                c = 0xfffd;
-            } catch (System.IndexOutOfRangeException) {
-                c = 0xfffd;
-            }
-        } else if (System.Char.IsHighSurrogate(c2)) {
-            c = 0xfffd;
-        } else {
-            c = c2;
-        }
-        lst = list.cons(c, lst);
-    }
-    CharList = lst;
-").
-:- pragma foreign_proc("Java",
-    do_to_char_list(Str::in, CharList::out),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, no_sharing],
-"
-    list.List_1<Integer> lst = list.empty_list();
-    for (int i = Str.length(); i > 0; ) {
-        int c = Str.codePointBefore(i);
-        lst = list.cons(c, lst);
-        i -= java.lang.Character.charCount(c);
-    }
-    CharList = lst;
-").
-:- pragma foreign_proc("Erlang",
-    do_to_char_list(Str::in, CharList::out),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness],
-"
-    CharList = unicode:characters_to_list(Str)
-").
-
-    % It would be worth checking if this Mercury implementation (or another
-    % one) is as fast the foreign_proc implementations, the next time any
-    % changes are required.
-    %
 do_to_char_list(Str, CharList) :-
-    foldr(list.cons, Str, [], CharList).
+    do_to_char_list_loop(Str, length(Str), [], CharList).
+
+:- pred do_to_char_list_loop(string::in, int::in,
+    list(char)::in, list(char)::out) is det.
+
+do_to_char_list_loop(Str, Index0, !CharList) :-
+    ( if string.unsafe_prev_index(Str, Index0, Index1, C) then
+        !:CharList = [C | !.CharList],
+        do_to_char_list_loop(Str, Index1, !CharList)
+    else
+        true
+    ).
 
 %---------------------%
-
-% XXX ILSEQ unsafe_index_next causes truncation at first ill-formed sequence.
 
 to_rev_char_list(S) = Cs :-
     to_rev_char_list(S, Cs).
@@ -1643,7 +1702,7 @@ from_char_list(Chars::in, Str::uo) :-
     ( if semidet_from_char_list(Chars, Str0) then
         Str = Str0
     else
-        unexpected($pred, "null character in list")
+        unexpected($pred, "null character or surrogate code point in list")
     ).
 
 :- pragma foreign_proc("C",
@@ -1651,51 +1710,55 @@ from_char_list(Chars::in, Str::uo) :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, may_not_duplicate, no_sharing],
 "{
-    // mode (uo, in) is det
     MR_Word char_list_ptr;
     size_t size;
-    MR_Char c;
 
     // Loop to calculate list length + sizeof(MR_Word) in `size'
     // using list in `char_list_ptr'.
-    size = 0;
-    char_list_ptr = CharList;
-    while (! MR_list_is_empty(char_list_ptr)) {
-        c = (MR_Char) MR_list_head(char_list_ptr);
-        if (MR_is_ascii(c)) {
-            size++;
-        } else {
-            // XXX ILSEQ Do something if c is a surrogate code point.
-            size += MR_utf8_width(c);
-        }
-        char_list_ptr = MR_list_tail(char_list_ptr);
-    }
-
-    // Allocate heap space for string.
-    MR_allocate_aligned_string_msg(Str, size, MR_ALLOC_ID);
-
-    // Loop to copy the characters from the char_list to the string.
     SUCCESS_INDICATOR = MR_TRUE;
     size = 0;
     char_list_ptr = CharList;
     while (! MR_list_is_empty(char_list_ptr)) {
-        c = (MR_Char) MR_list_head(char_list_ptr);
-        // It is an error to put a null character in a string
-        // (see the comments at the top of this file).
+        MR_Char c = (MR_Char) MR_list_head(char_list_ptr);
         if (c == '\\0') {
             SUCCESS_INDICATOR = MR_FALSE;
             break;
         }
         if (MR_is_ascii(c)) {
-            Str[size] = c;
             size++;
         } else {
-            size += MR_utf8_encode(Str + size, c);
+            size_t csize = MR_utf8_width(c);
+            if (csize == 0) {
+                // c is a surrogate code point (or even out of range,
+                // but that is not supposed to happen).
+                SUCCESS_INDICATOR = MR_FALSE;
+                break;
+            }
+            size += csize;
         }
         char_list_ptr = MR_list_tail(char_list_ptr);
     }
 
-    Str[size] = '\\0';
+    if (SUCCESS_INDICATOR) {
+        // Allocate heap space for string.
+        MR_allocate_aligned_string_msg(Str, size, MR_ALLOC_ID);
+
+        // Loop to copy the characters from the char_list to the string.
+        size = 0;
+        char_list_ptr = CharList;
+        while (! MR_list_is_empty(char_list_ptr)) {
+            MR_Char c = (MR_Char) MR_list_head(char_list_ptr);
+            if (MR_is_ascii(c)) {
+                Str[size] = c;
+                size++;
+            } else {
+                size += MR_utf8_encode(Str + size, c);
+            }
+            char_list_ptr = MR_list_tail(char_list_ptr);
+        }
+
+        Str[size] = '\\0';
+    }
 }").
 :- pragma foreign_proc("C#",
     semidet_from_char_list(CharList::in, Str::uo),
@@ -1755,6 +1818,7 @@ semidet_from_char_list(CharList, Str) :-
     ;
         CharList = [C | Cs],
         not char.to_int(C, 0),
+        internal_encoding_is_utf8 => not char.is_surrogate(C),
         semidet_from_char_list(Cs, Str0),
         first_char(Str, C, Str0)
     ).
@@ -1774,7 +1838,7 @@ from_rev_char_list(Chars, Str) :-
     ( if semidet_from_rev_char_list(Chars, Str0) then
         Str = Str0
     else
-        unexpected($pred, "null character in list")
+        unexpected($pred, "null character or surrogate code point in list")
     ).
 
 :- pragma foreign_proc("C",
@@ -1784,47 +1848,54 @@ from_rev_char_list(Chars, Str) :-
 "{
     MR_Word list_ptr;
     MR_Word size;
-    MR_Char c;
 
     // Loop to calculate list length in `size' using list in `list_ptr'.
+    SUCCESS_INDICATOR = MR_TRUE;
     size = 0;
     list_ptr = Chars;
     while (!MR_list_is_empty(list_ptr)) {
-        c = (MR_Char) MR_list_head(list_ptr);
-        if (MR_is_ascii(c)) {
-            size++;
-        } else {
-            // XXX ILSEQ Do something if c is a surrogate code point.
-            size += MR_utf8_width(c);
-        }
-        list_ptr = MR_list_tail(list_ptr);
-    }
-
-    // Allocate heap space for string.
-    MR_allocate_aligned_string_msg(Str, size, MR_ALLOC_ID);
-
-    // Set size to be the offset of the end of the string
-    // (ie the \\0) and null terminate the string.
-    Str[size] = '\\0';
-
-    // Loop to copy the characters from the list_ptr to the string
-    // in reverse order.
-    list_ptr = Chars;
-    SUCCESS_INDICATOR = MR_TRUE;
-    while (!MR_list_is_empty(list_ptr)) {
-        c = (MR_Char) MR_list_head(list_ptr);
+        MR_Char c = (MR_Char) MR_list_head(list_ptr);
         if (c == '\\0') {
             SUCCESS_INDICATOR = MR_FALSE;
             break;
         }
         if (MR_is_ascii(c)) {
-            size--;
-            Str[size] = c;
+            size++;
         } else {
-            size -= MR_utf8_width(c);
-            MR_utf8_encode(Str + size, c);
+            size_t csize = MR_utf8_width(c);
+            if (csize == 0) {
+                // c is a surrogate code point (or even out of range,
+                // but that is not supposed to happen).
+                SUCCESS_INDICATOR = MR_FALSE;
+                break;
+            }
+            size += csize;
         }
         list_ptr = MR_list_tail(list_ptr);
+    }
+
+    if (SUCCESS_INDICATOR) {
+        // Allocate heap space for string.
+        MR_allocate_aligned_string_msg(Str, size, MR_ALLOC_ID);
+
+        // Set size to be the offset of the end of the string
+        // (ie the \\0) and null terminate the string.
+        Str[size] = '\\0';
+
+        // Loop to copy the characters from the list_ptr to the string
+        // in reverse order.
+        list_ptr = Chars;
+        while (! MR_list_is_empty(list_ptr)) {
+            MR_Char c = (MR_Char) MR_list_head(list_ptr);
+            if (MR_is_ascii(c)) {
+                size--;
+                Str[size] = c;
+            } else {
+                size -= MR_utf8_width(c);
+                MR_utf8_encode(Str + size, c);
+            }
+            list_ptr = MR_list_tail(list_ptr);
+        }
     }
 }").
 :- pragma foreign_proc("C#",
@@ -2163,21 +2234,17 @@ duplicate_char(Char, Count, String) :-
 % so that the compiler can do loop invariant hoisting on calls to them
 % that occur in loops.
 
-% XXX ILSEQ index/3 and unsafe_index/3 throw an exception if an ill-formed
-% sequence is detected. The index_next family fails instead. Both families
-% should be made consistent.
-%
+% XXX ILSEQ
 % We should allow the possibility of working with strings containing ill-formed
 % sequences. That would require predicates that can return either a code point
 % when possible, or else code units from ill-formed sequences.
-%
-% It might have been overzealous to throw an exception for unpaired surrogate
-% code points in UTF-16.
 
 :- pragma inline(index/3).
 :- pragma inline(det_index/3).
 :- pragma inline(index_next/4).
+:- pragma inline(index_next_repl/5).
 :- pragma inline(prev_index/4).
+:- pragma inline(prev_index_repl/5).
 
 index(Str, Index, Char) :-
     Len = length(Str),
@@ -2200,17 +2267,8 @@ det_index(String, Int, Char) :-
 unsafe_index(S, N) = C :-
     unsafe_index(S, N, C).
 
-unsafe_index(Str, Index, Char) :-
-    ( if unsafe_index_2(Str, Index, CharPrime) then
-        Char = CharPrime
-    else
-        unexpected($pred, "illegal sequence")
-    ).
-
-:- pred unsafe_index_2(string::in, int::in, char::uo) is semidet.
-
 :- pragma foreign_proc("C",
-    unsafe_index_2(Str::in, Index::in, Ch::uo),
+    unsafe_index(Str::in, Index::in, Ch::uo),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "
@@ -2218,44 +2276,40 @@ unsafe_index(Str, Index, Char) :-
     if (!MR_is_ascii(Ch)) {
         int width;
         Ch = MR_utf8_get_mb(Str, Index, &width);
+        if (Ch < 0) {
+            Ch = 0xFFFD;
+        }
     }
-    SUCCESS_INDICATOR = (Ch > 0);
 ").
 :- pragma foreign_proc("C#",
-    unsafe_index_2(Str::in, Index::in, Ch::uo),
+    unsafe_index(Str::in, Index::in, Ch::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
     char c1 = Str[Index];
+    Ch = c1;
     if (System.Char.IsSurrogate(c1)) {
         try {
             char c2 = Str[Index + 1];
             Ch = System.Char.ConvertToUtf32(c1, c2);
         } catch (System.ArgumentOutOfRangeException) {
-            Ch = -1;
+            // Return unpaired surrogate code point.
         } catch (System.IndexOutOfRangeException) {
-            Ch = -1;
+            // Return unpaired surrogate code point.
         }
-    } else {
-        // Common case.
-        Ch = c1;
     }
-    SUCCESS_INDICATOR = (Ch >= 0);
 ").
 :- pragma foreign_proc("Java",
-    unsafe_index_2(Str::in, Index::in, Ch::uo),
+    unsafe_index(Str::in, Index::in, Ch::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
     Ch = Str.codePointAt(Index);
-    SUCCESS_INDICATOR =
-        !java.lang.Character.isHighSurrogate((char) Ch) &&
-        !java.lang.Character.isLowSurrogate((char) Ch);
 ").
 :- pragma foreign_proc("Erlang",
-    unsafe_index_2(Str::in, Index::in, Ch::uo),
+    unsafe_index(Str::in, Index::in, Ch::uo),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    <<_:Index/binary, Ch/utf8, _/binary>> = Str,
-    SUCCESS_INDICATOR = true
+    % XXX does not handle ill-formed sequences as described
+    <<_:Index/binary, Ch/utf8, _/binary>> = Str
 ").
 
 %---------------------%
@@ -2265,44 +2319,65 @@ String ^ unsafe_elem(Index) = unsafe_index(String, Index).
 
 %---------------------%
 
-% XXX ILSEQ index_next/4 and unsafe_index_next/4 fail when an ill-formed
-% sequence is detected, unlike the index family. Most programs will probably
-% work as intended if we just replace code units in ill-formed sequences with
-% replacement char (for UTF-8) or return the unpaired surrogate code point
-% (for UTF-16).
 index_next(Str, Index, NextIndex, Char) :-
+    index_next_repl(Str, Index, NextIndex, Char, _IsReplaced).
+
+unsafe_index_next(Str, Index, NextIndex, Ch) :-
+    unsafe_index_next_repl(Str, Index, NextIndex, Ch, _IsReplaced).
+
+    % XXX ILSEQ Export something like this.
+    % index_next_repl(String, Index, NextIndex, Char, IsReplaced):
+    %
+    % Like index_next/4 but `IsReplaced' is `yes' iff `Char' is U+FFFD but
+    % `String' does NOT contain an encoding of U+FFFD beginning at `Index'.
+    % (`IsReplaced' is always `no' when strings are UTF-16 encoded.)
+    %
+:- pred index_next_repl(string::in, int::in, int::out, char::uo, bool::out)
+    is semidet.
+
+index_next_repl(Str, Index, NextIndex, Char, IsReplaced) :-
     Len = length(Str),
     ( if index_check(Index, Len) then
-        unsafe_index_next(Str, Index, NextIndex, Char)
+        unsafe_index_next_repl(Str, Index, NextIndex, Char, IsReplaced)
     else
         fail
     ).
 
-% XXX ILSEQ Behaviour of unsafe_index_next depends on target language.
-%   - c: fails at ill-formed sequence
-%   - java: fails at unpaired surrogate
-%   - csharp: System.Char.ConvertToUtf32 throws exception for unpaired surrogate
+    % XXX ILSEQ Export something like this.
+    %
+:- pred unsafe_index_next_repl(string::in, int::in, int::out, char::uo,
+    bool::out) is semidet.
+
 :- pragma foreign_proc("C",
-    unsafe_index_next(Str::in, Index::in, NextIndex::out, Ch::uo),
+    unsafe_index_next_repl(Str::in, Index::in, NextIndex::out, Ch::uo,
+        IsReplaced::out),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "
     Ch = Str[Index];
+    IsReplaced = MR_FALSE;
     if (MR_is_ascii(Ch)) {
         NextIndex = Index + 1;
         SUCCESS_INDICATOR = (Ch != 0);
     } else {
         NextIndex = Index;
         Ch = MR_utf8_get_next_mb(Str, &NextIndex);
-        SUCCESS_INDICATOR = (Ch > 0);
+        if (Ch < 0) {
+            Ch = 0xfffd;
+            IsReplaced = MR_TRUE;
+            NextIndex = Index + 1;
+        }
+        SUCCESS_INDICATOR = MR_TRUE;
     }
 ").
 :- pragma foreign_proc("C#",
-    unsafe_index_next(Str::in, Index::in, NextIndex::out, Ch::uo),
+    unsafe_index_next_repl(Str::in, Index::in, NextIndex::out, Ch::uo,
+        IsReplaced::out),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "
-    if (Index < Str.Length) {
+    IsReplaced = mr_bool.NO;
+    try {
         Ch = System.Char.ConvertToUtf32(Str, Index);
         if (Ch <= 0xffff) {
             NextIndex = Index + 1;
@@ -2310,39 +2385,41 @@ index_next(Str, Index, NextIndex, Char) :-
             NextIndex = Index + 2;
         }
         SUCCESS_INDICATOR = true;
-    } else {
-        Ch = -1;
+    } catch (System.ArgumentOutOfRangeException) {
+        Ch = 0;
         NextIndex = Index;
         SUCCESS_INDICATOR = false;
+    } catch (System.ArgumentException) {
+        // Return unpaired surrogate code point.
+        Ch = Str[Index];
+        NextIndex = Index + 1;
+        SUCCESS_INDICATOR = true;
     }
 ").
 :- pragma foreign_proc("Java",
-    unsafe_index_next(Str::in, Index::in, NextIndex::out, Ch::uo),
+    unsafe_index_next_repl(Str::in, Index::in, NextIndex::out, Ch::uo,
+        IsReplaced::out),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "
-    if (Index < Str.length()) {
+    IsReplaced = bool.NO;
+    try {
         Ch = Str.codePointAt(Index);
-        SUCCESS_INDICATOR =
-            !java.lang.Character.isHighSurrogate((char) Ch) &&
-            !java.lang.Character.isLowSurrogate((char) Ch);
-        if (SUCCESS_INDICATOR) {
-            NextIndex = Index + java.lang.Character.charCount(Ch);
-        } else {
-            Ch = -1;
-            NextIndex = Index;
-        }
-    } else {
-        Ch = -1;
+        NextIndex = Index + java.lang.Character.charCount(Ch);
+        SUCCESS_INDICATOR = true;
+    } catch (IndexOutOfBoundsException e) {
+        Ch = 0;
         NextIndex = Index;
         SUCCESS_INDICATOR = false;
     }
 ").
 :- pragma foreign_proc("Erlang",
-    unsafe_index_next(Str::in, Index::in, NextIndex::out, Ch::uo),
+    unsafe_index_next_repl(Str::in, Index::in, NextIndex::out, Ch::uo,
+        IsReplaced::out),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "
+    % XXX does not handle ill-formed sequences as described
     case Str of
         << _:Index/binary, Ch/utf8, _/binary >> ->
             if
@@ -2355,102 +2432,130 @@ index_next(Str, Index, NextIndex, Char) :-
                 true ->
                     NextIndex = Index + 4
             end,
+            IsReplaced = {no},
             SUCCESS_INDICATOR = true;
         _ ->
             Ch = -1,
+            IsReplaced = {no},
             NextIndex = Index,
             SUCCESS_INDICATOR = false
     end
 ").
 
-prev_index(Str, Index, CharIndex, Char) :-
+%---------------------%
+
+prev_index(Str, Index, PrevIndex, Char) :-
+    prev_index_repl(Str, Index, PrevIndex, Char, _IsReplaced).
+
+unsafe_prev_index(Str, Index, PrevIndex, Ch) :-
+    unsafe_prev_index_repl(Str, Index, PrevIndex, Ch, _IsReplaced).
+
+    % XXX ILSEQ Export something like this.
+    %
+:- pred prev_index_repl(string::in, int::in, int::out, char::uo, bool::out)
+    is semidet.
+
+prev_index_repl(Str, Index, PrevIndex, Char, IsReplaced) :-
     Len = length(Str),
     ( if index_check(Index - 1, Len) then
-        unsafe_prev_index(Str, Index, CharIndex, Char)
+        unsafe_prev_index_repl(Str, Index, PrevIndex, Char, IsReplaced)
     else
         fail
     ).
 
-% XXX ILSEQ Behaviour of unsafe_prev_index depends on target language.
-%   - c: fails on ill-formed sequence
-%   - java: returns unpaired surrogate
-%   - csharp: fails on unpaired surrogate (excepting for the bug)
+    % XXX ILSEQ Export something like this.
+    %
+:- pred unsafe_prev_index_repl(string::in, int::in, int::out, char::uo,
+    bool::out) is semidet.
+
 :- pragma foreign_proc("C",
-    unsafe_prev_index(Str::in, Index::in, PrevIndex::out, Ch::uo),
+    unsafe_prev_index_repl(Str::in, Index::in, PrevIndex::out, Ch::uo,
+        IsReplaced::out),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "
-    if (Index > 0) {
+    IsReplaced = MR_FALSE;
+    if (Index <= 0) {
+        PrevIndex = Index;
+        Ch = 0;
+        SUCCESS_INDICATOR = MR_FALSE;
+    } else {
         PrevIndex = Index - 1;
         Ch = Str[PrevIndex];
-        if (MR_is_ascii(Ch)) {
-            SUCCESS_INDICATOR = (Ch != 0);
-        } else {
+        if (! MR_is_ascii(Ch)) {
             Ch = MR_utf8_prev_get(Str, &PrevIndex);
-            // XXX ILSEQ
-            // SUCCESS_INDICATOR should be false if there are any extra bytes
-            // after the encoding of Ch, but before Index.
-            SUCCESS_INDICATOR = (Ch > 0);
+            // XXX MR_utf8_prev_get currently just scans backwards to find a
+            // lead byte, so we need a separate check to ensure no bytes are
+            // unaccounted for.
+            if (Ch < 0 || PrevIndex + MR_utf8_width(Ch) != Index) {
+                Ch = 0xfffd;
+                IsReplaced = MR_TRUE;
+                PrevIndex = Index - 1;
+            }
         }
-    } else {
-        SUCCESS_INDICATOR = MR_FALSE;
+        SUCCESS_INDICATOR = MR_TRUE;
     }
 ").
 :- pragma foreign_proc("C#",
-    unsafe_prev_index(Str::in, Index::in, PrevIndex::out, Ch::uo),
+    unsafe_prev_index_repl(Str::in, Index::in, PrevIndex::out, Ch::uo,
+        IsReplaced::out),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "
-    if (Index > 0) {
+    IsReplaced = mr_bool.NO;
+    if (Index <= 0) {
+        Ch = 0;
+        PrevIndex = Index;
+        SUCCESS_INDICATOR = false;
+    } else {
         char c2 = Str[Index - 1];
-        if (System.Char.IsSurrogate(c2)) {
+        if (System.Char.IsLowSurrogate(c2)) {
             try {
                 char c1 = Str[Index - 2];
                 Ch = System.Char.ConvertToUtf32(c1, c2);
                 PrevIndex = Index - 2;
-            } catch (System.IndexOutOfRangeException) {
-                Ch = -1;
-                PrevIndex = Index;
-                SUCCESS_INDICATOR = false;
             } catch (System.ArgumentOutOfRangeException) {
-                Ch = -1;
-                PrevIndex = Index;
-                SUCCESS_INDICATOR = false;
+                // Return unpaired surrogate code point.
+                Ch = (int) c2;
+                PrevIndex = Index - 1;
+            } catch (System.IndexOutOfRangeException) {
+                // Return unpaired surrogate code point.
+                Ch = (int) c2;
+                PrevIndex = Index - 1;
             }
         } else {
-            // Common case.
             Ch = (int) c2;
             PrevIndex = Index - 1;
         }
-        // XXX ILSEQ bug, check (Ch >= 0)
         SUCCESS_INDICATOR = true;
-    } else {
-        Ch = -1;
-        PrevIndex = Index;
-        SUCCESS_INDICATOR = false;
     }
 ").
 :- pragma foreign_proc("Java",
-    unsafe_prev_index(Str::in, Index::in, PrevIndex::out, Ch::uo),
+    unsafe_prev_index_repl(Str::in, Index::in, PrevIndex::out, Ch::uo,
+        IsReplaced::out),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, no_sharing],
 "
-    if (Index > 0) {
+    IsReplaced = bool.NO;
+    try {
         Ch = Str.codePointBefore(Index);
         PrevIndex = Index - java.lang.Character.charCount(Ch);
         SUCCESS_INDICATOR = true;
-    } else {
-        Ch = -1;
+    } catch (IndexOutOfBoundsException e) {
+        Ch = 0;
         PrevIndex = Index;
         SUCCESS_INDICATOR = false;
     }
 ").
 :- pragma foreign_proc("Erlang",
-    unsafe_prev_index(Str::in, Index::in, PrevIndex::out, Ch::uo),
+    unsafe_prev_index_repl(Str::in, Index::in, PrevIndex::out, Ch::uo,
+        IsReplaced::out),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness, may_not_duplicate, no_sharing],
 "
+    % XXX does not handle ill-formed sequences as described
     {PrevIndex, Ch} = do_unsafe_prev_index(Str, Index - 1),
+    IsReplaced = {no},
     SUCCESS_INDICATOR = (Ch =/= -1)
 ").
 
@@ -2475,6 +2580,8 @@ do_unsafe_prev_index(Str, Index) ->
         {Index, -1}
     end.
 ").
+
+%---------------------%
 
     % XXX We should consider making this routine a compiler built-in.
     %
@@ -2812,48 +2919,9 @@ count_code_units(Str, Length) :-
 
 %---------------------%
 
-% XXX ILSEQ Behaviour depends on target language.
-%   - c: counts lead bytes without checking trailing bytes
-%   - java: unpaired surrogates count as one code point each
-%   - csharp: counts non-surrogates and high surrogates
-%   - generic: unsafe_index_next stops at the first ill-formed sequence
-%
-% The Java behaviour seems best: count well-formed code points plus each code
-% unit in an ill-formed sequence. index_next and other iteration predicates
-% should be made consistent with however count_codepoints ends up counting.
-
 count_codepoints(String) = Count :-
     count_codepoints(String, Count).
 
-:- pragma foreign_proc("C",
-    count_codepoints(String::in, Count::out),
-    [will_not_call_mercury, promise_pure, thread_safe, may_not_duplicate],
-"
-    unsigned char   b;
-    int             i;
-
-    Count = 0;
-    for (i = 0; ; i++) {
-        b = String[i];
-        if (b == '\\0') {
-            break;
-        }
-        if (MR_utf8_is_single_byte(b) || MR_utf8_is_lead_byte(b)) {
-            Count++;
-        }
-    }
-").
-:- pragma foreign_proc("C#",
-    count_codepoints(String::in, Count::out),
-    [will_not_call_mercury, promise_pure, thread_safe, may_not_duplicate],
-"
-    Count = 0;
-    foreach (char c in String) {
-        if (!System.Char.IsLowSurrogate(c)) {
-            Count++;
-        }
-    }
-").
 :- pragma foreign_proc("Java",
     count_codepoints(String::in, Count::out),
     [will_not_call_mercury, promise_pure, thread_safe, may_not_duplicate],
@@ -2909,43 +2977,6 @@ count_utf8_code_units_2(Char, !Length) :-
 
 %---------------------%
 
-% XXX ILSEQ Behaviour depends on target language.
-% Should be made consistent so that each code unit in an ill-formed sequence
-% counts as one (pseudo) code point.
-
-:- pragma foreign_proc("C",
-    codepoint_offset(String::in, StartOffset::in, N::in, Index::out),
-    [will_not_call_mercury, promise_pure, thread_safe, may_not_duplicate],
-"
-    size_t          len;
-    unsigned char   b;
-
-    SUCCESS_INDICATOR = MR_FALSE;
-    len = strlen(String);
-    for (Index = StartOffset; Index < len; Index++) {
-        b = String[Index];
-        if (MR_utf8_is_single_byte(b) || MR_utf8_is_lead_byte(b)) {
-            if (N-- == 0) {
-                SUCCESS_INDICATOR = MR_TRUE;
-                break;
-            }
-        }
-    }
-").
-:- pragma foreign_proc("C#",
-    codepoint_offset(String::in, StartOffset::in, N::in, Index::out),
-    [will_not_call_mercury, promise_pure, thread_safe, may_not_duplicate],
-"
-    SUCCESS_INDICATOR = false;
-    for (Index = StartOffset; Index < String.Length; Index++) {
-        if (!System.Char.IsLowSurrogate(String, Index)) {
-            if (N-- == 0) {
-                SUCCESS_INDICATOR = true;
-                break;
-            }
-        }
-    }
-").
 :- pragma foreign_proc("Java",
     codepoint_offset(String::in, StartOffset::in, N::in, Index::out),
     [will_not_call_mercury, promise_pure, thread_safe, may_not_duplicate],
@@ -2979,9 +3010,6 @@ codepoint_offset_loop(String, Offset, Length, N, Index) :-
 %---------------------------------------------------------------------------%
 
 codepoint_offset(String, N, Index) :-
-    % XXX ILSEQ
-    % Note: we do not define what happens with unpaired surrogates.
-    %
     codepoint_offset(String, 0, N, Index).
 
 %---------------------------------------------------------------------------%
@@ -3175,10 +3203,6 @@ is_well_formed(_) :-
 % For speed, most of these predicates have C versions as well as
 % Mercury versions. XXX why not all?
 
-% XXX ILSEQ Behaviour depends on target language.
-% The generic versions use all_match which currently uses unsafe_index_next and
-% ignores the first ill-formed sequence and everything thereafter.
-
 :- pragma foreign_proc("C",
     is_all_alpha(S::in),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
@@ -3321,9 +3345,6 @@ is_all_digits(S) :-
 
 %---------------------%
 
-% XXX ILSEQ all_match should fail if it encounters an ill-formed sequence;
-% instead it acts as if the String ends there.
-
 all_match(P, String) :-
     all_match_loop(P, String, 0).
 
@@ -3331,7 +3352,8 @@ all_match(P, String) :-
     int::in) is semidet.
 
 all_match_loop(P, String, Cur) :-
-    ( if unsafe_index_next(String, Cur, Next, Char) then
+    ( if unsafe_index_next_repl(String, Cur, Next, Char, IsReplaced) then
+        IsReplaced = no,
         P(Char),
         all_match_loop(P, String, Next)
     else
@@ -3340,13 +3362,6 @@ all_match_loop(P, String, Cur) :-
 
 %---------------------%
 
-% XXX ILSEQ Behaviour depends on target language.
-%  - C/C#/Java: ill-formed sequences don't prevent matching of later chars
-%  - generic: unsafe_index_next stops at first ill-formed sequence
-
-    % strchr always returns true when searching for '\0',
-    % but the '\0' is an implementation detail which really
-    % shouldn't be considered to be part of the string itself.
 :- pragma foreign_proc("C",
     contains_char(Str::in, Ch::in),
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
@@ -3356,12 +3371,13 @@ all_match_loop(P, String, Cur) :-
     size_t  len;
     if (MR_is_ascii(Ch)) {
         // Fast path.
-        SUCCESS_INDICATOR = (strchr(Str, Ch) != NULL) && Ch != '\\0';
+        // strchr always returns true when searching for NUL,
+        // but the NUL is not part of the string itself.
+        SUCCESS_INDICATOR = (Ch != '\\0') && (strchr(Str, Ch) != NULL);
     } else {
-        // XXX ILSEQ Handle Ch being surrogate or invalid valid.
         len = MR_utf8_encode(buf, Ch);
         buf[len] = '\\0';
-        SUCCESS_INDICATOR = (strstr(Str, buf) != NULL);
+        SUCCESS_INDICATOR = (len > 0) && (strstr(Str, buf) != NULL);
     }
 ").
 :- pragma foreign_proc("C#",
@@ -3384,65 +3400,127 @@ all_match_loop(P, String, Cur) :-
 ").
 
 contains_char(String, Char) :-
-    contains_char(String, Char, 0).
+    contains_char_loop(String, Char, 0).
 
-:- pred contains_char(string::in, char::in, int::in) is semidet.
+:- pred contains_char_loop(string::in, char::in, int::in) is semidet.
 
-contains_char(Str, Char, I) :-
-    ( if unsafe_index_next(Str, I, J, IndexChar) then
-        ( if IndexChar = Char then
-            true
-        else
-            contains_char(Str, Char, J)
-        )
+contains_char_loop(Str, Char, I) :-
+    unsafe_index_next_repl(Str, I, J, IndexChar, IsReplaced),
+    ( if
+        IndexChar = Char,
+        IsReplaced = no
+    then
+        true
+    else
+        contains_char_loop(Str, Char, J)
+    ).
+
+%---------------------%
+
+compare_substrings(Res, X, StartX, Y, StartY, Length) :-
+    LengthX = length(X),
+    LengthY = length(Y),
+    ( if
+        Length >= 0,
+        StartX >= 0,
+        StartY >= 0,
+        StartX + Length =< LengthX,
+        StartY + Length =< LengthY
+    then
+        unsafe_compare_substrings(Res, X, StartX, Y, StartY, Length)
     else
         fail
     ).
 
-%---------------------%
+:- pragma foreign_proc("C",
+    unsafe_compare_substrings(Res::uo, X::in, StartX::in, Y::in, StartY::in,
+        Length::in),
+    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
+        does_not_affect_liveness, no_sharing],
+"
+    int res = memcmp(X + StartX, Y + StartY, Length);
+    Res = ((res < 0) ? MR_COMPARE_LESS
+        : (res == 0) ? MR_COMPARE_EQUAL
+        : MR_COMPARE_GREATER);
+").
+:- pragma foreign_proc("C#",
+    unsafe_compare_substrings(Res::uo, X::in, StartX::in, Y::in, StartY::in,
+        Length::in),
+    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
+        does_not_affect_liveness, no_sharing],
+"
+    int res = System.String.CompareOrdinal(X, StartX, Y, StartY, Length);
+    Res = ((res < 0) ? builtin.COMPARE_LESS
+        : (res == 0) ? builtin.COMPARE_EQUAL
+        : builtin.COMPARE_GREATER);
+").
 
-% XXX ILSEQ unsafe_index_next effectively truncates either or both strings
-% at the first ill-formed sequence.
+unsafe_compare_substrings(Res, X, StartX, Y, StartY, Length) :-
+    unsafe_compare_substrings_loop(X, Y, StartX, StartY, Length, Res).
 
-compare_ignore_case_ascii(Res, X, Y) :-
-    compare_ignore_case_ascii_loop(X, Y, 0, Res).
+:- pred unsafe_compare_substrings_loop(string::in, string::in,
+    int::in, int::in, int::in, comparison_result::uo) is det.
 
-:- pred compare_ignore_case_ascii_loop(string::in, string::in, int::in,
-    comparison_result::uo) is det.
-
-compare_ignore_case_ascii_loop(X, Y, I, Res) :-
-    ( if unsafe_index_next(X, I, IX, CharX) then
-        ( if unsafe_index_next(Y, I, _IY, CharY) then
-            char.to_lower(CharX, LowerCharX),
-            char.to_lower(CharY, LowerCharY),
-            compare(CharRes, LowerCharX, LowerCharY),
-            (
-                CharRes = (=),
-                % CharX = CharY, or both are in the ASCII range.
-                % In either case, we must have IX = IY.
-                compare_ignore_case_ascii_loop(X, Y, IX, Res)
-            ;
-                ( CharRes = (<)
-                ; CharRes = (>)
-                ),
-                Res = CharRes
-            )
-        else
-            % X longer than Y.
-            Res = (>)
-        )
-    else if unsafe_index_next(Y, I, _IY, _CharY) then
-        % X shorter than Y.
-        Res = (<)
-    else
+unsafe_compare_substrings_loop(X, Y, IX, IY, Rem, Res) :-
+    ( if Rem = 0 then
         Res = (=)
+    else
+        unsafe_index_code_unit(X, IX, CodeX),
+        unsafe_index_code_unit(Y, IY, CodeY),
+        compare(Res0, CodeX, CodeY),
+        (
+            Res0 = (=),
+            unsafe_compare_substrings_loop(X, Y, IX + 1, IY + 1, Rem - 1, Res)
+        ;
+            ( Res0 = (<)
+            ; Res0 = (>)
+            ),
+            Res = Res0
+        )
     ).
 
 %---------------------%
 
-    % XXX ILSEQ unsafe_index_next effectively truncates the string at the first
-    % ill-formed sequence.
-    %
+compare_ignore_case_ascii(Res, X, Y) :-
+    LenX = length(X),
+    LenY = length(Y),
+    CommonLen = min(LenX, LenY),
+    compare_ignore_case_ascii_loop(X, Y, 0, CommonLen, Res0),
+    (
+        Res0 = (=),
+        compare(Res, LenX, LenY)
+    ;
+        ( Res0 = (<)
+        ; Res0 = (>)
+        ),
+        Res = Res0
+    ).
+
+:- pred compare_ignore_case_ascii_loop(string::in, string::in,
+    int::in, int::in, comparison_result::uo) is det.
+
+compare_ignore_case_ascii_loop(X, Y, I, CommonLen, Res) :-
+    ( if I = CommonLen then
+        Res = (=)
+    else
+        unsafe_index_code_unit(X, I, CodeX),
+        unsafe_index_code_unit(Y, I, CodeY),
+        to_lower_code_unit(CodeX, LowerCodeX),
+        to_lower_code_unit(CodeY, LowerCodeY),
+        compare(Res0, LowerCodeX, LowerCodeY),
+        (
+            Res0 = (=),
+            compare_ignore_case_ascii_loop(X, Y, I + 1, CommonLen, Res)
+        ;
+            ( Res0 = (<)
+            ; Res0 = (>)
+            ),
+            Res = Res0
+        )
+    ).
+
+%---------------------%
+
 prefix_length(P, S) = Index :-
     prefix_length_loop(P, S, 0, Index).
 
@@ -3451,7 +3529,8 @@ prefix_length(P, S) = Index :-
 
 prefix_length_loop(P, S, I, Index) :-
     ( if
-        unsafe_index_next(S, I, J, Char),
+        unsafe_index_next_repl(S, I, J, Char, IsReplaced),
+        IsReplaced = no,
         P(Char)
     then
         prefix_length_loop(P, S, J, Index)
@@ -3459,9 +3538,6 @@ prefix_length_loop(P, S, I, Index) :-
         Index = I
     ).
 
-    % XXX ILSEQ unsafe_index_next effectively truncates the string at the first
-    % ill-formed sequence.
-    %
 suffix_length(P, S) = End - Index :-
     End = length(S),
     suffix_length_loop(P, S, End, Index).
@@ -3471,7 +3547,8 @@ suffix_length(P, S) = End - Index :-
 
 suffix_length_loop(P, S, I, Index) :-
     ( if
-        unsafe_prev_index(S, I, J, Char),
+        unsafe_prev_index_repl(S, I, J, Char, IsReplaced),
+        IsReplaced = no,
         P(Char)
     then
         suffix_length_loop(P, S, J, Index)
@@ -3481,33 +3558,8 @@ suffix_length_loop(P, S, I, Index) :-
 
 %---------------------%
 
-% XXX ILSEQ Behaviour depends on target language.
-%   - C: works at code unit level so ill-formed sequences are no problem
-%   - Java: works
-%   - C#: searching for low/high surrogate returns same index
-
 sub_string_search(WholeString, Pattern, Index) :-
     sub_string_search_start(WholeString, Pattern, 0, Index).
-
-:- pragma foreign_decl("Erlang", local, "
--export([sub_string_search_start_2/5]).
-").
-
-:- pragma foreign_code("Erlang", "
-sub_string_search_start_2(String, SubString, I, Length, SubLength) ->
-    case I + SubLength =< Length of
-        true ->
-            case String of
-                <<_:I/binary, SubString:SubLength/binary, _/binary>> ->
-                    I;
-                _ ->
-                    sub_string_search_start_2(String, SubString, I + 1,
-                        Length, SubLength)
-            end;
-        false ->
-            -1
-    end.
-").
 
 :- pragma foreign_proc("C",
     sub_string_search_start(WholeString::in, Pattern::in, BeginAt::in,
@@ -3533,7 +3585,12 @@ sub_string_search_start_2(String, SubString, I, Length, SubLength) ->
         Index::out),
     [will_not_call_mercury, promise_pure, thread_safe],
 "{
-    Index = WholeString.IndexOf(Pattern, BeginAt);
+    if (BeginAt < 0 || BeginAt > WholeString.Length) {
+        Index = -1;
+    } else {
+        Index = WholeString.IndexOf(Pattern, BeginAt,
+            System.StringComparison.Ordinal);
+    }
     SUCCESS_INDICATOR = (Index >= 0);
 }").
 :- pragma foreign_proc("Java",
@@ -3541,7 +3598,13 @@ sub_string_search_start_2(String, SubString, I, Length, SubLength) ->
         Index::out),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    Index = WholeString.indexOf(Pattern, BeginAt);
+    // String.indexOf will check BeginAt > WholeString.Length
+    // so we don't need to do it first.
+    if (BeginAt < 0) {
+        Index = -1;
+    } else {
+        Index = WholeString.indexOf(Pattern, BeginAt);
+    }
     SUCCESS_INDICATOR = (Index >= 0);
 ").
 :- pragma foreign_proc("Erlang",
@@ -3549,14 +3612,35 @@ sub_string_search_start_2(String, SubString, I, Length, SubLength) ->
         Index::out),
     [will_not_call_mercury, promise_pure, thread_safe],
 "
-    Index = mercury__string:sub_string_search_start_2(String, SubString,
-        BeginAt, size(String), size(SubString)),
+    case String of
+        <<_:BeginAt/binary, Haystack/binary>> ->
+            if
+                size(SubString) =:= 0 ->
+                    Index = BeginAt;
+                true ->
+                    case binary:match(Haystack, SubString) of
+                        {FoundStart, FoundLength} ->
+                            Index = BeginAt + FoundStart;
+                        nomatch ->
+                            Index = -1
+                    end
+            end;
+        _ ->
+            Index = -1
+    end,
     SUCCESS_INDICATOR = (Index =/= -1)
 ").
 
 sub_string_search_start(String, SubString, BeginAt, Index) :-
-    sub_string_search_start_loop(String, SubString, BeginAt,
-        length(String), length(SubString), Index).
+    ( if BeginAt < 0 then
+        fail
+    else
+        Len = length(String),
+        SubLen = length(SubString),
+        LastStart = Len - SubLen,
+        sub_string_search_start_loop(String, SubString, BeginAt, LastStart,
+            SubLen, Index)
+    ).
 
     % Brute force string searching. For short Strings this is good;
     % for longer strings Boyer-Moore is much better.
@@ -3564,19 +3648,12 @@ sub_string_search_start(String, SubString, BeginAt, Index) :-
 :- pred sub_string_search_start_loop(string::in, string::in, int::in, int::in,
     int::in, int::out) is semidet.
 
-sub_string_search_start_loop(String, SubString, I, Len, SubLen, Index) :-
-    I < Len,
-    ( if
-        % XXX This is inefficient -- there is no (in, in, in) = in is semidet
-        % mode of between, so this ends up calling the (in, in, in) = out
-        % mode and then doing the unification. This will create a lot of
-        % unnecessary garbage.
-        % XXX This will abort if either index is not at a code point boundary.
-        between(String, I, I + SubLen) = SubString
-    then
+sub_string_search_start_loop(String, SubString, I, LastI, SubLen, Index) :-
+    I =< LastI,
+    ( if unsafe_compare_substrings((=), String, I, SubString, 0, SubLen) then
         Index = I
     else
-        sub_string_search_start_loop(String, SubString, I + 1, Len, SubLen,
+        sub_string_search_start_loop(String, SubString, I + 1, LastI, SubLen,
             Index)
     ).
 
@@ -3596,101 +3673,37 @@ append(S1::in, S2::uo, S3::in) :-
     append_ioi(S1, S2, S3).
 append(S1::in, S2::in, S3::uo) :-
     append_iio(S1, S2, S3).
+append(S1::uo, S2::in, S3::in) :-
+    append_oii(S1, S2, S3).
 append(S1::out, S2::out, S3::in) :-
-    append_ooi(S1, S2, S3).
+    nondet_append(S1, S2, S3).
 
 :- pred append_iii(string::in, string::in, string::in) is semidet.
 
-:- pragma foreign_proc("C",
-    append_iii(S1::in, S2::in, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, no_sharing],
-"{
-    size_t len_1 = strlen(S1);
-    SUCCESS_INDICATOR = (
-        strncmp(S1, S3, len_1) == 0 &&
-        strcmp(S2, S3 + len_1) == 0
-    );
-}").
-:- pragma foreign_proc("C#",
-    append_iii(S1::in, S2::in, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"{
-    SUCCESS_INDICATOR = S3.Equals(System.String.Concat(S1, S2));
-}").
-:- pragma foreign_proc("Java",
-    append_iii(S1::in, S2::in, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    SUCCESS_INDICATOR = S3.equals(S1.concat(S2));
-").
-:- pragma foreign_proc("Erlang",
-    append_iii(S1::in, S2::in, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    S1_length = size(S1),
-    S2_length = size(S2),
-    case S1_length + S2_length =:= size(S3) of
-        true ->
-            <<Left:S1_length/binary, Right/binary>> = S3,
-            SUCCESS_INDICATOR = (Left =:= S1 andalso Right =:= S2);
-        false ->
-            SUCCESS_INDICATOR = false
-    end
-").
-
-append_iii(X, Y, Z) :-
-    mercury_append(X, Y, Z).
+append_iii(S1, S2, S3) :-
+    Len1 = length(S1),
+    Len2 = length(S2),
+    Len3 = length(S3),
+    ( if Len3 = Len1 + Len2 then
+        unsafe_compare_substrings((=), S1, 0, S3, 0, Len1),
+        unsafe_compare_substrings((=), S2, 0, S3, Len1, Len2)
+    else
+        fail
+    ).
 
 :- pred append_ioi(string::in, string::uo, string::in) is semidet.
 
-:- pragma foreign_proc("C",
-    append_ioi(S1::in, S2::uo, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, no_sharing],
-"{
-    size_t len_1, len_2, len_3;
-
-    len_1 = strlen(S1);
-    if (strncmp(S1, S3, len_1) != 0) {
-        SUCCESS_INDICATOR = MR_FALSE;
-    } else {
-        len_3 = strlen(S3);
-        len_2 = len_3 - len_1;
-        // We need to make a copy to ensure that the pointer is word-aligned.
-        MR_allocate_aligned_string_msg(S2, len_2, MR_ALLOC_ID);
-        strcpy(S2, S3 + len_1);
-        SUCCESS_INDICATOR = MR_TRUE;
-    }
-}").
-:- pragma foreign_proc("C#",
-    append_ioi(S1::in, S2::uo, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"{
-    if (S3.StartsWith(S1)) {
-        // .Substring() better?
-        S2 = S3.Remove(0, S1.Length);
-        SUCCESS_INDICATOR = true;
-    } else {
-        S2 = null;
-        SUCCESS_INDICATOR = false;
-    }
-}").
-:- pragma foreign_proc("Java",
-    append_ioi(S1::in, S2::uo, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    if (S3.startsWith(S1)) {
-        S2 = S3.substring(S1.length());
-        SUCCESS_INDICATOR = true;
-    } else {
-        S2 = null;
-        SUCCESS_INDICATOR = false;
-    }
-").
-
-append_ioi(X, Y, Z) :-
-    mercury_append(X, Y, Z).
+append_ioi(S1, S2, S3) :-
+    Len1 = length(S1),
+    Len3 = length(S3),
+    ( if
+        Len1 =< Len3,
+        unsafe_compare_substrings((=), S1, 0, S3, 0, Len1)
+    then
+        unsafe_between(S3, Len1, Len3, S2)
+    else
+        fail
+    ).
 
 :- pred append_iio(string::in, string::in, string::uo) is det.
 
@@ -3725,81 +3738,36 @@ append_ioi(X, Y, Z) :-
     S3 = list_to_binary([S1, S2])
 ").
 
-append_iio(X, Y, Z) :-
-    mercury_append(X, Y, Z).
+:- pred append_oii(string::uo, string::in, string::in) is semidet.
 
-:- pred append_ooi(string::out, string::out, string::in) is multi.
-
-append_ooi(S1, S2, S3) :-
-    S3Len = length(S3),
-    append_ooi_2(0, S3Len, S1, S2, S3).
-
-:- pred append_ooi_2(int::in, int::in, string::out, string::out,
-    string::in) is multi.
-
-append_ooi_2(NextS1Len, S3Len, S1, S2, S3) :-
-    ( if NextS1Len = S3Len then
-        append_ooi_3(NextS1Len, S3Len, S1, S2, S3)
+append_oii(S1, S2, S3) :-
+    Len2 = length(S2),
+    Len3 = length(S3),
+    ( if
+        Len2 =< Len3,
+        Len1 = Len3 - Len2,
+        compare_substrings((=), S3, Len1, S2, 0, Len2)
+    then
+        unsafe_between(S3, 0, Len1, S1)
     else
-        (
-            append_ooi_3(NextS1Len, S3Len, S1, S2, S3)
-        ;
-            unsafe_index_next(S3, NextS1Len, AdvS1Len, _),
-            append_ooi_2(AdvS1Len, S3Len, S1, S2, S3)
-        )
+        fail
     ).
 
-:- pred append_ooi_3(int::in, int::in, string::out,
-    string::out, string::in) is det.
+nondet_append(S1, S2, S3) :-
+    Len3 = length(S3),
+    nondet_append_2(0, Len3, S1, S2, S3).
 
-:- pragma foreign_proc("C",
-    append_ooi_3(S1Len::in, S3Len::in, S1::out, S2::out, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, may_not_duplicate, no_sharing],
-"{
-    MR_allocate_aligned_string_msg(S1, S1Len, MR_ALLOC_ID);
-    MR_memcpy(S1, S3, S1Len);
-    S1[S1Len] = '\\0';
-    MR_allocate_aligned_string_msg(S2, S3Len - S1Len, MR_ALLOC_ID);
-    strcpy(S2, S3 + S1Len);
-}").
-:- pragma foreign_proc("C#",
-    append_ooi_3(S1Len::in, _S3Len::in, S1::out, S2::out, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    S1 = S3.Substring(0, S1Len);
-    S2 = S3.Substring(S1Len);
-").
-:- pragma foreign_proc("Java",
-    append_ooi_3(S1Len::in, _S3Len::in, S1::out, S2::out, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    S1 = S3.substring(0, S1Len);
-    S2 = S3.substring(S1Len);
-").
-:- pragma foreign_proc("Erlang",
-    append_ooi_3(S1Len::in, _S3Len::in, S1::out, S2::out, S3::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    << S1:S1Len/binary, S2/binary >> = S3
-").
+:- pred nondet_append_2(int::in, int::in, string::out, string::out,
+    string::in) is multi.
 
-append_ooi_3(S1Len, _S3Len, S1, S2, S3) :-
-    split(S3, S1Len, S1, S2).
-
-    % XXX ILSEQ to_char_list cannot handle ill-formed sequences.
-    %
-:- pred mercury_append(string, string, string).
-:- mode mercury_append(in, in, in) is semidet.  % implied
-:- mode mercury_append(in, uo, in) is semidet.
-:- mode mercury_append(in, in, uo) is det.
-:- mode mercury_append(uo, uo, in) is multi.
-
-mercury_append(X, Y, Z) :-
-    to_char_list(X, XList),
-    to_char_list(Y, YList),
-    to_char_list(Z, ZList),
-    list.append(XList, YList, ZList).
+nondet_append_2(Start2, Len3, S1, S2, S3) :-
+    (
+        unsafe_between(S3, 0, Start2, S1),
+        unsafe_between(S3, Start2, Len3, S2)
+    ;
+        unsafe_index_next(S3, Start2, NextStart2, _Char),
+        nondet_append_2(NextStart2, Len3, S1, S2, S3)
+    ).
 
 S1 ++ S2 = append(S1, S2).
 
@@ -3988,408 +3956,67 @@ join_list_loop(Sep, [H | T]) = Sep ++ H ++ join_list_loop(Sep, T).
 % Splitting up strings.
 %
 
-% XXX ILSEQ Behaviour depends on target language.
-%  - C: fails if the string begins with ill-formed sequence
-%  - Java/C#: succeeds if the string begins with an unpaired surrogate
+:- pragma promise_equivalent_clauses(first_char/3).
 
-:- pragma foreign_proc("C",
-    first_char(Str::in, First::in, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, no_sharing],
-"
-    MR_Integer pos = 0;
-    int c = MR_utf8_get_next(Str, &pos);
-    SUCCESS_INDICATOR = (
-        c == First &&
-        First != '\\0' &&
-        strcmp(Str + pos, Rest) == 0
-    );
-").
-:- pragma foreign_proc("C#",
-    first_char(Str::in, First::in, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    int len = Str.Length;
-    if (First <= 0xffff) {
-        SUCCESS_INDICATOR = (
-            len > 0 &&
-            Str[0] == First &&
-            System.String.CompareOrdinal(Str, 1, Rest, 0, len) == 0
-        );
-    } else {
-        string firstchars = System.Char.ConvertFromUtf32(First);
-        SUCCESS_INDICATOR = (
-            len > 1 &&
-            Str[0] == firstchars[0] &&
-            Str[1] == firstchars[1] &&
-            System.String.CompareOrdinal(Str, 2, Rest, 0, len) == 0
-        );
-    }
-").
-:- pragma foreign_proc("Java",
-    first_char(Str::in, First::in, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    int toffset = java.lang.Character.charCount(First);
-    SUCCESS_INDICATOR = (
-        Str.length() > 0 &&
-        Str.codePointAt(0) == First &&
-        Str.regionMatches(toffset, Rest, 0, Rest.length())
-    );
-").
-:- pragma foreign_proc("Erlang",
-    first_char(Str::in, First::in, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    case Str of
-        <<First/utf8, Rest/binary>> ->
-            SUCCESS_INDICATOR = true;
-        _ ->
-            SUCCESS_INDICATOR = false
-    end
-").
+first_char(Str::in, First::in, Rest::in) :-
+    first_char_rest_in(Str, First, Rest).
+first_char(Str::in, First::uo, Rest::in) :-
+    first_char_rest_in(Str, First, Rest).
+first_char(Str::in, First::in, Rest::uo) :-
+    first_char_rest_out(Str, First, Rest).
+first_char(Str::in, First::uo, Rest::uo) :-
+    first_char_rest_out(Str, First, Rest).
+first_char(Str::uo, First::in, Rest::in) :-
+    first_char_str_out(Str, First, Rest).
 
-:- pragma foreign_proc("C",
-    first_char(Str::in, First::uo, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, no_sharing],
-"
-    MR_Integer pos = 0;
-    First = MR_utf8_get_next(Str, &pos);
-    SUCCESS_INDICATOR = (First > 0 && strcmp(Str + pos, Rest) == 0);
-").
-:- pragma foreign_proc("C#",
-    first_char(Str::in, First::uo, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    try {
-        int len = Str.Length;
-        char c1 = Str[0];
-        if (System.Char.IsHighSurrogate(c1)) {
-            char c2 = Str[1];
-            First = System.Char.ConvertToUtf32(c1, c2);
-            SUCCESS_INDICATOR =
-                (System.String.CompareOrdinal(Str, 2, Rest, 0, len) == 0);
-        } else {
-            First = c1;
-            SUCCESS_INDICATOR =
-                (System.String.CompareOrdinal(Str, 1, Rest, 0, len) == 0);
-        }
-    } catch (System.IndexOutOfRangeException) {
-        SUCCESS_INDICATOR = false;
-        First = (char) 0;
-    } catch (System.ArgumentOutOfRangeException) {
-        SUCCESS_INDICATOR = false;
-        First = (char) 0;
-    }
-").
-:- pragma foreign_proc("Java",
-    first_char(Str::in, First::uo, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    int toffset;
-    if (Str.length() > 0) {
-        First = Str.codePointAt(0);
-        toffset = java.lang.Character.charCount(First);
-        SUCCESS_INDICATOR =
-            Str.regionMatches(toffset, Rest, 0, Rest.length());
-    } else {
-        SUCCESS_INDICATOR = false;
-        // XXX to avoid uninitialized var warning
-        First = 0;
-    }
-").
-:- pragma foreign_proc("Erlang",
-    first_char(Str::in, First::uo, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    case Str of
-        <<First/utf8, Rest/binary>> ->
-            SUCCESS_INDICATOR = true;
-        _ ->
-            SUCCESS_INDICATOR = false,
-            First = 0
-    end
-").
+:- pred first_char_rest_in(string, char, string).
+:- mode first_char_rest_in(in, in, in) is semidet.
+:- mode first_char_rest_in(in, uo, in) is semidet.
 
-:- pragma foreign_proc("C",
-    first_char(Str::in, First::in, Rest::uo),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, no_sharing],
-"{
-    MR_Integer pos = 0;
-    int c = MR_utf8_get_next(Str, &pos);
-    if (c != First || First == '\\0') {
-        SUCCESS_INDICATOR = MR_FALSE;
-    } else {
-        Str += pos;
-        // We need to make a copy to ensure that the pointer is word-aligned.
-        MR_allocate_aligned_string_msg(Rest, strlen(Str), MR_ALLOC_ID);
-        strcpy(Rest, Str);
-        SUCCESS_INDICATOR = MR_TRUE;
-    }
-}").
-:- pragma foreign_proc("C#",
-    first_char(Str::in, First::in, Rest::uo),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"{
-    int len = Str.Length;
+first_char_rest_in(Str, First, Rest) :-
+    index_next_repl(Str, 0, NextIndex, First0, IsReplaced),
+    IsReplaced = no,
+    not is_surrogate(First0),
+    unsafe_promise_unique(First0, First),
+    unsafe_compare_substrings((=), Str, NextIndex, Rest, 0, length(Rest)).
 
-    if (len > 0) {
-        if (First <= 0xffff) {
-            SUCCESS_INDICATOR = (First == Str[0]);
-            Rest = Str.Substring(1);
-        } else {
-            string firststr = System.Char.ConvertFromUtf32(First);
-            SUCCESS_INDICATOR =
-                (System.String.CompareOrdinal(Str, 0, firststr, 0, 2) == 0);
-            Rest = Str.Substring(2);
-        }
-    } else {
-        SUCCESS_INDICATOR = false;
-        Rest = null;
-    }
-}").
-:- pragma foreign_proc("Java",
-    first_char(Str::in, First::in, Rest::uo),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"{
-    int len = Str.length();
+:- pred first_char_rest_out(string, char, string).
+:- mode first_char_rest_out(in, in, uo) is semidet.
+:- mode first_char_rest_out(in, uo, uo) is semidet.
 
-    if (len > 0) {
-        SUCCESS_INDICATOR = (First == Str.codePointAt(0));
-        Rest = Str.substring(java.lang.Character.charCount(First));
-    } else {
-        SUCCESS_INDICATOR = false;
-        // XXX to avoid uninitialized var warning
-        Rest = null;
-    }
-}").
-:- pragma foreign_proc("Erlang",
-    first_char(Str::in, First::in, Rest::uo),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    case Str of
-        <<First/utf8, Rest/binary>> ->
-            SUCCESS_INDICATOR = true;
-        _ ->
-            SUCCESS_INDICATOR = false,
-            Rest = <<>>
-    end
-").
+first_char_rest_out(Str, First, Rest) :-
+    index_next_repl(Str, 0, NextIndex, First0, IsReplaced),
+    IsReplaced = no,
+    not is_surrogate(First0),
+    unsafe_promise_unique(First0, First),
+    unsafe_between(Str, NextIndex, length(Str), Rest).
 
-:- pragma foreign_proc("C",
-    first_char(Str::in, First::uo, Rest::uo),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, no_sharing],
-"{
-    MR_Integer pos = 0;
-    First = MR_utf8_get_next(Str, &pos);
-    if (First < 1) {
-        SUCCESS_INDICATOR = MR_FALSE;
-    } else {
-        Str += pos;
-        // We need to make a copy to ensure that the pointer is word-aligned.
-        MR_allocate_aligned_string_msg(Rest, strlen(Str), MR_ALLOC_ID);
-        strcpy(Rest, Str);
-        SUCCESS_INDICATOR = MR_TRUE;
-    }
-}").
-:- pragma foreign_proc("C#",
-    first_char(Str::in, First::uo, Rest::uo),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"{
-    try {
-        char c1 = Str[0];
-        if (System.Char.IsHighSurrogate(c1)) {
-            char c2 = Str[1];
-            First = System.Char.ConvertToUtf32(c1, c2);
-            Rest = Str.Substring(2);
-        } else {
-            First = Str[0];
-            Rest = Str.Substring(1);
-        }
-        SUCCESS_INDICATOR = true;
-    } catch (System.IndexOutOfRangeException) {
-        SUCCESS_INDICATOR = false;
-        First = (char) 0;
-        Rest = null;
-    } catch (System.ArgumentOutOfRangeException) {
-        SUCCESS_INDICATOR = false;
-        First = (char) 0;
-        Rest = null;
-    }
-}").
-:- pragma foreign_proc("Java",
-    first_char(Str::in, First::uo, Rest::uo),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"{
-    if (Str.length() == 0) {
-        SUCCESS_INDICATOR = false;
-        First = (char) 0;
-        Rest = null;
-    } else {
-        First = Str.codePointAt(0);
-        Rest = Str.substring(java.lang.Character.charCount(First));
-        SUCCESS_INDICATOR = true;
-    }
-}").
-:- pragma foreign_proc("Erlang",
-    first_char(Str::in, First::uo, Rest::uo),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    case Str of
-        <<First/utf8, Rest/binary>> ->
-            SUCCESS_INDICATOR = true;
-        _ ->
-            SUCCESS_INDICATOR = false,
-            First = 0,
-            Rest = <<>>
-    end
-").
+:- pred first_char_str_out(string, char, string).
+:- mode first_char_str_out(uo, in, in) is det.
 
-:- pragma foreign_proc("C",
-    first_char(Str::uo, First::in, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, no_sharing],
-"{
-    size_t firstw = MR_utf8_width(First);
-    size_t len = firstw + strlen(Rest);
-    MR_allocate_aligned_string_msg(Str, len, MR_ALLOC_ID);
-    MR_utf8_encode(Str, First);
-    strcpy(Str + firstw, Rest);
-}").
-:- pragma foreign_proc("C#",
-    first_char(Str::uo, First::in, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"{
-    string FirstStr;
-    if (First <= 0xffff) {
-        FirstStr = new System.String((char) First, 1);
-    } else {
-        FirstStr = System.Char.ConvertFromUtf32(First);
-    }
-    Str = FirstStr + Rest;
-}").
-:- pragma foreign_proc("Java",
-    first_char(Str::uo, First::in, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"{
-    String FirstStr = new String(Character.toChars(First));
-    Str = FirstStr.concat(Rest);
-}").
-:- pragma foreign_proc("Erlang",
-    first_char(Str::uo, First::in, Rest::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Str = unicode:characters_to_binary([First, Rest])
-").
+first_char_str_out(Str, First, Rest) :-
+    ( if char.to_int(First, 0) then
+        unexpected($pred, "null character")
+    else if char.is_surrogate(First) then
+        unexpected($pred, "surrogate code point")
+    else
+        Str = char_to_string(First) ++ Rest
+    ).
 
 %---------------------%
-%
-% For some Str and Count inputs, we may return Str as either Left or Right.
-% Since Str has mode `in', both Left or Right must have mode 'out', not `uo'.
-%
 
-:- pragma foreign_proc("C",
-    split(Str::in, Count::in, Left::out, Right::out),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, may_not_duplicate],
-"{
-    MR_Integer  len;
-
-    if (Count <= 0) {
-        MR_make_aligned_string(Left, """");
-        Right = Str;
-    } else {
-        len = strlen(Str);
-
-        if (Count > len) {
-            Count = len;
-        }
-
-        MR_allocate_aligned_string_msg(Left, Count, MR_ALLOC_ID);
-        MR_memcpy(Left, Str, Count);
-        Left[Count] = '\\0';
-        // We need to make a copy to ensure that the pointer is word-aligned.
-        MR_allocate_aligned_string_msg(Right, len - Count, MR_ALLOC_ID);
-        strcpy(Right, Str + Count);
-    }
-}").
-:- pragma foreign_proc("C#",
-    split(Str::in, Count::in, Left::out, Right::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"{
-    int len;
-
-    if (Count <= 0) {
-        Left = """";
-        Right = Str;
-    } else {
-        len = Str.Length;
-        if (Count > len) {
-            Count = len;
-        }
-        Left = Str.Substring(0, Count);
-        Right = Str.Substring(Count);
-    }
-}").
-:- pragma foreign_proc("Java",
-    split(Str::in, Count::in, Left::out, Right::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    if (Count <= 0) {
-        Left = """";
-        Right = Str;
-    } else {
-        int len = Str.length();
-        if (Count > len) {
-            Count = len;
-        }
-        Left = Str.substring(0, Count);
-        Right = Str.substring(Count);
-    }
-").
-:- pragma foreign_proc("Erlang",
-    split(Str::in, Count::in, Left::out, Right::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    if
-        Count =< 0 ->
-            Left = <<>>,
-            Right = Str;
-        Count > size(Str) ->
-            Left = Str,
-            Right = <<>>;
-        true ->
-            << Left:Count/binary, Right/binary >> = Str
-    end
-").
-
-    % XXX ILSEQ from_code_unit_list refuses to create strings containing
-    % ill-formed sequences.
-    %
-split(Str, Count, Left, Right) :-
-    ( if Count =< 0 then
+split(Str, Index, Left, Right) :-
+    ( if Index =< 0 then
         Left = "",
         Right = Str
     else
-        to_code_unit_list(Str, List),
         Len = length(Str),
-        ( if Count > Len then
-            Num = Len
+        ( if Index >= Len then
+            Left = Str,
+            Right = ""
         else
-            Num = Count
-        ),
-        ( if
-            list.split_list(Num, List, LeftList, RightList),
-            from_code_unit_list(LeftList, LeftPrime),
-            from_code_unit_list(RightList, RightPrime)
-        then
-            Left = LeftPrime,
-            Right = RightPrime
-        else
-            unexpected($pred, "split_list failed")
+            unsafe_between(Str, 0, Index, Left),
+            unsafe_between(Str, Index, Len, Right)
         )
     ).
 
@@ -4410,7 +4037,7 @@ left(S1, N) = S2 :-
     left(S1, N, S2).
 
 left(String, Count, LeftString) :-
-    split(String, Count, LeftString, _RightString).
+    between(String, 0, Count, LeftString).
 
 left_by_codepoint(String, Count) = LeftString :-
     left_by_codepoint(String, Count, LeftString).
@@ -4423,8 +4050,8 @@ right(S1, N) = S2 :-
 
 right(String, RightCount, RightString) :-
     length(String, Length),
-    LeftCount = Length - RightCount,
-    split(String, LeftCount, _LeftString, RightString).
+    Start = Length - RightCount,
+    between(String, Start, Length, RightString).
 
 right_by_codepoint(String, RightCount) = RightString :-
     right_by_codepoint(String, RightCount, RightString).
@@ -4439,108 +4066,23 @@ right_by_codepoint(String, RightCount, RightString) :-
 between(Str, Start, End) = SubString :-
     between(Str, Start, End, SubString).
 
-:- pragma foreign_proc("C",
-    between(Str::in, Start::in, End::in, SubString::uo),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, may_not_duplicate, no_sharing],
-"{
-    MR_Integer  len;
-    MR_Integer  Count;
-
-    if (Start < 0) Start = 0;
-    if (End <= Start) {
-        MR_make_aligned_string(SubString, """");
-    } else {
-        len = strlen(Str);
-        if (Start > len) {
-            Start = len;
-        }
-        if (End > len) {
-            End = len;
-        }
-        Count = End - Start;
-        MR_allocate_aligned_string_msg(SubString, Count, MR_ALLOC_ID);
-        MR_memcpy(SubString, Str + Start, Count);
-        SubString[Count] = '\\0';
-    }
-}").
-:- pragma foreign_proc("C#",
-    between(Str::in, Start::in, End::in, SubString::uo),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, may_not_duplicate, no_sharing],
-"
-    if (Start < 0) Start = 0;
-    if (End <= Start) {
-        SubString = """";
-    } else {
-        int len = Str.Length;
-        if (Start > len) {
-            Start = len;
-        }
-        if (End > len) {
-            End = len;
-        }
-        SubString = Str.Substring(Start, End - Start);
-    }
-").
-:- pragma foreign_proc("Java",
-    between(Str::in, Start::in, End::in, SubString::uo),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness, may_not_duplicate, no_sharing],
-"
-    if (Start < 0) Start = 0;
-    if (End <= Start) {
-        SubString = """";
-    } else {
-        int len = Str.length();
-        if (Start > len) {
-            Start = len;
-        }
-        if (End > len) {
-            End = len;
-        }
-        SubString = Str.substring(Start, End);
-    }
-").
-:- pragma foreign_proc("Erlang",
-    between(Str::in, Start0::in, End0::in, SubString::uo),
-    [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
-        does_not_affect_liveness],
-"
-    Start = max(Start0, 0),
-    End = min(End0, size(Str)),
-    Count = End - Start,
-    if Count =< 0 ->
-        SubString = <<>>
-    ; true ->
-        <<_:Start/binary, SubString:Count/binary, _/binary>> = Str
-    end
-").
-
 between(Str, Start, End, SubStr) :-
-    ( if Start >= End then
-        SubStr = ""
+    Len = length(Str),
+    ( if Start =< 0 then
+        ClampStart = 0
+    else if Start >= Len then
+        ClampStart = Len
     else
-        Len = length(Str),
-        max(0, Start, ClampStart),
-        min(Len, End, ClampEnd),
-        CharList = between_loop(ClampStart, ClampEnd, Str),
-        SubStr = from_char_list(CharList)
-    ).
-
-:- func between_loop(int, int, string) = list(char).
-
-between_loop(I, End, Str) = Chars :-
-    ( if
-        I < End,
-        unsafe_index_next(Str, I, J, C),
-        J =< End
-    then
-        Cs = between_loop(J, End, Str),
-        Chars = [C | Cs]
+        ClampStart = Start
+    ),
+    ( if End =< ClampStart then
+        ClampEnd = ClampStart
+    else if End >= Len then
+        ClampEnd = Len
     else
-        Chars = []
-    ).
+        ClampEnd = End
+    ),
+    unsafe_between(Str, ClampStart, ClampEnd, SubStr).
 
 %---------------------%
 
@@ -4579,13 +4121,14 @@ between_codepoints(Str, Start, End, SubString) :-
     else
         StartOffset = length(Str)
     ),
-    ( if End =< Start then
-        EndOffset = StartOffset
+    ( if End < 0 then
+        EndOffset = 0
     else if codepoint_offset(Str, End, EndOffset0) then
         EndOffset = EndOffset0
     else
         EndOffset = length(Str)
     ),
+    % between/4 will enforce StartOffset =< EndOffset.
     between(Str, StartOffset, EndOffset, SubString).
 
 %---------------------%
@@ -4633,8 +4176,6 @@ unsafe_substring(Str, Start, Count, SubString) :-
 
 %---------------------%
 
-% XXX ILSEQ unsafe_index_next causes truncation at first ill-formed sequence.
-
 words_separator(SepP, String) = Words :-
     skip_to_next_word_start(SepP, String, 0, WordStart),
     words_loop(SepP, String, WordStart, Words).
@@ -4668,7 +4209,8 @@ words_loop(SepP, String, WordStartPos, Words) :-
 
 skip_to_next_word_start(SepP, String, CurPos, NextWordStartPos) :-
     ( if
-        unsafe_index_next(String, CurPos, NextPos, Char),
+        unsafe_index_next_repl(String, CurPos, NextPos, Char, IsReplaced),
+        IsReplaced = no,
         SepP(Char)
     then
         skip_to_next_word_start(SepP, String, NextPos, NextWordStartPos)
@@ -4683,10 +4225,8 @@ skip_to_next_word_start(SepP, String, CurPos, NextWordStartPos) :-
     string::in, int::in, int::out) is det.
 
 skip_to_word_end(SepP, String, CurPos, PastWordEndPos) :-
-    ( if
-        unsafe_index_next(String, CurPos, NextPos, Char)
-    then
-        ( if SepP(Char) then
+    ( if unsafe_index_next_repl(String, CurPos, NextPos, Char, IsReplaced) then
+        ( if IsReplaced = no, SepP(Char) then
             PastWordEndPos = CurPos
         else
             skip_to_word_end(SepP, String, NextPos, PastWordEndPos)
@@ -4711,12 +4251,11 @@ split_at_separator_loop(DelimP, Str, CurPos, PastSegEnd, !Segments) :-
     % Invariant: 0 =< CurPos =< length(Str).
     % PastSegEnd is one past the last index of the current segment.
     %
-    % XXX ILSEQ unsafe_prev_index fails at an ill-formed sequence.
-    % Ideally code units in an ill-form sequence are skipped over
-    % since they cannot be delimiters.
-    %
-    ( if unsafe_prev_index(Str, CurPos, PrevPos, Char) then
-        ( if DelimP(Char) then
+    ( if unsafe_prev_index_repl(Str, CurPos, PrevPos, Char, IsReplaced) then
+        ( if
+            IsReplaced = no,
+            DelimP(Char)
+        then
             % Chop here.
             SegStart = CurPos,
             Segment = unsafe_between(Str, SegStart, PastSegEnd),
@@ -4744,8 +4283,6 @@ split_at_string(Needle, Total) =
 :- func split_at_string_loop(int, int, string, string) = list(string).
 
 split_at_string_loop(StartAt, NeedleLen, Needle, Total) = Out :-
-    % XXX ILSEQ Behaviour of sub_string_search_start currently differs
-    % across targets.
     ( if sub_string_search_start(Total, Needle, StartAt, NeedlePos) then
         BeforeNeedle = between(Total, StartAt, NeedlePos),
         Tail = split_at_string_loop(NeedlePos+NeedleLen, NeedleLen,
@@ -4764,23 +4301,9 @@ split_at_string_loop(StartAt, NeedleLen, Needle, Total) = Out :-
 :- pragma promise_equivalent_clauses(prefix/2).
 
 prefix(String::in, Prefix::in) :-
-    Len    = length(String),
-    PreLen = length(Prefix),
-    PreLen =< Len,
-    prefix_2_iii(String, Prefix, PreLen - 1).
+    compare_substrings((=), String, 0, Prefix, 0, length(Prefix)).
 prefix(String::in, Prefix::out) :-
     prefix_2_ioi(String, Prefix, 0).
-
-:- pred prefix_2_iii(string::in, string::in, int::in) is semidet.
-
-prefix_2_iii(String, Prefix, I) :-
-    ( if 0 =< I then
-        unsafe_index_code_unit(String, I, C),
-        unsafe_index_code_unit(Prefix, I, C),
-        prefix_2_iii(String, Prefix, I - 1)
-    else
-        true
-    ).
 
 :- pred prefix_2_ioi(string::in, string::out, int::in) is multi.
 
@@ -4788,7 +4311,6 @@ prefix_2_ioi(String, Prefix, Cur) :-
     (
         Prefix = unsafe_between(String, 0, Cur)
     ;
-        % XXX ILSEQ unsafe_index_next stops at ill-formed sequence
         unsafe_index_next(String, Cur, Next, _),
         prefix_2_ioi(String, Prefix, Next)
     ).
@@ -4796,25 +4318,13 @@ prefix_2_ioi(String, Prefix, Cur) :-
 :- pragma promise_equivalent_clauses(suffix/2).
 
 suffix(String::in, Suffix::in) :-
-    Len    = length(String),
-    PreLen = length(Suffix),
-    PreLen =< Len,
-    suffix_2_iiii(String, Suffix, 0, Len - PreLen, PreLen).
+    StringLength = length(String),
+    SuffixLength = length(Suffix),
+    StringStart = StringLength - SuffixLength,
+    compare_substrings((=), String, StringStart, Suffix, 0, SuffixLength).
 suffix(String::in, Suffix::out) :-
     Len = length(String),
     suffix_2_ioii(String, Suffix, Len, Len).
-
-:- pred suffix_2_iiii(string::in, string::in, int::in, int::in, int::in)
-    is semidet.
-
-suffix_2_iiii(String, Suffix, I, Offset, Len) :-
-    ( if I < Len then
-        unsafe_index_code_unit(String, I + Offset, C),
-        unsafe_index_code_unit(Suffix, I, C),
-        suffix_2_iiii(String, Suffix, I + 1, Offset, Len)
-    else
-        true
-    ).
 
 :- pred suffix_2_ioii(string::in, string::out, int::in, int::in) is multi.
 
@@ -4822,7 +4332,6 @@ suffix_2_ioii(String, Suffix, Cur, Len) :-
     (
         unsafe_between(String, Cur, Len, Suffix)
     ;
-        % XXX ILSEQ unsafe_prev_index stops at ill-formed sequence
         unsafe_prev_index(String, Cur, Prev, _),
         suffix_2_ioii(String, Suffix, Prev, Len)
     ).
@@ -4847,8 +4356,7 @@ remove_prefix_if_present(Prefix, String) = Out :-
     ).
 
 remove_suffix(String, Suffix, Prefix) :-
-    suffix(String, Suffix),
-    left(String, length(String) - length(Suffix), Prefix).
+    append(Prefix, Suffix, String).
 
 det_remove_suffix(String, Suffix) = Prefix :-
     ( if remove_suffix(String, Suffix, PrefixPrime) then
@@ -4858,10 +4366,8 @@ det_remove_suffix(String, Suffix) = Prefix :-
     ).
 
 remove_suffix_if_present(Suffix, String) = Out :-
-    LeftCount = length(String) - length(Suffix),
-    split(String, LeftCount, LeftString, RightString),
-    ( if RightString = Suffix then
-        Out = LeftString
+    ( if remove_suffix(String, Suffix, Prefix) then
+        Out = Prefix
     else
         Out = String
     ).
@@ -5114,27 +4620,30 @@ pad_right(String0, PadChar, Width, String) :-
     ).
 
 chomp(S) = Chomp :-
-    ( if prev_index(S, length(S), Offset, '\n') then
-        Chomp = left(S, Offset)
+    ( if prev_index(S, length(S), Index, '\n') then
+        Chomp = unsafe_between(S, 0, Index)
     else
         Chomp = S
     ).
 
-% XXX ILSEQ Once the problems with prefix_length, suffix_length are fixed,
-% there should be no problem stripping strings containing ill-formed sequences.
-
 strip(S0) = S :-
     L = prefix_length(char.is_whitespace, S0),
     R = suffix_length(char.is_whitespace, S0),
-    S = between(S0, L, length(S0) - R).
+    Start = L,
+    End = max(L, length(S0) - R),
+    S = unsafe_between(S0, Start, End).
 
 lstrip(S) = lstrip_pred(char.is_whitespace, S).
 
 rstrip(S) = rstrip_pred(char.is_whitespace, S).
 
-lstrip_pred(P, S) = right(S, length(S) - prefix_length(P, S)).
+lstrip_pred(P, S0) = S :-
+    L = prefix_length(P, S0),
+    S = unsafe_between(S0, L, length(S0)).
 
-rstrip_pred(P, S) = left(S, length(S) - suffix_length(P, S)).
+rstrip_pred(P, S0) = S :-
+    R = suffix_length(P, S0),
+    S = unsafe_between(S0, 0, length(S0) - R).
 
 %---------------------%
 
@@ -5311,20 +4820,6 @@ break_up_string_reverse(Str, N, Prev) = Strs :-
 % Folds over the characters in strings.
 %
 
-% XXX ILSEQ The behaviour of foldl depends on unsafe_index_next.
-% For UTF-16, we can call Closure for unpaired surrogate code points like any
-% other code point. For UTF-8, bytes in ill-formed sequences cannot be passed
-% as `char's since they are not code points. Perhaps foldl should throw an
-% exception, or just should pass replacement char.
-%
-% We may want to introduce fold predicates with an accumulator of type:
-%       pred(char_or_code_unit, A, A)
-% or
-%       pred(char, maybe(int), A, A)
-% For the latter, the second argument would be set to `yes(CodeUnit)' for each
-% code unit in an ill-formed sequence, and the first argument could be set to
-% U+FFFD (replacement char).
-
 foldl(F, S, A) = B :-
     P = ( pred(X::in, Y::in, Z::out) is det :- Z = F(X, Y) ),
     foldl(P, S, A, B).
@@ -5416,8 +4911,6 @@ foldl2_substring(Closure, String, Start, Count, !Acc1, !Acc2) :-
         !Acc1, !Acc2).
 
 %---------------------%
-
-% XXX ILSEQ Behaviour depends on unsafe_prev_index.
 
 foldr(F, String, Acc0) = Acc :-
     Closure = ( pred(X::in, Y::in, Z::out) is det :- Z = F(X, Y)),
@@ -5664,9 +5157,6 @@ string_to_doc(S) = docs([str(term_io.quoted_string(S))]).
 % Converting strings to values of builtin types.
 %
 
-% XXX ILSEQ Behaviour on ill-formed sequences depends on foldl_between.
-% Strings containing ill-formed sequences should fail to convert.
-
 to_int(String, Int) :-
     base_string_to_int(10, String, Int).
 
@@ -5877,8 +5367,14 @@ det_to_float(FloatString) = Float :-
 char_to_string(C) = S1 :-
     char_to_string(C, S1).
 
-char_to_string(Char, String) :-
-    to_char_list(String, [Char]).
+:- pragma promise_equivalent_clauses(char_to_string/2).
+
+char_to_string(Char::in, String::uo) :-
+    from_char_list([Char], String).
+char_to_string(Char::out, String::in) :-
+    index_next_repl(String, 0, NextIndex, Char, IsReplaced),
+    IsReplaced = no,
+    length(String, NextIndex).
 
 from_char(Char) = char_to_string(Char).
 

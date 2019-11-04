@@ -359,7 +359,7 @@ gather_in_item(Section, Item, !Info) :-
         % Do nothing.
     ;
         Item = item_pragma(ItemPragma),
-        ItemPragma = item_pragma_info(PragmaType, _, _, _),
+        ItemPragma = item_pragma_info(PragmaType, _, _),
         ( if is_pred_pragma(PragmaType, yes(PredOrFuncId)) then
             PragmaItems0 = !.Info ^ gii_pragma_items,
             PragmaItems = cord.snoc(PragmaItems0,
@@ -650,7 +650,6 @@ is_pred_pragma(PragmaType, MaybePredOrFuncId) :-
         ( PragmaType = pragma_inline(PredNameArity)
         ; PragmaType = pragma_no_inline(PredNameArity)
         ; PragmaType = pragma_consider_used(PredNameArity)
-        ; PragmaType = pragma_obsolete(PredNameArity, _)
         ; PragmaType = pragma_no_detism_warning(PredNameArity)
         ; PragmaType = pragma_promise_pure(PredNameArity)
         ; PragmaType = pragma_promise_semipure(PredNameArity)
@@ -663,8 +662,13 @@ is_pred_pragma(PragmaType, MaybePredOrFuncId) :-
         PredNameArity = pred_name_arity(Name, Arity),
         MaybePredOrFuncId = yes(no - sym_name_arity(Name, Arity))
     ;
-        PragmaType = pragma_fact_table(FTInfo),
-        FTInfo = pragma_info_fact_table(PredNameArity, _),
+        (
+            PragmaType = pragma_obsolete_pred(ObsoletePredInfo),
+            ObsoletePredInfo = pragma_info_obsolete_pred(PredNameArity, _)
+        ;
+            PragmaType = pragma_fact_table(FTInfo),
+            FTInfo = pragma_info_fact_table(PredNameArity, _)
+        ),
         PredNameArity = pred_name_arity(Name, Arity),
         MaybePredOrFuncId = yes(no - sym_name_arity(Name, Arity))
     ;
@@ -705,7 +709,7 @@ is_pred_pragma(PragmaType, MaybePredOrFuncId) :-
     ;
         (
             PragmaType = pragma_foreign_proc_export(FPEInfo),
-            FPEInfo = pragma_info_foreign_proc_export(_, PredNameModesPF, _)
+            FPEInfo = pragma_info_foreign_proc_export(_, _, PredNameModesPF, _)
         ;
             PragmaType = pragma_termination_info(TermInfo),
             TermInfo = pragma_info_termination_info(PredNameModesPF, _, _)
@@ -715,11 +719,14 @@ is_pred_pragma(PragmaType, MaybePredOrFuncId) :-
         ;
             PragmaType = pragma_structure_sharing(SharingInfo),
             SharingInfo = pragma_info_structure_sharing(PredNameModesPF,
-                _, _, _)
+                _, _, _, _, _)
         ;
             PragmaType = pragma_structure_reuse(ReuseInfo),
             ReuseInfo = pragma_info_structure_reuse(PredNameModesPF,
-                _, _, _)
+                _, _, _, _, _)
+        ;
+            PragmaType = pragma_obsolete_proc(ObsoleteProcInfo),
+            ObsoleteProcInfo = pragma_info_obsolete_proc(PredNameModesPF, _)
         ),
         PredNameModesPF = pred_name_modes_pf(Name, Modes, PredOrFunc),
         adjust_func_arity(PredOrFunc, Arity, list.length(Modes)),
@@ -965,14 +972,14 @@ is_item_changed(Item1, Item2, Changed) :-
         )
     ;
         Item1 = item_pragma(ItemPragma1),
-        ItemPragma1 = item_pragma_info(PragmaType1, _, _, _),
+        ItemPragma1 = item_pragma_info(PragmaType1, _, _),
         % We do need to compare the variable names in `:- pragma type_spec'
         % declarations because the names of the variables are used to find
         % the corresponding variables in the predicate or function
         % type declaration.
         ( if
             Item2 = item_pragma(ItemPragma2),
-            ItemPragma2 = item_pragma_info(PragmaType2, _, _, _)
+            ItemPragma2 = item_pragma_info(PragmaType2, _, _)
         then
             ( if
                 PragmaType1 = pragma_type_spec(TypeSpecInfo1),
@@ -1446,8 +1453,8 @@ parse_item_type_version_numbers(Term, Result) :-
     else
         % XXX This is an uninformative error message.
         Pieces = [words("Invalid item type version numbers."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(Term), [always(Pieces)])]),
+        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+            get_term_context(Term), Pieces),
         Result = error1([Spec])
     ).
 
@@ -1468,8 +1475,8 @@ parse_key_version_number(ParseName, Term, Result) :-
         Result = ok1((Name - Arity) - VersionNumber)
     else
         Pieces = [words("Error in item version number."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(Term), [always(Pieces)])]),
+        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+            get_term_context(Term), Pieces),
         Result = error1([Spec])
     ).
 
@@ -1490,8 +1497,8 @@ parse_item_version_number(ParseName, Term, Result) :-
         Result = ok1(item_name(SymName, Arity) - VersionNumber)
     else
         Pieces = [words("Error in item version number."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(Term), [always(Pieces)])]),
+        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+            get_term_context(Term), Pieces),
         Result = error1([Spec])
     ).
 

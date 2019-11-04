@@ -419,7 +419,7 @@ classify_items([Item | Items], !TypeDefnMap, !InstDefnMap, !ModeDefnMap,
         )
     ;
         Item = item_pragma(ItemPragmaInfo),
-        ItemPragmaInfo = item_pragma_info(Pragma, _, _, _),
+        ItemPragmaInfo = item_pragma_info(Pragma, _, _),
         (
             ( Pragma = pragma_foreign_proc_export(_)
             ; Pragma = pragma_external_proc(_)
@@ -431,7 +431,8 @@ classify_items([Item | Items], !TypeDefnMap, !InstDefnMap, !ModeDefnMap,
             ; Pragma = pragma_exceptions(_)
             ; Pragma = pragma_trailing_info(_)
             ; Pragma = pragma_mm_tabling_info(_)
-            ; Pragma = pragma_obsolete(_, _)
+            ; Pragma = pragma_obsolete_pred(_)
+            ; Pragma = pragma_obsolete_proc(_)
             ; Pragma = pragma_no_detism_warning(_)
             ; Pragma = pragma_tabled(_)
             ; Pragma = pragma_fact_table(_)

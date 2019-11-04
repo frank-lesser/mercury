@@ -24,13 +24,17 @@
 
 :- import_module bool.
 :- import_module io.
-:- import_module list.
 :- import_module maybe.
 
 %---------------------------------------------------------------------------%
 
 :- pred mercury_output_item_pragma(merc_out_info::in,
     item_pragma_info::in, io::di, io::uo) is det.
+
+%---------------------------------------------------------------------------%
+
+:- pred mercury_output_item_pred_marker(pragma_info_pred_marker::in,
+    io::di, io::uo) is det.
 
 %---------------------------------------------------------------------------%
 
@@ -69,29 +73,30 @@
     % This predicate outputs termination_info pragmas;
     % such annotations can be part of .opt and .trans_opt files.
     %
-:- pred write_pragma_termination_info_components(output_lang::in,
-    pred_or_func::in, sym_name::in, list(mer_mode)::in,
-    maybe(generic_arg_size_info(T))::in,
-    maybe(generic_termination_info(S, T))::in, io::di, io::uo) is det.
+:- pred write_pragma_termination_info(output_lang::in,
+    pragma_info_termination_info::in, io::di, io::uo) is det.
 
-    % Write the given arg size info. Verbose if the second arg is yes.
+    % Write the given arg size info. Verbose if the first arg is yes.
     %
 :- pred write_maybe_arg_size_info(bool::in,
     maybe(generic_arg_size_info(T))::in, io::di, io::uo) is det.
 
-    % Write the given termination info. Verbose if the second arg is yes.
+    % Write the given termination info. Verbose if the first arg is yes.
     %
 :- pred write_maybe_termination_info(bool::in,
     maybe(generic_termination_info(S, T))::in, io::di, io::uo) is det.
 
 %---------------------------------------------------------------------------%
 
+:- pred write_pragma_termination2_info(output_lang::in,
+    pragma_info_termination2_info::in, io::di, io::uo) is det.
+
+%---------------------------------------------------------------------------%
+
 :- pred write_pragma_structure_sharing_info(output_lang::in,
-    maybe(prog_varset)::in, maybe(tvarset)::in,
     pragma_info_structure_sharing::in, io::di, io::uo) is det.
 
 :- pred write_pragma_structure_reuse_info(output_lang::in,
-    maybe(prog_varset)::in, maybe(tvarset)::in,
     pragma_info_structure_reuse::in, io::di, io::uo) is det.
 
 %---------------------------------------------------------------------------%
@@ -114,6 +119,7 @@
 
 :- import_module char.
 :- import_module int.
+:- import_module list.
 :- import_module pair.
 :- import_module require.
 :- import_module set.
@@ -125,7 +131,7 @@
 %---------------------------------------------------------------------------%
 
 mercury_output_item_pragma(Info, ItemPragma, !IO) :-
-    ItemPragma = item_pragma_info(Pragma, _, Context, _SeqNum),
+    ItemPragma = item_pragma_info(Pragma, Context, _SeqNum),
     maybe_output_line_number(Info, Context, !IO),
     Lang = get_output_lang(Info),
     (
@@ -175,8 +181,11 @@ mercury_output_item_pragma(Info, ItemPragma, !IO) :-
         Pragma = pragma_mm_tabling_info(TablingInfo),
         mercury_output_pragma_mm_tabling_info(TablingInfo, !IO)
     ;
-        Pragma = pragma_obsolete(PredNameArity, ObsoleteInFavourOf),
-        mercury_output_pragma_obsolete(PredNameArity, ObsoleteInFavourOf, !IO)
+        Pragma = pragma_obsolete_pred(ObsoletePredInfo),
+        mercury_output_pragma_obsolete_pred(ObsoletePredInfo, !IO)
+    ;
+        Pragma = pragma_obsolete_proc(ObsoleteProcInfo),
+        mercury_output_pragma_obsolete_proc(Lang, ObsoleteProcInfo, !IO)
     ;
         Pragma = pragma_no_detism_warning(PredNameArity),
         PredNameArity = pred_name_arity(Pred, Arity),
@@ -238,13 +247,52 @@ mercury_output_item_pragma(Info, ItemPragma, !IO) :-
             "mode_check_clauses", no, !IO)
     ;
         Pragma = pragma_structure_sharing(SharingInfo),
-        write_pragma_structure_sharing_info(Lang, no, no, SharingInfo, !IO)
+        write_pragma_structure_sharing_info(Lang, SharingInfo, !IO)
     ;
         Pragma = pragma_structure_reuse(ReuseInfo),
-        write_pragma_structure_reuse_info(Lang, no, no, ReuseInfo, !IO)
+        write_pragma_structure_reuse_info(Lang, ReuseInfo, !IO)
     ;
         Pragma = pragma_require_feature_set(RFSInfo),
         mercury_output_pragma_require_feature_set(RFSInfo, !IO)
+    ).
+
+%---------------------------------------------------------------------------%
+
+mercury_output_item_pred_marker(PredMarker, !IO) :-
+    PredMarker = pragma_info_pred_marker(PredNameArity, PredMarkerKind),
+    PredNameArity = pred_name_arity(Pred, Arity),
+    (
+        PredMarkerKind = pmpk_inline,
+        mercury_output_pragma_decl(Pred, Arity, pf_predicate,
+            "inline", no, !IO)
+    ;
+        PredMarkerKind = pmpk_noinline,
+        mercury_output_pragma_decl(Pred, Arity, pf_predicate,
+            "no_inline", no, !IO)
+    ;
+        PredMarkerKind = pmpk_promise_eqv_clauses,
+        mercury_output_pragma_decl(Pred, Arity, pf_predicate,
+            "promise_equivalent_clauses", no, !IO)
+    ;
+        PredMarkerKind = pmpk_promise_pure,
+        mercury_output_pragma_decl(Pred, Arity, pf_predicate,
+            "promise_pure", no, !IO)
+    ;
+        PredMarkerKind = pmpk_promise_semipure,
+        mercury_output_pragma_decl(Pred, Arity, pf_predicate,
+            "promise_semipure", no, !IO)
+    ;
+        PredMarkerKind = pmpk_terminates,
+        mercury_output_pragma_decl(Pred, Arity, pf_predicate,
+            "terminates", no, !IO)
+    ;
+        PredMarkerKind = pmpk_does_not_terminate,
+        mercury_output_pragma_decl(Pred, Arity, pf_predicate,
+            "does_not_terminate", no, !IO)
+    ;
+        PredMarkerKind = pmpk_mode_check_clauses,
+        mercury_output_pragma_decl(Pred, Arity, pf_predicate,
+            "mode_check_clauses", no, !IO)
     ).
 
 %---------------------------------------------------------------------------%
@@ -756,8 +804,8 @@ extra_attribute_to_string(needs_call_standard_output_registers) =
     pragma_info_foreign_proc_export::in, U::di, U::uo) is det <= output(U).
 
 mercury_format_pragma_foreign_proc_export(Lang, FPEInfo, !U) :-
-    FPEInfo = pragma_info_foreign_proc_export(ForeignLang, PredNameModesPF,
-        ExportName),
+    FPEInfo = pragma_info_foreign_proc_export(_Origin, ForeignLang,
+        PredNameModesPF, ExportName),
     PredNameModesPF = pred_name_modes_pf(Name, ModeList, PredOrFunc),
     varset.init(InstVarSet), % The varset isn't really used.
     add_string(":- pragma foreign_export(", !U),
@@ -838,23 +886,8 @@ mercury_output_pragma_type_spec(VarNamePrint, Lang, TypeSpecInfo, !IO) :-
             MaybePredOrFunc = no,
             unexpected($pred, "no pred_or_func")
         ),
-        (
-            PredOrFunc = pf_function,
-            pred_args_to_func_args(Modes, FuncModes, RetMode),
-            mercury_output_sym_name(PredName, !IO),
-            io.write_string("(", !IO),
-            varset.init(InstVarSet),
-            mercury_output_mode_list(Lang, InstVarSet, FuncModes, !IO),
-            io.write_string(") = ", !IO),
-            mercury_output_mode(Lang, InstVarSet, RetMode, !IO)
-        ;
-            PredOrFunc = pf_predicate,
-            mercury_output_sym_name(PredName, !IO),
-            io.write_string("(", !IO),
-            varset.init(InstVarSet),
-            mercury_output_mode_list(Lang, InstVarSet, Modes, !IO),
-            io.write_string(")", !IO)
-        )
+        PredNameModesPF = pred_name_modes_pf(PredName, Modes, PredOrFunc),
+        write_pred_name_modes_pf(Lang, PredNameModesPF, !IO)
     ;
         MaybeModes = no,
         mercury_output_bracketed_sym_name_ngt(next_to_graphic_token, PredName,
@@ -1017,13 +1050,15 @@ mercury_output_pragma_mm_tabling_info(TablingInfo, !IO) :-
 
 %---------------------------------------------------------------------------%
 %
-% Output an obsolete pragma.
+% Output an obsolete_pred or obsolete_proc pragma.
 %
 
-:- pred mercury_output_pragma_obsolete(pred_name_arity::in,
-    list(sym_name_and_arity)::in, io::di, io::uo) is det.
+:- pred mercury_output_pragma_obsolete_pred(pragma_info_obsolete_pred::in,
+    io::di, io::uo) is det.
 
-mercury_output_pragma_obsolete(PredNameArity, ObsoleteInFavourOf, !IO) :-
+mercury_output_pragma_obsolete_pred(ObsoletePredInfo, !IO) :-
+    ObsoletePredInfo =
+        pragma_info_obsolete_pred(PredNameArity, ObsoleteInFavourOf),
     PredNameArity = pred_name_arity(SymName, Arity),
     PredSymNameArity = sym_name_arity(SymName, Arity),
     ObsoleteStrs = list.map(wrapped_sym_name_and_arity_to_string,
@@ -1032,6 +1067,19 @@ mercury_output_pragma_obsolete(PredNameArity, ObsoleteInFavourOf, !IO) :-
     io.format(":- pragma obsolete(%s, [%s]).\n",
         [s(wrapped_sym_name_and_arity_to_string(PredSymNameArity)),
         s(ObsoleteStr)], !IO).
+
+:- pred mercury_output_pragma_obsolete_proc(output_lang::in,
+    pragma_info_obsolete_proc::in, io::di, io::uo) is det.
+
+mercury_output_pragma_obsolete_proc(Lang, ObsoleteProcInfo, !IO) :-
+    ObsoleteProcInfo =
+        pragma_info_obsolete_proc(PredNameModesPF, ObsoleteInFavourOf),
+    io.write_string(":- pragma obsolete_proc(", !IO),
+    write_pred_name_modes_pf(Lang, PredNameModesPF, !IO),
+    ObsoleteStrs = list.map(wrapped_sym_name_and_arity_to_string,
+        ObsoleteInFavourOf),
+    ObsoleteStr = string.join_list(", ", ObsoleteStrs),
+    io.format(", [%s]).\n", [s(ObsoleteStr)], !IO).
 
 :- func wrapped_sym_name_and_arity_to_string(sym_name_and_arity) = string.
 
@@ -1267,30 +1315,11 @@ mercury_format_pred_name_arity(PredNameArity, !U) :-
 % Output a termination_info pragma.
 %
 
-:- pred write_pragma_termination_info(output_lang::in,
-    pragma_info_termination_info::in, io::di, io::uo) is det.
-
 write_pragma_termination_info(Lang, TermInfo, !IO) :-
     TermInfo = pragma_info_termination_info(PredNameModesPF,
         MaybeArgSize, MaybeTermination),
-    PredNameModesPF = pred_name_modes_pf(SymName, ModeList, PredOrFunc),
-    write_pragma_termination_info_components(Lang, PredOrFunc,
-        SymName, ModeList, MaybeArgSize, MaybeTermination, !IO).
-
-write_pragma_termination_info_components(Lang, PredOrFunc, SymName, ModeList,
-        MaybeArgSize, MaybeTermination, !IO) :-
     io.write_string(":- pragma termination_info(", !IO),
-    varset.init(InitVarSet),
-    (
-        PredOrFunc = pf_predicate,
-        mercury_output_pred_mode_subdecl(Lang, InitVarSet, SymName,
-            ModeList, no, !IO)
-    ;
-        PredOrFunc = pf_function,
-        pred_args_to_func_args(ModeList, FuncModeList, RetMode),
-        mercury_output_func_mode_subdecl(Lang, InitVarSet, SymName,
-            FuncModeList, RetMode, no, !IO)
-    ),
+    write_pred_name_modes_pf(Lang, PredNameModesPF, !IO),
     io.write_string(", ", !IO),
     write_maybe_arg_size_info(no, MaybeArgSize, !IO),
     io.write_string(", ", !IO),
@@ -1375,24 +1404,11 @@ write_maybe_termination_info(Verbose, MaybeTerminationInfo, !IO) :-
 % Output a termination2_info pragma.
 %
 
-:- pred write_pragma_termination2_info(output_lang::in,
-    pragma_info_termination2_info::in, io::di, io::uo) is det.
-
 write_pragma_termination2_info(Lang, Term2Info, !IO) :-
-    Term2Info = pragma_info_termination2_info(PredModesPF,
+    Term2Info = pragma_info_termination2_info(PredNameModesPF,
         MaybeSuccess, MaybeFailure, MaybeTermination),
-    PredModesPF = pred_name_modes_pf(PredName, ModeList, PredOrFunc),
     io.write_string(":- pragma termination2_info(", !IO),
-    (
-        PredOrFunc = pf_predicate,
-        mercury_output_pred_mode_subdecl(Lang, varset.init, PredName,
-            ModeList, no, !IO)
-    ;
-        PredOrFunc = pf_function,
-        pred_args_to_func_args(ModeList, FuncModeList, RetMode),
-        mercury_output_func_mode_subdecl(Lang, varset.init, PredName,
-            FuncModeList, RetMode, no, !IO)
-    ),
+    write_pred_name_modes_pf(Lang, PredNameModesPF, !IO),
     io.write_string(", ", !IO),
     write_maybe_pragma_constr_arg_size_info(MaybeSuccess, !IO),
     io.write_string(", ", !IO),
@@ -1407,7 +1423,7 @@ write_pragma_termination2_info(Lang, Term2Info, !IO) :-
 write_maybe_pragma_constr_arg_size_info(no, !IO) :-
     io.write_string("not_set", !IO).
 write_maybe_pragma_constr_arg_size_info(yes(ArgSizeInfo), !IO) :-
-    io.write_string("constaints(", !IO),
+    io.write_string("constraints(", !IO),
     io.write_char('[', !IO),
     io.write_list(ArgSizeInfo, ", ", write_arg_size_constr, !IO),
     io.write_string("])", !IO).
@@ -1463,41 +1479,17 @@ write_maybe_pragma_termination_info(MaybeTermination, !IO) :-
 % Output a structure_sharing pragma.
 %
 
-write_pragma_structure_sharing_info(Lang, MaybeVarSet, MaybeTVarSet,
-        SharingInfo, !IO) :-
+write_pragma_structure_sharing_info(Lang, SharingInfo, !IO) :-
     SharingInfo = pragma_info_structure_sharing(PredNameModesPF,
-        HeadVars, HeadVarTypes, MaybeSharingAs),
-    PredNameModesPF = pred_name_modes_pf(SymName, Modes, PredOrFunc),
+        HeadVars, HeadVarTypes, VarSet, TVarSet, MaybeSharingAs),
     io.write_string(":- pragma structure_sharing(", !IO),
-    varset.init(InitVarSet),
-    (
-        MaybeVarSet = yes(VarSet)
-    ;
-        MaybeVarSet = no,
-        varset.init(VarSet)
-    ),
-    (
-        MaybeTVarSet = yes(TypeVarSet)
-    ;
-        MaybeTVarSet = no,
-        varset.init(TypeVarSet)
-    ),
-    (
-        PredOrFunc = pf_predicate,
-        mercury_output_pred_mode_subdecl(Lang, InitVarSet, SymName,
-            Modes, no, !IO)
-    ;
-        PredOrFunc = pf_function,
-        pred_args_to_func_args(Modes, FuncModeList, RetMode),
-        mercury_output_func_mode_subdecl(Lang, InitVarSet, SymName,
-            FuncModeList, RetMode, no, !IO)
-    ),
+    write_pred_name_modes_pf(Lang, PredNameModesPF, !IO),
     % write headvars and types:
     io.write_string(", ", !IO),
-    write_vars_and_types(VarSet, TypeVarSet, HeadVars, HeadVarTypes, !IO),
+    write_vars_and_types(VarSet, TVarSet, HeadVars, HeadVarTypes, !IO),
     % write structure sharing information.
     io.write_string(", ", !IO),
-    prog_ctgc.print_interface_structure_sharing_domain(VarSet, TypeVarSet,
+    prog_ctgc.print_interface_structure_sharing_domain(VarSet, TVarSet,
         MaybeSharingAs, !IO),
     io.write_string(").\n", !IO).
 
@@ -1506,42 +1498,17 @@ write_pragma_structure_sharing_info(Lang, MaybeVarSet, MaybeTVarSet,
 % Output a structure_reuse pragma.
 %
 
-write_pragma_structure_reuse_info(Lang, MaybeVarSet, MaybeTVarSet,
-        ReuseInfo, !IO) :-
+write_pragma_structure_reuse_info(Lang, ReuseInfo, !IO) :-
     ReuseInfo = pragma_info_structure_reuse(PredNameModesPF,
-        HeadVars, HeadVarTypes, MaybeStructureReuseDomain),
-    PredNameModesPF = pred_name_modes_pf(SymName, Modes, PredOrFunc),
+        HeadVars, HeadVarTypes, VarSet, TVarSet, MaybeStructureReuseDomain),
     io.write_string(":- pragma structure_reuse(", !IO),
-    varset.init(InitVarSet),
-    (
-        MaybeVarSet = yes(VarSet)
-    ;
-        MaybeVarSet = no,
-        varset.init(VarSet)
-    ),
-    (
-        MaybeTVarSet = yes(TypeVarSet)
-    ;
-        MaybeTVarSet = no,
-        varset.init(TypeVarSet)
-    ),
-
-    (
-        PredOrFunc = pf_predicate,
-        mercury_output_pred_mode_subdecl(Lang, InitVarSet, SymName,
-            Modes, no, !IO)
-    ;
-        PredOrFunc = pf_function,
-        pred_args_to_func_args(Modes, FuncModeList, RetMode),
-        mercury_output_func_mode_subdecl(Lang, InitVarSet, SymName,
-            FuncModeList, RetMode, no, !IO)
-    ),
+    write_pred_name_modes_pf(Lang, PredNameModesPF, !IO),
     % write headvars and types:
     io.write_string(", ", !IO),
-    write_vars_and_types(VarSet, TypeVarSet, HeadVars, HeadVarTypes, !IO),
+    write_vars_and_types(VarSet, TVarSet, HeadVars, HeadVarTypes, !IO),
     % write structure reuse information.
     io.write_string(", ", !IO),
-    prog_ctgc.print_interface_maybe_structure_reuse_domain(VarSet, TypeVarSet,
+    prog_ctgc.print_interface_maybe_structure_reuse_domain(VarSet, TVarSet,
         MaybeStructureReuseDomain, !IO),
     io.write_string(").\n", !IO).
 
@@ -1604,6 +1571,29 @@ mercury_format_required_feature(reqf_strict_sequential, !U) :-
     add_string("strict_sequential", !U).
 mercury_format_required_feature(reqf_conservative_gc, !U) :-
     add_string("conservative_gc", !U).
+
+%---------------------------------------------------------------------------%
+%
+% Utility predicates.
+%
+
+:- pred write_pred_name_modes_pf(output_lang::in,
+    pred_name_modes_pf::in, io::di, io::uo) is det.
+
+write_pred_name_modes_pf(Lang, PredNameModesPF, !IO) :-
+    PredNameModesPF = pred_name_modes_pf(SymName, Modes, PredOrFunc),
+    varset.init(InstVarSet),
+    MaybeDet = no,
+    (
+        PredOrFunc = pf_predicate,
+        mercury_output_pred_mode_subdecl(Lang, InstVarSet, SymName,
+            Modes, MaybeDet, !IO)
+    ;
+        PredOrFunc = pf_function,
+        pred_args_to_func_args(Modes, ArgModes, RetMode),
+        mercury_output_func_mode_subdecl(Lang, InstVarSet, SymName,
+            ArgModes, RetMode, MaybeDet, !IO)
+    ).
 
 %---------------------------------------------------------------------------%
 :- end_module parse_tree.parse_tree_out_pragma.

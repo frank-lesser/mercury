@@ -81,7 +81,7 @@
     %     backslash escapes if necessary and backslash or octal escapes for
     %     all characters for which char.is_control/1 is true.
     %   - for characters, the character inside single quotation marks using
-    %     a backslash escape if necssary and a backslash or octal escape for
+    %     a backslash escape if necessary and a backslash or octal escape for
     %     for all characters for which char.is_control/1 is true.
     %   - for predicates, the string <<predicate>>, and for functions,
     %     the string <<function>>, except with include_details_cc,
@@ -90,7 +90,7 @@
     %     predicate and function values created by lambda expressions.)
     %   - for tuples, the string {}.
     %   - for arrays, the string <<array>>.
-    %   - for c_pointers, the string ptr(0xXXXX) where XXXX is the
+    %   - for c_pointers, the string c_pointer(0xXXXX) where XXXX is the
     %     hexadecimal representation of the pointer.
     %   - for foreign types, a string of the form <<foreign(Name, Rep)>> where
     %     Name is the type's Mercury name and Rep is a target language specific

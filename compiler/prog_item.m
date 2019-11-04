@@ -408,8 +408,7 @@
                 tcad_abstract_std       :: list(item_type_defn_info_abstract),
                 tcad_eqv                :: list(item_type_defn_info_eqv),
                 tcad_du                 :: list(item_type_defn_info_du),
-                tcad_foreign            :: c_java_csharp_erlang(
-                                            list(item_type_defn_info_foreign))
+                tcad_foreign            :: c_j_cs_e_defns
             ).
 
 :- type type_ctor_maybe_defn
@@ -422,8 +421,7 @@
                 tcmd_abstract_std       :: maybe(item_type_defn_info_abstract),
                 tcmd_eqv                :: maybe(item_type_defn_info_eqv),
                 tcmd_du                 :: maybe(item_type_defn_info_du),
-                tcmd_foreign            :: c_java_csharp_erlang(
-                                            maybe(item_type_defn_info_foreign))
+                tcmd_foreign            :: c_j_cs_e_maybe_defn
             ).
 
     % We support foreign type definitions in all four of our target languages,
@@ -447,6 +445,10 @@
     c_java_csharp_erlang(list(item_foreign_enum_info)).
 :- type c_j_cs_e_maybe_enum ==
     c_java_csharp_erlang(maybe(item_foreign_enum_info)).
+:- type c_j_cs_e_repn ==
+    c_java_csharp_erlang(maybe(foreign_type_repn)).
+:- type c_j_cs_e_enum_repn ==
+    c_java_csharp_erlang(maybe(enum_foreign_repn)).
 
 % The map key is sym_name_and_arity because we don't have an inst_ctor type.
 :- type inst_ctor_defn_map == map(sym_name_and_arity, inst_ctor_all_defns).
@@ -483,6 +485,54 @@
 
                 pto_fims                    :: list(item_fim),
                 pto_items                   :: list(item)
+            ).
+
+:- type parse_tree_plain_opt
+    --->    parse_tree_plain_opt(
+                ptpo_module_name            :: module_name,
+
+                % The context of the `:- module' declaration.
+                ptpo_module_name_context    :: prog_context,
+
+                % `:- use_module' (not `:- import_module') declarations.
+                ptpo_uses                   :: list(avail_use_info),
+                ptpo_fims                   :: list(item_fim),
+                ptpo_type_defns             :: list(item_type_defn_info),
+                ptpo_foreign_enums          :: list(item_foreign_enum_info),
+                ptpo_inst_defns             :: list(item_inst_defn_info),
+                ptpo_mode_defns             :: list(item_mode_defn_info),
+                ptpo_typeclasses            :: list(item_typeclass_info),
+                ptpo_instances              :: list(item_instance_info),
+                ptpo_pred_decls             :: list(item_pred_decl_info),
+                ptpo_mode_decls             :: list(item_mode_decl_info),
+                ptpo_pred_marker_pragmas    :: list(item_pred_marker),
+                ptpo_type_spec_pragmas      :: list(item_type_spec),
+                ptpo_clauses                :: list(item_clause_info),
+
+                ptpo_unused_args            :: list(item_unused_args),
+                ptpo_termination            :: list(item_termination),
+                ptpo_termination2           :: list(item_termination2),
+                ptpo_exceptions             :: list(item_exceptions),
+                ptpo_trailing               :: list(item_trailing),
+                ptpo_mm_tabling             :: list(item_mm_tabling),
+                ptpo_struct_sharing         :: list(item_struct_sharing),
+                ptpo_struct_reuse           :: list(item_struct_reuse)
+            ).
+
+:- type parse_tree_trans_opt
+    --->    parse_tree_trans_opt(
+                ptto_module_name            :: module_name,
+
+                % The context of the `:- module' declaration.
+                ptto_module_name_context    :: prog_context,
+
+                ptto_termination            :: list(item_termination),
+                ptto_termination2           :: list(item_termination2),
+                ptto_exceptions             :: list(item_exceptions),
+                ptto_trailing               :: list(item_trailing),
+                ptto_mm_tabling             :: list(item_mm_tabling),
+                ptto_struct_sharing         :: list(item_struct_sharing),
+                ptto_struct_reuse           :: list(item_struct_reuse)
             ).
 
 %-----------------------------------------------------------------------------%
@@ -918,6 +968,13 @@
                 fe_seq_num                      :: int
             ).
 
+:- type foreign_enum_spec
+    --->    foreign_enum_spec(
+                foreign_language,
+                type_ctor,
+                one_or_more(pair(sym_name, string))
+            ).
+
 :- type item_foreign_export_enum_info
     --->    item_foreign_export_enum_info(
                 fee_language                    :: foreign_language,
@@ -928,10 +985,10 @@
                 fee_seq_num                     :: int
             ).
 
-:- type item_pragma_info
+:- type item_pragma_info == item_pragma_info(pragma_type).
+:- type item_pragma_info(T)
     --->    item_pragma_info(
-                prag_type                       :: pragma_type,
-                prag_maybe_attrs                :: item_maybe_attrs,
+                prag_type                       :: T,
                 prag_context                    :: prog_context,
                 prag_seq_num                    :: int
             ).
@@ -1034,6 +1091,8 @@
 :- func get_item_context(item) = prog_context.
 
 :- func item_desc_pieces(item) = list(format_component).
+
+:- func project_pragma_type(item_pragma_info(T)) = T.
 
 %-----------------------------------------------------------------------------%
 %
@@ -1319,58 +1378,106 @@
 % Information about the representations of types defined in other modules.
 %
 
+    % This type and type_ctor_checked_defn are closely related.
+    % The principal differences are the following.
+    %
+    % - type_ctor_checked_defn deals with solver types. Since solver types
+    %   have no representation information themselves (they are represented
+    %   by values of another type), this type does not deal with them.
+    %
+    % - One of the purposes of type_ctor_checked_defn is to decide
+    %   what items to include in interface files, for use by code using
+    %   the compiler's ancient approach to deciding type representation,
+    %   where each compiler invocation that generated code decided for itself
+    %   how every type it had access to was represented, including the types
+    %   imported from other modules. This means that it needs to contain
+    %   either whole items (of particular kinds), or information from which
+    %   whole items can be reconstructed.
+    %
+    % - The above consideration also requires a type_ctor_checked_defn
+    %   to specify the status of the type. On the other hand, values of
+    %   this type have no use for status information. Status information
+    %   is used only for checking whether an access to a type should be
+    %   allowed or not; the only use of values of this type is to help
+    %   compute type representations.
+    %
+    % - Only the last four of the function symbols of this type are
+    %   now intended to be the used. The others are part of a discarded
+    %   attempt to redesign that ancient system.
+    %   XXX TYPE_REPN Delete the others.
+    %
+    % - Only this type needs to contain representation information.
+    %   A value of the type_ctor_checked_defn type needs to contain *part*
+    %   of the information from which this representation information is
+    %   computed for its type, but not *all* of it; some of that information
+    %   comes from information about the representation of *other* types.
+    %
+    % One sort-of difference is while both contain information that has been
+    % checked by a compiler invocation, values of this type that have been
+    % read in from an interface file, while checked by another compiler
+    % invocation before being written out, may be corrupted in the filesystem.
+    % However, while this danger is always present, we need not take any
+    % special steps to guard against it, precisely because no perfect defense
+    % is possible.
+    %
 :- type type_ctor_repn_info
     --->    tcrepn_is_direct_dummy
     ;       tcrepn_is_notag
-    ;       tcrepn_is_eqv_to(
-                % XXX TYPE_REPN maybe nonword
-                % XXX TYPE_REPN maybe notag
-                mer_type
-            )
     ;       tcrepn_fits_in_n_bits(int, fill_kind)
-    ;       tcrepn_is_word_aligned_ptr
     ;       tcrepn_has_direct_arg_functors(list(sym_name_and_arity))
+    ;       tcrepn_is_word_aligned_ptr
+    ;       tcrepn_is_eqv_to(mer_type)
     ;       tcrepn_du(du_repn)
-    ;       tcrepn_maybe_foreign(
-                % If the foreign language of the current backend
-                % is the key of an entry in the list, then
-                % the representation of this type_ctor is given
-                % by the associated foreign_type_repn.
-                %
-                % The list may mention a language at most once.
-                % If it mentions *every* foreign language once,
-                % then the maybe may be "no", since in that case
-                % any Mercury definition of the type would never be used.
-                %
-                % If the foreign language of the current backend
-                % is not the key of any entry in the assoc_list, then
-                % the maybe must be a "yes" whose argument gives the
-                % representation of the Mercury version of the type.
-                one_or_more(pair(foreign_language, foreign_type_repn)),
-                maybe(du_repn)
-            ).
+    ;       tcrepn_foreign(c_j_cs_e_repn).
 
-:- type foreign_type_repn
-    --->    foreign_type_repn(
-                % The name of the foreign type that represents values
-                % of this Mercury type.
-                frd_foreign_type        :: string,
-
-                % The assertions about this foreign type.
-                frd_assertions          :: foreign_type_assertions
-            ).
-
-    % There should be exactly one applicable du_repn for any given type_ctor.
-    % That means that a non-foreign-enum
-    % du_repn for a type_ctor may coexist with one or
-    % more foreign enum du_repn for that same type_ctor,
-    % *provided* that the foreign enum du_repn are
-    % all for different types.
+    % A type that has a discriminated union definition in Mercury
+    % may also have a definition in each of our foreign languages,
+    % If it is an direct_dummy or enum type, that definition may be
+    % either a foreign type definition or a foreign enum definition;
+    % otherwise, it can only be a foreign type definition.
 :- type du_repn
-    --->    dur_notag(notag_repn)
-    ;       dur_direct_dummy(direct_dummy_repn)
+    --->    dur_direct_dummy(direct_dummy_repn)
     ;       dur_enum(enum_repn)
-    ;       dur_gen(gen_du_repn).
+    ;       dur_notag(notag_repn)
+    ;       dur_gen_only_functor(gen_du_repn_only_functor)
+    ;       dur_gen_more_functors(gen_du_repn_more_functors).
+
+:- type direct_dummy_repn
+    --->    direct_dummy_repn(
+                % The type is a direct dummy type that satisfies the
+                % requirements of du_type_is_dummy.
+
+                % The name of the one functor in the type, which must be
+                % arity 0. Its representation will be dummy_tag.
+                dummy_functor_name          :: string,
+
+                % Any foreign type or foreign enum definitions for the type.
+                dummy_foreign               :: c_j_cs_e_enum_repn
+            ).
+
+:- type enum_repn
+    --->    enum_repn(
+                % The type is an enum type that satisfies the requirements
+                % of du_type_is_enum.
+
+                % The list of the functor names (all arity 0). We store
+                % the first two separately to enforce the structural invariant
+                % that an enum must have at least two functors.
+                %
+                % The representation of functor #N in Mercury will be
+                % int_tag(int_tag_int(N)), with counting starting at 0.
+                %
+                % We do not care about the 32 vs 64 bit distinction here,
+                % because the definition of an enum type with more than 2^32
+                % function symbols will cause a compiler to run out of memory
+                % for a *very* long time to come.
+                enum_functor1               :: string,
+                enum_functor2               :: string,
+                enum_functors3plus          :: list(string),
+
+                % Any foreign type or foreign enum definitions for the type.
+                enum_foreign            :: c_j_cs_e_enum_repn
+            ).
 
 :- type notag_repn
     --->    notag_repn(
@@ -1380,51 +1487,28 @@
                 % as a full word at offset 0, but this should never be
                 % looked up, since the argument will actually be stored
                 % wherever the whole term is stored.
-                notag_functor_name      :: string
+                notag_functor_name          :: string,
+
+                notag_foreign               :: c_j_cs_e_repn
             ).
 
-:- type direct_dummy_repn
-    --->    direct_dummy_repn(
-                % The name of the one functor in the type, which must be
-                % arity 0. Its representation will be dummy_tag.
-                dummy_functor_name      :: string
-            ).
-
-:- type enum_repn
-    --->    enum_repn(
-                % The list of the functor names (all arity 0).
-                enum_functors           :: one_or_more(string),
-
-                % The representation of functor #N in Mercury will be
-                % int_tag(int_tag_int(N)), with counting starting at 0.
-                % However, if the enum_foreign field has an element
-                % whose key is the current backend's language, the
-                % representation of functor #N will be the Nth string
-                % in the associated value.
-                %
-                % We do not care about the 32 vs 64 bit distinction here,
-                % because the definition of an enum type with more than 2^32
-                % function symbols will cause a compiler to run out of memory
-                % for a *very* long time to come.
-                %
-                % The set of foreign languages mentioned here must be
-                % disjoint from the set of foreign languages mentioned
-                % in any tcrepn_conditional wrapped around this du_repn.
-                enum_foreign            :: assoc_list(foreign_language,
-                                                one_or_more(string))
-            ).
-
-:- type gen_du_repn
+:- type gen_du_repn_only_functor
     --->    gen_du_repn_only_functor(
                 % The name of the data constructor. The arity is implicit
                 % in the length of the argument list, which must be the same
                 % in the 64 and 32 bit versions.
-                gduofd_functor          :: string,
-                gduofd_args_64          :: gen_du_only_functor_args,
-                gduofd_args_32          :: gen_du_only_functor_args
-            )
-    ;       gen_du_repn_more_functors(
-                gdumfd_functors         :: one_or_more(gen_du_functor)
+                gdrof_functor           :: string,
+                gdrof_args64            :: gen_du_only_functor_args,
+                gdrof_args32            :: gen_du_only_functor_args,
+                gdrof_foreign           :: c_j_cs_e_repn
+            ).
+
+:- type gen_du_repn_more_functors
+    --->    gen_du_repn_more_functors(
+                gdrmf_functor_1         :: gen_du_functor,
+                gdrmf_functor_2         :: gen_du_functor,
+                gdrmf_other_functors    :: list(gen_du_functor),
+                gdrmf_foreign           :: c_j_cs_e_repn
             ).
 
 :- type gen_du_only_functor_args
@@ -1459,6 +1543,26 @@
                 gduncf_args_64          :: one_or_more(maybe_direct_arg),
                 gduncf_args_32          :: one_or_more(maybe_direct_arg)
             ).
+
+:- type foreign_type_lang_repn
+    --->    foreign_type_lang_repn(
+                ftlr_lang               :: foreign_language,
+                ftlr_foreign_type       :: foreign_type_repn
+            ).
+
+:- type foreign_type_repn
+    --->    foreign_type_repn(
+                % The name of the foreign type that represents values
+                % of this Mercury type.
+                ftr_foreign_type        :: string,
+
+                % The assertions about this foreign type.
+                ftr_assertions          :: foreign_type_assertions
+            ).
+
+:- type enum_foreign_repn
+    --->    enum_foreign_type(foreign_type_repn)
+    ;       enum_foreign_enum(one_or_more(string)).
 
 :- type ptag_sectag
     --->    ptag_sectag(
@@ -1549,7 +1653,6 @@
     ;       pragma_exceptions(pragma_info_exceptions)
     ;       pragma_trailing_info(pragma_info_trailing_info)
     ;       pragma_mm_tabling_info(pragma_info_mm_tabling_info)
-    ;       pragma_obsolete(pred_name_arity, list(sym_name_and_arity))
     ;       pragma_no_detism_warning(pred_name_arity)
     ;       pragma_require_tail_recursion(pragma_info_require_tail_recursion)
     ;       pragma_tabled(pragma_info_tabled)
@@ -1566,7 +1669,36 @@
     ;       pragma_mode_check_clauses(pred_name_arity)
     ;       pragma_structure_sharing(pragma_info_structure_sharing)
     ;       pragma_structure_reuse(pragma_info_structure_reuse)
+    ;       pragma_obsolete_pred(pragma_info_obsolete_pred)
+    ;       pragma_obsolete_proc(pragma_info_obsolete_proc)
     ;       pragma_require_feature_set(pragma_info_require_feature_set).
+
+:- type pred_marker_pragma_kind
+    --->    pmpk_inline
+    ;       pmpk_noinline
+    ;       pmpk_promise_pure
+    ;       pmpk_promise_semipure
+    ;       pmpk_promise_eqv_clauses
+    ;       pmpk_terminates
+    ;       pmpk_does_not_terminate
+    ;       pmpk_mode_check_clauses.
+
+:- type pragma_info_pred_marker
+    --->    pragma_info_pred_marker(
+                pred_name_arity,
+                pred_marker_pragma_kind
+            ).
+
+:- type item_pred_marker ==    item_pragma_info(pragma_info_pred_marker).
+:- type item_type_spec ==      item_pragma_info(pragma_info_type_spec).
+:- type item_unused_args ==    item_pragma_info(pragma_info_unused_args).
+:- type item_exceptions ==     item_pragma_info(pragma_info_exceptions).
+:- type item_trailing ==       item_pragma_info(pragma_info_trailing_info).
+:- type item_mm_tabling ==     item_pragma_info(pragma_info_mm_tabling_info).
+:- type item_termination ==    item_pragma_info(pragma_info_termination_info).
+:- type item_termination2 ==   item_pragma_info(pragma_info_termination2_info).
+:- type item_struct_sharing == item_pragma_info(pragma_info_structure_sharing).
+:- type item_struct_reuse ==   item_pragma_info(pragma_info_structure_reuse).
 
     % Check whether a particular `pragma' declaration is allowed
     % in the interface section of a module.
@@ -1610,6 +1742,8 @@
 
 :- type pragma_info_foreign_proc_export
     --->    pragma_info_foreign_proc_export(
+                exp_maybe_attrs         :: item_maybe_attrs,
+
                 % Predname, Predicate/function, Modes, foreign function name.
                 exp_language            :: foreign_language,
                 exp_pred_id             :: pred_name_modes_pf,
@@ -1757,7 +1891,18 @@
                 % (or inferred argmodes if there are no declared ones).
                 sharing_pred_id         :: pred_name_modes_pf,
                 sharing_headvars        :: list(prog_var),
-                sharing_headvartypes    :: list(mer_type),
+                sharing_headvar_types   :: list(mer_type),
+
+                % The prog_varset and tvarset are meaningful only when
+                % writing out this pragma; add_pragma.m ignores both varsets.
+                sharing_varset          :: prog_varset,
+                sharing_tvarset         :: tvarset,
+
+                % As of 2019 10 29, and probably long before then,
+                % the compiler *always* fills this slot with `yes(...)'.
+                % A `no' would mean that the relevant information is not
+                % available, but in that case, we simply do not write out
+                % this pragma.
                 sharing_description     :: maybe(structure_sharing_domain)
             ).
 
@@ -1769,26 +1914,45 @@
                 %
                 % The list of modes consists of the declared argmodes
                 % (or inferred argmodes if there are no declared ones).
+                %
                 % The last sym_name (reuse_optimised_name) stores the name
                 % of the optimised version of the exported predicate.
+                % XXX As of 2019 10 29, the word "reuse_optimised_name"
+                % appears nowhere in the compiler apart from this comment.
                 reuse_pred_id           :: pred_name_modes_pf,
                 reuse_headvars          :: list(prog_var),
-                reuse_headvartypes      :: list(mer_type),
+                reuse_headvar_types     :: list(mer_type),
+
+                % The prog_varset and tvarset are meaningful only when
+                % writing out this pragma; add_pragma.m ignores both varsets.
+                reuse_varset            :: prog_varset,
+                reuse_tvarset           :: tvarset,
+
+                % As of 2019 10 29, and probably long before then,
+                % the compiler *always* fills this slot with `yes(...)'.
+                % A `no' would mean that the relevant information is not
+                % available, but in that case, we simply do not write out
+                % this pragma.
                 reuse_description       :: maybe(structure_reuse_domain)
             ).
 
     % Misc pragmas.
 
+:- type pragma_info_obsolete_pred
+    --->    pragma_info_obsolete_pred(
+                pred_name_arity,
+                list(sym_name_and_arity)
+            ).
+
+:- type pragma_info_obsolete_proc
+    --->    pragma_info_obsolete_proc(
+                pred_name_modes_pf,
+                list(sym_name_and_arity)
+            ).
+
 :- type pragma_info_require_feature_set
     --->    pragma_info_require_feature_set(
                 rfs_feature_set         :: set(required_feature)
-            ).
-
-:- type foreign_enum_spec
-    --->    foreign_enum_spec(
-                foreign_language,
-                type_ctor,
-                one_or_more(pair(sym_name, string))
             ).
 
     % These types identify procedures in pragmas.
@@ -2319,6 +2483,8 @@ item_desc_pieces(Item) = Pieces :-
         Pieces = [words("a type representation description")]
     ).
 
+project_pragma_type(item_pragma_info(Pragma, _, _)) = Pragma.
+
 %-----------------------------------------------------------------------------%
 
 add_included_module_name(Incl, !ModuleNames) :-
@@ -2483,7 +2649,8 @@ pragma_allowed_in_interface(Pragma) = Allowed :-
         ),
         Allowed = no
     ;
-        ( Pragma = pragma_obsolete(_, _)
+        ( Pragma = pragma_obsolete_pred(_)
+        ; Pragma = pragma_obsolete_proc(_)
         ; Pragma = pragma_type_spec(_)
         ; Pragma = pragma_termination_info(_)
         ; Pragma = pragma_termination2_info(_)
@@ -2584,8 +2751,11 @@ pragma_desc_pieces(Pragma) = Pieces :-
         Pragma = pragma_require_feature_set(_),
         Pieces = [pragma_decl("require_feature_set"), words("declaration")]
     ;
-        Pragma = pragma_obsolete(_, _),
+        Pragma = pragma_obsolete_pred(_),
         Pieces = [pragma_decl("obsolete"), words("declaration")]
+    ;
+        Pragma = pragma_obsolete_proc(_),
+        Pieces = [pragma_decl("obsolete_proc"), words("declaration")]
     ;
         Pragma = pragma_type_spec(_),
         Pieces = [pragma_decl("type_spec"), words("declaration")]
@@ -2699,7 +2869,7 @@ get_foreign_code_indicators_from_fim(Globals, FIM, !Info) :-
 get_foreign_code_indicators_from_item(Globals, Item, !Info) :-
     (
         Item = item_pragma(ItemPragma),
-        ItemPragma = item_pragma_info(Pragma, _, _, _),
+        ItemPragma = item_pragma_info(Pragma, _, _),
         get_pragma_foreign_code(Globals, Pragma, !Info)
     ;
         Item = item_mutable(_),
@@ -2714,7 +2884,7 @@ get_foreign_code_indicators_from_item(Globals, Item, !Info) :-
         ( Item = item_initialise(_)
         ; Item = item_finalise(_)
         ),
-        % Intialise/finalise declarations introduce export pragmas, but
+        % Initialise/finalise declarations introduce export pragmas, but
         % again they won't have been expanded by the time we get here.
         UsedForeignLanguages0 = !.Info ^ used_foreign_languages,
         set.insert_list(all_foreign_languages,
@@ -2796,7 +2966,7 @@ get_pragma_foreign_code(Globals, Pragma, !Info) :-
         % rather than assembler code. So we need to treat `pragma export'
         % like the other pragmas for foreign code.
         Pragma = pragma_foreign_proc_export(FPEInfo),
-        FPEInfo = pragma_info_foreign_proc_export(Lang, _, _),
+        FPEInfo = pragma_info_foreign_proc_export(_, Lang, _, _),
         ( if list.member(Lang, BackendLangs) then
             !Info ^ used_foreign_languages :=
                 set.insert(!.Info ^ used_foreign_languages, Lang),
@@ -2830,7 +3000,8 @@ get_pragma_foreign_code(Globals, Pragma, !Info) :-
         ; Pragma = pragma_no_detism_warning(_)
         ; Pragma = pragma_no_inline(_)
         ; Pragma = pragma_consider_used(_)
-        ; Pragma = pragma_obsolete(_, _)
+        ; Pragma = pragma_obsolete_pred(_)
+        ; Pragma = pragma_obsolete_proc(_)
         ; Pragma = pragma_promise_eqv_clauses(_)
         ; Pragma = pragma_promise_pure(_)
         ; Pragma = pragma_promise_semipure(_)

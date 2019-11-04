@@ -89,6 +89,7 @@
 :- import_module mdbcomp.prim_data.
 :- import_module mdbcomp.sym_name.
 :- import_module parse_tree.builtin_lib_types.
+:- import_module parse_tree.parse_tree_out_info.
 :- import_module parse_tree.prog_data.
 :- import_module parse_tree.prog_data_foreign.
 :- import_module parse_tree.prog_data_pragma.
@@ -128,8 +129,8 @@ simplify_goal_plain_call(GoalExpr0, GoalExpr, GoalInfo0, GoalInfo,
     else
         true
     ),
-    maybe_generate_warning_for_call_to_obsolete_predicate(PredId, PredInfo,
-        GoalInfo0, !Info),
+    maybe_generate_warning_for_call_to_obsolete_predicate(PredId, ProcId,
+        PredInfo, ProcInfo, GoalInfo0, !Info),
     maybe_generate_warning_for_infinite_loop_call(PredId, ProcId,
         Args, IsBuiltin, PredInfo, ProcInfo, GoalInfo0, NestedContext,
         Common0, !Info),
@@ -462,16 +463,31 @@ one_extra_stream_arg(ModuleInfo, NumExtraArgs,
     % Generate warnings for calls to predicates that have been marked with
     % `pragma obsolete' declarations.
     %
-:- pred maybe_generate_warning_for_call_to_obsolete_predicate(pred_id::in,
-    pred_info::in, hlds_goal_info::in,
+:- pred maybe_generate_warning_for_call_to_obsolete_predicate(
+    pred_id::in, proc_id::in, pred_info::in, proc_info::in, hlds_goal_info::in,
     simplify_info::in, simplify_info::out) is det.
 
-maybe_generate_warning_for_call_to_obsolete_predicate(PredId, PredInfo,
-        GoalInfo, !Info) :-
+maybe_generate_warning_for_call_to_obsolete_predicate(PredId, ProcId,
+        PredInfo, ProcInfo, GoalInfo, !Info) :-
     ( if
         simplify_do_warn_obsolete(!.Info),
-        pred_info_get_obsolete_in_favour_of(PredInfo, MaybeObsolete),
-        MaybeObsolete = yes(InFavourOf),
+        ( if
+            pred_info_get_obsolete_in_favour_of(PredInfo, MaybeObsolete),
+            MaybeObsolete = yes(InFavourOfPrime)
+        then
+            InFavourOf = InFavourOfPrime,
+            PredOrProcPieces = describe_one_pred_name(ModuleInfo,
+                should_module_qualify, PredId)
+        else if
+            proc_info_get_obsolete_in_favour_of(ProcInfo, MaybeObsolete),
+            MaybeObsolete = yes(InFavourOfPrime)
+        then
+            InFavourOf = InFavourOfPrime,
+            PredOrProcPieces = describe_one_proc_name_mode(ModuleInfo,
+                output_mercury, should_module_qualify, proc(PredId, ProcId))
+        else
+            fail
+        ),
 
         % Don't warn about directly recursive calls to obsolete predicates.
         % That would cause spurious warnings, particularly with builtin
@@ -489,10 +505,8 @@ maybe_generate_warning_for_call_to_obsolete_predicate(PredId, PredInfo,
         ThisMaybeObsolete = no
     then
         GoalContext = goal_info_get_context(GoalInfo),
-        PredPieces = describe_one_pred_name(ModuleInfo,
-            should_module_qualify, PredId),
         MainPieces = [words("Warning: call to obsolete")] ++
-            PredPieces ++ [suffix("."), nl],
+            PredOrProcPieces ++ [suffix("."), nl],
         (
             InFavourOf = [],
             Pieces = MainPieces
@@ -852,7 +866,7 @@ maybe_generate_warning_for_useless_comparison(PredInfo, InstMap, Args,
     ).
 
 :- pred is_useless_unsigned_comparison(string::in, string::in, mer_inst::in,
-    mer_inst::in, format_components::out) is semidet.
+    mer_inst::in, list(format_component)::out) is semidet.
 
 is_useless_unsigned_comparison(ModuleName, PredName, ArgA, ArgB, Pieces) :-
     (
@@ -1087,9 +1101,7 @@ simplify_inline_builtin_inequality(TI, X, Y, Inequality, Invert, GoalInfo,
         qualified(mercury_public_builtin_module, "comparison_result"), 0),
     ConsId = cons(qualified(BuiltinModule, Inequality), 0, TypeCtor),
     Bound = bound(shared, inst_test_results_fgtc, [bound_functor(ConsId, [])]),
-    UnifyMode = unify_modes_lhs_rhs(
-        from_to_insts(Unique, Bound),
-        from_to_insts(Bound, Bound)),
+    UnifyMode = unify_modes_li_lf_ri_rf(Unique, Bound, Bound, Bound),
     RHS = rhs_functor(ConsId, is_not_exist_constr, []),
     UKind = deconstruct(CmpRes, ConsId, [], [], can_fail, cannot_cgc),
     UContext = unify_context(umc_implicit(
@@ -1321,9 +1333,7 @@ simplify_make_int_const(IntConst, ConstVar, Goal, !Info) :-
     % The context shouldn't matter.
     UnifyContext = unify_context(umc_explicit, []),
     Ground = ground_inst,
-    UnifyMode = unify_modes_lhs_rhs(
-        from_to_insts(free, Ground),
-        from_to_insts(Ground, Ground)),
+    UnifyMode = unify_modes_li_lf_ri_rf(free, Ground, Ground, Ground),
     GoalExpr = unify(ConstVar, RHS, UnifyMode, Unification, UnifyContext),
     NonLocals = set_of_var.make_singleton(ConstVar),
     InstMapDelta = instmap_delta_bind_var(ConstVar),

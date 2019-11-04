@@ -293,7 +293,7 @@ gather_stats_in_item(Item, !ItemStats, !GoalStats) :-
     item_stats::in, item_stats::out) is det.
 
 gather_stats_in_item_pragma(ItemPragmaInfo, !ItemStats) :-
-    ItemPragmaInfo = item_pragma_info(PragmaType, _, _, _),
+    ItemPragmaInfo = item_pragma_info(PragmaType, _, _),
     (
         PragmaType = pragma_termination_info(_),
         !ItemStats ^ item_num_pragma_term :=
@@ -322,7 +322,8 @@ gather_stats_in_item_pragma(ItemPragmaInfo, !ItemStats) :-
         ; PragmaType = pragma_no_inline(_)
         ; PragmaType = pragma_consider_used(_)
         ; PragmaType = pragma_unused_args(_)
-        ; PragmaType = pragma_obsolete(_, _)
+        ; PragmaType = pragma_obsolete_pred(_)
+        ; PragmaType = pragma_obsolete_proc(_)
         ; PragmaType = pragma_no_detism_warning(_)
         ; PragmaType = pragma_promise_eqv_clauses(_)
         ; PragmaType = pragma_promise_pure(_)

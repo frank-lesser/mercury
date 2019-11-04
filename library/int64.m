@@ -51,6 +51,20 @@
 % Conversion to int.
 %
 
+    % to_int(I64, I):
+    %
+    % Convert an int64 into an int.
+    % Fails if I64 is not in [int.min_int, int.max_int].
+    %
+:- pred to_int(int64::in, int::out) is semidet.
+
+    % det_to_int(I64) = I:
+    %
+    % Convert an int64 into an int.
+    % Throws an exception if I64 is not in [int.min_int, int.max_int].
+    %
+:- func det_to_int(int64) = int.
+
     % cast_to_int(I64) = I:
     %
     % Convert an int64 to an int.
@@ -398,6 +412,20 @@ cast_from_int(_) = _ :-
 
 %---------------------------------------------------------------------------%
 
+to_int(I64, I) :-
+    I64 =< cast_from_int(int.max_int),
+    I64 >= cast_from_int(int.min_int),
+    I = cast_to_int(I64).
+
+det_to_int(I64) = I :-
+    ( if to_int(I64, IPrime) then
+        I = IPrime
+    else
+        error($pred, "cannot convert int64 to int")
+    ).
+
+%---------------------------------------------------------------------------%
+
 :- pragma no_determinism_warning(cast_to_int/1).
 
 :- pragma foreign_proc("C",
@@ -533,7 +561,7 @@ min(X, Y) =
 
 abs(Num) = Abs :-
     ( if Num = int64.min_int64 then
-        throw(software_error("int64.abs: abs(min_int64) would overflow"))
+        error($pred, "abs(min_int64) would overflow")
     else
         Abs = unchecked_abs(Num)
     ).
