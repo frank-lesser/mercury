@@ -237,13 +237,14 @@ write_pred_markers(Markers, !IO) :-
         io.write_string("\n", !IO)
     ).
 
-:- pred write_obsolete_in_favour_of(int::in, sym_name_and_arity::in,
+:- pred write_obsolete_in_favour_of(int::in, sym_name_arity::in,
     io::di, io::uo) is det.
 
 write_obsolete_in_favour_of(Indent, ObsoleteInFavourOf, !IO) :-
     ObsoleteInFavourOf = sym_name_arity(SymName, Arity),
     write_indent(Indent, !IO),
-    io.format("%%    %s/%d\n", [s(sym_name_to_string(SymName)), i(Arity)], !IO).
+    io.format("%%    %s/%d\n",
+        [s(sym_name_to_string(SymName)), i(Arity)], !IO).
 
 :- pred write_pred_types(int::in, prog_varset::in, tvarset::in,
     var_name_print::in, rtti_varmaps::in,
@@ -296,6 +297,8 @@ write_pred_proc_var_name_remap(Indent, VarSet, VarNameRemap, !IO) :-
     pred_origin::in, io::di, io::uo) is det.
 
 write_origin(ModuleInfo, TVarSet, VarNamePrint, Origin, !IO) :-
+    % XXX CLEANUP Either a function version of this predicate should replace
+    % pred_info_id_to_string in hlds_out_util.m, or vice versa.
     (
         Origin = origin_special_pred(_, _),
         io.write_string("% special pred\n", !IO)
@@ -324,8 +327,14 @@ write_origin(ModuleInfo, TVarSet, VarNamePrint, Origin, !IO) :-
             mercury_output_constraint(TVarSet, VarNamePrint), !IO),
         io.nl(!IO)
     ;
-        Origin = origin_class_method,
-        io.write_string("%% class method\n", !IO)
+        Origin = origin_class_method(ClassId, MethodId),
+        ClassId = class_id(ClassSymName, ClassArity),
+        MethodId = pf_sym_name_arity(MethodPredOrFunc,
+            MethodSymName, MethodArity),
+        io.format("%% class method %s %s/%d for %s/%d\n",
+            [s(pred_or_func_to_string(MethodPredOrFunc)),
+            s(sym_name_to_string(MethodSymName)), i(MethodArity),
+            s(sym_name_to_string(ClassSymName)), i(ClassArity)], !IO)
     ;
         Origin = origin_transformed(Transformation, _, OrigPredId),
         OrigPredIdNum = pred_id_to_int(OrigPredId),
@@ -348,7 +357,7 @@ write_origin(ModuleInfo, TVarSet, VarNamePrint, Origin, !IO) :-
     ;
         Origin = origin_solver_type(TypeCtorSymName, TypeCtorArity,
             SolverAuxPredKind),
-        TypeCtorStr = sym_name_and_arity_to_string(
+        TypeCtorStr = sym_name_arity_to_string(
             sym_name_arity(TypeCtorSymName, TypeCtorArity)),
         (
             SolverAuxPredKind = solver_type_to_ground_pred,
@@ -367,7 +376,7 @@ write_origin(ModuleInfo, TVarSet, VarNamePrint, Origin, !IO) :-
             [s(SolverAuxPredKindStr), s(TypeCtorStr)], !IO)
     ;
         Origin = origin_tabling(BasePredCallId, TablingAuxPredKind),
-        BasePredStr = simple_call_id_to_string(BasePredCallId),
+        BasePredStr = pf_sym_name_orig_arity_to_string(BasePredCallId),
         (
             TablingAuxPredKind = tabling_aux_pred_stats,
             TablingAuxPredKindStr = "table statistics predicate"
@@ -879,6 +888,7 @@ write_proc(Info, Indent, VarNamePrint, ModuleInfo, PredId, PredInfo,
     proc_info_get_structure_sharing(ProcInfo, MaybeStructureSharing),
     proc_info_get_structure_reuse(ProcInfo, MaybeStructureReuse),
     proc_info_get_rtti_varmaps(ProcInfo, RttiVarMaps),
+    proc_info_get_cse_nopull_contexts(ProcInfo, CseNoPullContexts),
     proc_info_get_eval_method(ProcInfo, EvalMethod),
     proc_info_get_deleted_call_callees(ProcInfo, DeletedCallCalleeSet),
     proc_info_get_is_address_taken(ProcInfo, IsAddressTaken),
@@ -911,6 +921,8 @@ write_proc(Info, Indent, VarNamePrint, ModuleInfo, PredId, PredInfo,
 
         write_proc_flags(CanProcess, IsAddressTaken,
             HasParallelConj, HasUserEvent, !IO),
+        io.write_string("% cse_nopull_contexts: ", !IO),
+        io.write_line(CseNoPullContexts, !IO),
         write_proc_tabling_info(VarSet, TVarSet, VarNamePrint,
             EvalMethod, MaybeProcTableIOInfo, MaybeCallTableTip, !IO),
         write_proc_deep_profiling_info(VarSet, VarNamePrint,

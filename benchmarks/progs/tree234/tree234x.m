@@ -176,6 +176,10 @@
 :- import_module pair.
 :- import_module require.
 
+:- interface.
+
+    % This should be abstract, but needs to be exported for insts.
+    %
 :- type tree234x(K, V)	--->
 		empty
 	;	two(K, V, tree234x(K, V), tree234x(K, V))
@@ -183,9 +187,8 @@
 	;	four(K, V, K, V, K, V, tree234x(K, V), tree234x(K, V),
 			tree234x(K, V), tree234x(K, V)).
 
-:- interface.
 
-:- inst uniq_tree234x(K, V) ==
+:- inst uniq_tree234x(K, V) for tree234x/2 ==
 	unique((
 		empty
 	;	two(K, V, uniq_tree234x(K, V), uniq_tree234x(K, V))
@@ -195,7 +198,7 @@
 			uniq_tree234x(K, V), uniq_tree234x(K, V))
 	)).
 
-:- inst uniq_tree234x_gg ==
+:- inst uniq_tree234x_gg for tree234x/2 ==
 	unique((
 		empty
 	;	two(ground, ground, uniq_tree234x_gg, uniq_tree234x_gg)
@@ -722,32 +725,32 @@ tree234x__update(Tin, K, V, Tout) :-
 %------------------------------------------------------------------------------%
 %------------------------------------------------------------------------------%
 
-:- inst two(K, V, T) ==
+:- inst two(K, V, T) for tree234x/2  ==
 	bound(
 		two(K, V, T, T)
 	).
 
-:- inst uniq_two(K, V, T) ==
+:- inst uniq_two(K, V, T) for tree234x/2 ==
 	unique(
 		two(K, V, T, T)
 	).
 
-:- inst three(K, V, T) ==
+:- inst three(K, V, T) for tree234x/2 ==
 	bound(
 		three(K, V, K, V, T, T, T)
 	).
 
-:- inst uniq_three(K, V, T) ==
+:- inst uniq_three(K, V, T) for tree234x/2 ==
 	unique(
 		three(K, V, K, V, T, T, T)
 	).
 
-:- inst four(K, V, T) ==
+:- inst four(K, V, T) for tree234x/2 ==
 	bound(
 		four(K, V, K, V, K, V, T, T, T, T)
 	).
 
-:- inst uniq_four(K, V, T) ==
+:- inst uniq_four(K, V, T) for tree234x/2 ==
 	unique(
 		four(K, V, K, V, K, V, T, T, T, T)
 	).

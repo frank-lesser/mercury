@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1994-2012 The University of Melbourne.
-% Copyright (C) 2013-2018 The Mercury team.
+% Copyright (C) 2013-2020 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %---------------------------------------------------------------------------%
@@ -157,6 +157,7 @@
     ;       halt_at_syntax_errors
     ;       halt_at_auto_parallel_failure
     ;       halt_at_invalid_interface
+    ;       print_errors_warnings_when_generating_interface
     ;       warn_singleton_vars
     ;       warn_overlapping_scopes
     ;       warn_det_decls_too_lax
@@ -213,6 +214,7 @@
     ;       inform_inferred_types
     ;       inform_inferred_modes
     ;       inform_suboptimal_packing
+    ;       print_error_spec_id
 
     % Verbosity options
     ;       verbose
@@ -335,11 +337,13 @@
     ;       line_numbers
     ;       line_numbers_around_foreign_code
     ;       line_numbers_for_c_headers
+    ;       type_repns_for_humans
     ;       auto_comments
     ;       frameopt_comments
     ;       max_error_line_width
     ;       show_definitions
     ;       show_definition_line_counts
+    ;       show_definition_extents
     ;       show_local_type_repns
     ;       show_all_type_repns
     ;       show_developer_type_repns
@@ -488,17 +492,14 @@
     ;       link_ssdb_libs
 
     % Data representation compilation model options
-    ;       tags
     ;       num_ptag_bits
     ;       bits_per_word
     ;       bytes_per_word
             % The undocumented conf_low_ptag_bits option is used by the `mmc'
             % script to pass the default value for num_ptag_bits assuming
-            % --tags low. The reason that `mmc' doesn't just pass a default
-            % value for --num-tag-bits is that we want to be able to give an
-            % error message if the user specifies `--tags high' and doesn't
-            % specify `--num-tag-bits'.
-
+            % target_c. The reason that `mmc' doesn't just pass a default
+            % value for --num-ptag-bits is that users need to be able to
+            % override this default when cross compiling.
     ;       conf_low_ptag_bits
     ;       unboxed_float
     ;       unboxed_int64s
@@ -524,7 +525,6 @@
 
     % MLDS back-end compilation model options
     ;       highlevel_code
-    ;       highlevel_data
     ;       det_copy_out
     ;       nondet_copy_out
     ;       put_commit_in_own_func
@@ -921,6 +921,7 @@
     ;       cflags_for_debug
     ;       cflags_for_sanitizers
     ;       cflags_for_pic
+    ;       cflags_for_lto
     ;       c_flag_to_name_object_file
     ;       object_file_extension
     ;       pic_object_file_extension
@@ -1015,6 +1016,7 @@
     ;       linker_opt_separator
     ;       linker_thread_flags
     ;       shlib_linker_thread_flags
+    ;       linker_lto_flags
     ;       linker_static_flags
     ;       linker_strip_flag
     ;       linker_link_lib_flag
@@ -1182,7 +1184,8 @@ option_defaults_2(warning_option, [
     % XXX TYPE_REPN We should set this to "yes" once we require
     % the installed compiler to ensure that what it puts into
     % interface files won't generate any errors.
-    halt_at_invalid_interface           -   bool(no),
+    halt_at_invalid_interface           -   bool(yes),
+    print_errors_warnings_when_generating_interface -   bool(no),
 
     % IMPORTANT NOTE:
     % if you add any new warning options, or if you change the default
@@ -1250,7 +1253,8 @@ option_defaults_2(warning_option, [
     inform_inferred                     -   bool_special,
     inform_inferred_types               -   bool(yes),
     inform_inferred_modes               -   bool(yes),
-    inform_suboptimal_packing           -   bool(no)
+    inform_suboptimal_packing           -   bool(no),
+    print_error_spec_id                 -   bool(no)
 ]).
 option_defaults_2(verbosity_option, [
     % Verbosity Options
@@ -1355,11 +1359,13 @@ option_defaults_2(aux_output_option, [
     line_numbers                        -   bool(no),
     line_numbers_around_foreign_code    -   bool(yes),
     line_numbers_for_c_headers          -   bool(no),
+    type_repns_for_humans               -   bool(no),
     auto_comments                       -   bool(no),
     frameopt_comments                   -   bool(no),
     max_error_line_width                -   maybe_int(yes(79)),
     show_definitions                    -   bool(no),
     show_definition_line_counts         -   bool(no),
+    show_definition_extents             -   bool(no),
     show_local_type_repns               -   bool(no),
     show_all_type_repns                 -   bool(no),
     show_developer_type_repns           -   bool(no),
@@ -1473,7 +1479,6 @@ option_defaults_2(compilation_model_option, [
     link_ssdb_libs                      -   bool(no),
 
     % Data representation compilation model options
-    tags                                -   string("low"),
     num_ptag_bits                        -   int(-1),
                                         % -1 is a special value which means
                                         % use the value of conf_low_ptag_bits
@@ -1517,7 +1522,6 @@ option_defaults_2(compilation_model_option, [
 
     % MLDS back-end compilation model options
     highlevel_code                      -   bool(no),
-    highlevel_data                      -   bool(no),
     det_copy_out                        -   bool(no),
     nondet_copy_out                     -   bool(no),
     put_commit_in_own_func              -   bool(no),
@@ -1853,6 +1857,7 @@ option_defaults_2(target_code_compilation_option, [
     cflags_for_threads                  -   string(""),
     cflags_for_debug                    -   string("-g"),
     cflags_for_pic                      -   string(""),
+    cflags_for_lto                      -   string(""),
     c_flag_to_name_object_file          -   string("-o "),
     object_file_extension               -   string(".o"),
     pic_object_file_extension           -   string(".o"),
@@ -1963,6 +1968,7 @@ option_defaults_2(link_option, [
     shlib_linker_trace_flags            -   string(""),
     linker_thread_flags                 -   string(""),
     shlib_linker_thread_flags           -   string(""),
+    linker_lto_flags                    -   string(""),
     linker_static_flags                 -   string("-static"),
     linker_strip_flag                   -   string("-s"),
     linker_link_lib_flag                -   string("-l"),
@@ -2102,6 +2108,8 @@ long_option("halt-at-warn",             halt_at_warn).
 long_option("halt-at-syntax-errors",    halt_at_syntax_errors).
 long_option("halt-at-auto-parallel-failure", halt_at_auto_parallel_failure).
 long_option("halt-at-invalid-interface",    halt_at_invalid_interface).
+long_option("print-errors-warnings-when-generating-interface",
+                    print_errors_warnings_when_generating_interface).
 long_option("warn-singleton-variables", warn_singleton_vars).
 long_option("warn-singleton-vars",      warn_singleton_vars).
 long_option("warn-overlapping-scopes",  warn_overlapping_scopes).
@@ -2181,6 +2189,7 @@ long_option("inform-inferred",          inform_inferred).
 long_option("inform-inferred-types",    inform_inferred_types).
 long_option("inform-inferred-modes",    inform_inferred_modes).
 long_option("inform-suboptimal-packing",    inform_suboptimal_packing).
+long_option("print-error-spec-id",      print_error_spec_id).
 
 % verbosity options
 long_option("verbose",                  verbose).
@@ -2318,11 +2327,13 @@ long_option("line-numbers",             line_numbers).
 long_option("line-numbers-around-foreign-code",
                                         line_numbers_around_foreign_code).
 long_option("line-numbers-for-c-headers", line_numbers_for_c_headers).
+long_option("type-repns-for-humans",    type_repns_for_humans).
 long_option("auto-comments",            auto_comments).
 long_option("frameopt-comments",        frameopt_comments).
 long_option("max-error-line-width",     max_error_line_width).
 long_option("show-definitions",         show_definitions).
 long_option("show-definition-line-counts",  show_definition_line_counts).
+long_option("show-definition-extents",  show_definition_extents).
 long_option("show-all-type-repns",              show_all_type_repns).
 long_option("show-all-type-representations",    show_all_type_repns).
 long_option("show-local-type-repns",            show_local_type_repns).
@@ -2462,7 +2473,6 @@ long_option("minimal-model-debug",  minimal_model_debug).
 long_option("pregenerated-dist",    pregenerated_dist).
 long_option("single-prec-float",    single_prec_float).
 long_option("single-precision-float",   single_prec_float).
-long_option("tags",                 tags).
 long_option("num-tag-bits",         num_ptag_bits). % for historical reasons
 long_option("num-ptag-bits",        num_ptag_bits).
 long_option("bits-per-word",        bits_per_word).
@@ -2484,8 +2494,6 @@ long_option("allow-packing-remote-sectags", allow_packing_remote_sectags).
 long_option("allow-packing-mini-types",     allow_packing_mini_types).
 long_option("allow-packed-unify-compare",   allow_packed_unify_compare).
 long_option("sync-term-size",       sync_term_size).
-long_option("highlevel-data",       highlevel_data).
-long_option("high-level-data",      highlevel_data).
 % LLDS back-end compilation model options
 long_option("gcc-non-local-gotos",  gcc_non_local_gotos).
 long_option("gcc-global-registers", gcc_global_registers).
@@ -2889,6 +2897,7 @@ long_option("cflags-for-threads",   cflags_for_threads).
 long_option("cflags-for-debug",     cflags_for_debug).
 long_option("cflags-for-sanitizers", cflags_for_sanitizers).
 long_option("cflags-for-pic",       cflags_for_pic).
+long_option("cflags-for-lto",       cflags_for_lto).
 long_option("c-flag-to-name-object-file", c_flag_to_name_object_file).
 long_option("object-file-extension",    object_file_extension).
 long_option("pic-object-file-extension", pic_object_file_extension).
@@ -2997,6 +3006,7 @@ long_option("linker-trace-flags",   linker_trace_flags).
 long_option("shlib-linker-trace-flags", shlib_linker_trace_flags).
 long_option("linker-thread-flags",  linker_thread_flags).
 long_option("shlib-linker-thread-flags", shlib_linker_thread_flags).
+long_option("linker-lto-flags",     linker_lto_flags).
 long_option("linker-static-flags",  linker_static_flags).
 long_option("linker-strip-flag",    linker_strip_flag).
 long_option("linker-link-lib-flag", linker_link_lib_flag).
@@ -3119,6 +3129,18 @@ long_option("simplest-msg-2019-09-22",
 long_option("unqual-foreign-enums-in-int-files-2019-10-04",
                                     compiler_sufficiently_recent).
 long_option("obsolete-proc-2019-10-23",
+                                    compiler_sufficiently_recent).
+long_option("type-repn-int3-2020-03-22",
+                                    compiler_sufficiently_recent).
+long_option("github-85--2020-03-24",
+                                    compiler_sufficiently_recent).
+long_option("foreign-proc-typeinfo-2020-04-08",
+                                    compiler_sufficiently_recent).
+long_option("ushift-2020-04-30",
+                                    compiler_sufficiently_recent).
+long_option("unsigned_lt-2020-05-02",
+                                    compiler_sufficiently_recent).
+long_option("format-uint-2020-05-23",
                                     compiler_sufficiently_recent).
 long_option("experiment",           experiment).
 long_option("experiment1",          experiment1).
@@ -3848,14 +3870,18 @@ options_help_warning -->
         "\tThis option causes the compiler to halt immediately",
         "\tafter syntax checking and not do any semantic checking",
         "\tif it finds any syntax errors in the program.",
+%       "--halt-at-auto-parallel-failure",
+%       "\tThis option causes the compiler to halt if it cannot perform",
+%       "\tan auto-parallelization requested by a feedback file.",
 % --halt-at-invalid-interface is a temporary developer-only option.
 %       "--halt-at-invalid-interface",
 %       "\tThis option causes the compiler to halt immediately",
 %       "\tif it finds that an automatically generated interface file",
 %       "\thas invalid contents.",
-%       "--halt-at-auto-parallel-failure",
-%       "\tThis option causes the compiler to halt if it cannot perform",
-%       "\tan auto-parallelization requested by a feedback file.",
+        "--print-errors-warnings-when-generating-interface",
+        "\tPrint error and/or warning messages about problems with a module",
+        "\tnot just when the module is compiled, but also when its",
+        "\tinterface files are generated, if the problem is visible then.",
         "--no-warn-accumulator-swaps",
         "\tDo not warn about argument order rearrangement caused",
         "\tby `--introduce-accumulators'.",
@@ -3951,9 +3977,9 @@ options_help_warning -->
         "--no-warn-undefined-options-variables",
         "\tDo not warn about references to undefined variables in",
         "\toptions files with `--make'.",
-%       "--warn-suspicious-recursion",
-%       "\tWarn about recursive calls which are likely to have problems,",
-%       "\tsuch as leading to infinite recursion.",
+        "--warn-suspicious-recursion",
+        "\tWarn about recursive calls which are likely to have problems,",
+        "\tsuch as leading to infinite recursion.",
 % These are the internal options that implement --warn-non-tail-recursion.
 %       "--warn-non-tail-recursion-self",
 %       "\tWarn about any self recursive calls that are not tail recursive.",
@@ -4041,6 +4067,9 @@ options_help_warning -->
         "--inform-suboptimal-packing",
         "\tGenerate messages if the arguments of a data constructor",
         "\tcould be packed more tightly if they were reordered."
+%       "--print-error-spec-id",
+%       "\tAfter each error message printed, print its id, which",
+%       "\tby convention is the $pred of the code that constructs it."
     ]).
 
 :- pred options_help_verbosity(io::di, io::uo) is det.
@@ -4422,6 +4451,10 @@ options_help_aux_output -->
         "\trecompilations of other modules if any of these line numbers",
         "\tchanges (e.g. because the location of a predicate declaration",
         "\tchanges in the Mercury source file).",
+% This option is for developers only.
+%       "--type-repns-for-humans",
+%       "\tFormat type_repn items in automatically generated interface files",
+%       "\tto be more easily read by humans.",
         "--auto-comments",
         "\tOutput comments in the generated target language file.",
 % This option is for developers only. Since it can include one C comment inside
@@ -4434,10 +4467,22 @@ options_help_aux_output -->
         "\tSet the maximum width of an error message line to <n> characters",
         "\t(unless a long single word forces the line over this limit).",
         "\tSpecifying --no-max-error-line-width removes the limit.",
+        "--show-definitions",
+        "\tWrite out a list of the types, insts, modes, predicates, functions",
+        "\ttypeclasses and instances defined in the module to",
+        "\t`<module>.defns'.",
         "--show-definition-line-counts",
         "\tWrite out a list of the predicates and functions defined in",
         "\tthe module, together with the names of the files containing them",
         "\tand their approximate line counts, to `<module>.defn_line_counts'.",
+        "\tThe list will be ordered on the names and arities of the",
+        "\tpredicates and functions.",
+        "--show-definition-extents",
+        "\tWrite out a list of the predicates and functions defined in",
+        "\tthe module, together with the approximate line numbers of their",
+        "\tfirst and last lines, to `<module>.defn_extents'.",
+        "\tThe list will be ordered on the starting line numbers",
+        "\tof the predicates and functions.",
         "--show-local-type-representations",
         "\tWrite out information about the representations of all types",
         "\tdefined in the module being compiled to `<module>.type_repns'.",
@@ -4929,9 +4974,8 @@ options_help_compilation_model -->
         "\tThis option is not yet supported for the C#, Java",
         "\tor Erlang back-ends.",
         "--trail-segments\t\t\t(grade modifier: `.trseg')",
-        "\tAs above, but use a dynamically sized trail that is composed",
-        "\tof small segments. This can help to avoid trail exhaustion",
-        "\tat the cost of increased execution time.",
+        "\tThis option is deprecated as trail segments are now used by",
+        "\tdefault. The `.trseg' grade modifier is a synonym for `.tr'.",
         "--parallel\t\t(grade modifier: `.par')",
         "\tEnable parallel execution support for the low-level C grades.",
         "\tEnable concurrency (via pthreads) for the high-level C grades.",
@@ -5047,12 +5091,12 @@ options_help_compilation_model -->
     io.write_string("\n    Developer compilation model options:\n"),
     io.write_string("\n      Data representation\n"),
     write_tabbed_lines([
-        "--tags {none, low, high}      (This option is not for general use.)",
-        "\tSpecify whether to use the low bits or the high bits of",
-        "\teach word as tag bits (default: low).",
-    %   "\t\t`--tags none' implies `--num-tag-bits 0'.",
-        "--num-tag-bits <n>            (This option is not for general use.)",
-        "\tUse <n> tag bits."
+        "--num-ptag-bits <n>           (This option is not for general use.)",
+        "\tUse <n> primary tag bits."
+        % Normally, The --num-tag-bits option is used only by the compiler.
+        % By default, its value is set to the value of the --conf-low-tag-bits
+        % option when targeting C, and to zero when targeting other languages.
+        % Its only legitimate use is for cross-compilation.
 
         % The --conf-low-tag-bits option is reserved for use
         % by the `mmc' script; it is deliberately not documented.
@@ -5073,13 +5117,13 @@ options_help_compilation_model -->
 %       "\t`-DMR_USE_SINGLE_PREC_FLOAT', if double precision",
 %       "\tfloats don't fit into a word."
 
-%        % This is a developer only option.
-%        "--unboxed-int64s",
-%        "(This option is not for general use.)",
-%        "\tDo not box 64-bit integer numbers",
-%        "\tThis assumes that word size of the target machine is at least",
-%        "\t64-bits in size.",
-%        "\tThe C code needs to be compiled with `-UMR_BOXED_INT64S'.",
+%       % This is a developer only option.
+%       "--unboxed-int64s",
+%       "(This option is not for general use.)",
+%       "\tDo not box 64-bit integer numbers",
+%       "\tThis assumes that word size of the target machine is at least",
+%       "\t64-bits in size.",
+%       "\tThe C code needs to be compiled with `-UMR_BOXED_INT64S'.",
 
         % This is a developer only option.
 %       "--no-unboxed-no-tag-types",
@@ -5911,7 +5955,7 @@ options_help_target_code_compilation -->
         % not documented.
 
         % The --cflags-for-regs, --cflags-for-gotos,
-        % --cflags-for-threads, --cflags-for-pic,
+        % --cflags-for-threads, --cflags-for-pic, --cflags-for-lto,
         % --cflags-for-warnings, --cflags-for-ansi,
         % --cflags-for-optimization, --cflags-for-sanitizers,
         % --c-flag-to-name-object-file,
@@ -6131,7 +6175,7 @@ options_help_link -->
         % --hwloc-libs, --hwloc-static-libs,
         % --linker-opt-separator,
         % --linker-debug-flags, --shlib-linker-debug-flags,
-        % --linker-sanitizer-flags,
+        % --linker-sanitizer-flags, --linker-lto-flags
         % --linker-trace-flags, --shlib-linker-trace-flags,
         % --linker-thread-flags, --shlib-linker-thread-flags,
         % --linker-static-flags, --linker-strip-flag,

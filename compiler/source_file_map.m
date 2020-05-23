@@ -2,6 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %-----------------------------------------------------------------------------%
 % Copyright (C) 2002-2009, 2011 The University of Melbourne.
+% Copyright (C) 2014-2015, 2019-2020 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %-----------------------------------------------------------------------------%
@@ -29,19 +30,27 @@
 :- import_module bool.
 :- import_module io.
 :- import_module list.
+:- import_module maybe.
 
 %-----------------------------------------------------------------------------%
 
-    % lookup_module_source_file(ModuleName, FileName, !IO)
+    % lookup_module_source_file(ModuleName, MaybeFileName, !IO)
+    % Return `yes(FileName)' if FileName is the source file for ModuleName,
+    % either through the source file map, or by default. Return `no' if no
+    % source file is available for ModuleName because the default file name
+    % is mapped to another module.
     %
-:- pred lookup_module_source_file(module_name::in, file_name::out,
+:- pred lookup_module_source_file(module_name::in, maybe(file_name)::out,
+    io::di, io::uo) is det.
+
+:- pred lookup_source_file_module(file_name::in, maybe(module_name)::out,
     io::di, io::uo) is det.
 
     % Return `yes' if there is a valid Mercury.modules file.
     %
 :- pred have_source_file_map(bool::out, io::di, io::uo) is det.
 
-    % Return the default fully-qualified source file name.
+    % Return the default fully qualified source file name.
     %
 :- func default_source_file(module_name) = file_name.
 
@@ -59,31 +68,61 @@
 :- import_module parse_tree.find_module.
 :- import_module parse_tree.prog_out.
 
+:- import_module bimap.
 :- import_module char.
 :- import_module dir.
-:- import_module map.
-:- import_module maybe.
 :- import_module string.
 
 %-----------------------------------------------------------------------------%
 
-lookup_module_source_file(ModuleName, FileName, !IO) :-
+lookup_module_source_file(ModuleName, MaybeFileName, !IO) :-
     get_source_file_map(SourceFileMap, !IO),
-    ( if map.search(SourceFileMap, ModuleName, FileName0) then
-        FileName = FileName0
+    ( if bimap.search(SourceFileMap, ModuleName, FileName) then
+        MaybeFileName = yes(FileName)
     else
-        FileName = default_source_file(ModuleName)
+        DefaultFileName = default_source_file(ModuleName),
+        ( if bimap.reverse_search(SourceFileMap, _, DefaultFileName) then
+            MaybeFileName = no
+        else
+            MaybeFileName = yes(DefaultFileName)
+        )
+    ).
+
+lookup_source_file_module(FileName, MaybeModuleName, !IO) :-
+    get_source_file_map(SourceFileMap, !IO),
+    ( if bimap.reverse_search(SourceFileMap, ModuleName, FileName) then
+        MaybeModuleName = yes(ModuleName)
+    else
+        ( if default_module_name_for_file(FileName, DefaultModuleName) then
+            ( if bimap.search(SourceFileMap, DefaultModuleName, _) then
+                MaybeModuleName = no
+            else
+                MaybeModuleName = yes(DefaultModuleName)
+            )
+        else
+            MaybeModuleName = no
+        )
     ).
 
 have_source_file_map(HaveMap, !IO) :-
     get_source_file_map(SourceFileMap, !IO),
-    ( if map.is_empty(SourceFileMap) then
+    ( if bimap.is_empty(SourceFileMap) then
         HaveMap = no
     else
         HaveMap = yes
     ).
 
 default_source_file(ModuleName) = sym_name_to_string(ModuleName) ++ ".m".
+
+    % If the file name ends in ".m", return the module name whose
+    % default file name that would be.
+    %
+:- pred default_module_name_for_file(file_name::in, module_name::out)
+    is semidet.
+
+default_module_name_for_file(FileName, DefaultModuleName) :-
+    string.remove_suffix(FileName, ".m", FileNameBeforeDotM),
+    file_name_to_module_name(FileNameBeforeDotM, DefaultModuleName).
 
     % Read the Mercury.modules file (if it exists) to find the mapping
     % from module name to file name.
@@ -101,13 +140,13 @@ get_source_file_map(SourceFileMap, !IO) :-
         (
             OpenRes = ok(Stream),
             io.set_input_stream(Stream, OldStream, !IO),
-            read_source_file_map([], map.init, SourceFileMap, !IO),
+            read_source_file_map([], bimap.init, SourceFileMap, !IO),
             io.set_input_stream(OldStream, _, !IO),
             io.close_input(Stream, !IO)
         ;
             OpenRes = error(_),
             % If the file doesn't exist, then the mapping is empty.
-            SourceFileMap = map.init
+            SourceFileMap = bimap.init
         ),
         globals.io_set_maybe_source_file_map(yes(SourceFileMap), !IO)
     ).
@@ -125,7 +164,7 @@ read_source_file_map(ModuleChars, !Map, !IO) :-
         (
             FileNameCharsResult = ok(FileNameChars),
             string.from_rev_char_list(FileNameChars, FileName),
-            map.set(ModuleName, FileName, !Map),
+            bimap.set(ModuleName, FileName, !Map),
             read_source_file_map(ModuleChars, !Map, !IO)
         ;
             FileNameCharsResult = eof,
@@ -183,20 +222,18 @@ write_source_file_map(Globals, FileNames, !IO) :-
     (
         OpenRes = ok(Stream),
         list.foldl2(write_source_file_map_2(Globals, Stream), FileNames,
-            map.init, _, !IO),
+            bimap.init, _, !IO),
         io.close_output(Stream, !IO)
     ;
         OpenRes = error(Error),
-        io.set_exit_status(1, !IO),
-        io.write_string("mercury_compile: error opening `", !IO),
-        io.write_string(ModulesFileName, !IO),
-        io.write_string("' for output: ", !IO),
-        io.write_string(io.error_message(Error), !IO)
+        io.format("mercury_compile: error opening `%s' for output: %s",
+            [s(ModulesFileName), s(io.error_message(Error))], !IO),
+        io.set_exit_status(1, !IO)
     ).
 
 :- pred write_source_file_map_2(globals::in, io.output_stream::in,
     file_name::in,
-    map(module_name, file_name)::in, map(module_name, file_name)::out,
+    bimap(module_name, file_name)::in, bimap(module_name, file_name)::out,
     io::di, io::uo) is det.
 
 write_source_file_map_2(Globals, MapStream, FileName,
@@ -205,20 +242,17 @@ write_source_file_map_2(Globals, MapStream, FileName,
     (
         MaybeModuleName = yes(ModuleName),
         ( if
-            map.search(SeenModules0, ModuleName, PrevFileName),
+            bimap.search(SeenModules0, ModuleName, PrevFileName),
             PrevFileName \= FileName
         then
-            io.write_string("mercury_compile: module `", !IO),
-            io.write_string(sym_name_to_string(ModuleName), !IO),
-            io.write_string("' defined in multiple files: ", !IO),
-            io.write_string(PrevFileName, !IO),
-            io.write_string(", ", !IO),
-            io.write_string(FileName, !IO),
-            io.write_string(".\n", !IO),
+            io.format("mercury_compile: module `%s' " ++
+                "defined in multiple files: %s, %s\n.",
+                [s(sym_name_to_string(ModuleName)),
+                s(PrevFileName), s(FileName)], !IO),
             io.set_exit_status(1, !IO),
             SeenModules = SeenModules0
         else
-            map.set(ModuleName, FileName, SeenModules0, SeenModules)
+            bimap.set(ModuleName, FileName, SeenModules0, SeenModules)
         ),
         ( if string.remove_suffix(FileName, ".m", PartialFileName0) then
             PartialFileName = PartialFileName0

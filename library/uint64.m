@@ -167,13 +167,13 @@
 
     % Truncating integer division.
     %
-    % Throws a `math.domain_error' exception if the right operand is zero.
+    % Throws a `domain_error' exception if the right operand is zero.
     %
 :- func (uint64::in) div (uint64::in) = (uint64::uo) is det.
 
     % Truncating integer division.
     %
-    % Throws a `math.domain_error' exception if the right operand is zero.
+    % Throws a `domain_error' exception if the right operand is zero.
     %
 :- func (uint64::in) // (uint64::in) = (uint64::uo) is det.
 
@@ -189,14 +189,14 @@
     % Modulus.
     % X mod Y = X - (X div Y) * Y
     %
-    % Throws a `math.domain_error' exception if the right operand is zero.
+    % Throws a `domain_error' exception if the right operand is zero.
     %
 :- func (uint64::in) mod (uint64::in) = (uint64::uo) is det.
 
     % Remainder.
     % X rem Y = X - (X // Y) * Y.
     %
-    % Throws a `math.domain_error/` exception if the right operand is zero.
+    % Throws a `domain_error/` exception if the right operand is zero.
     %
 :- func (uint64::in) rem (uint64::in) = (uint64::uo) is det.
 
@@ -584,7 +584,7 @@ X div Y = X // Y.
 :- pragma inline('//'/2).
 X // Y = Div :-
     ( if Y = 0u64 then
-        throw(math.domain_error("uint64.'//': division by zero"))
+        throw(domain_error("uint64.'//': division by zero"))
     else
         Div = unchecked_quotient(X, Y)
     ).
@@ -599,7 +599,7 @@ X mod Y = X rem Y.
 :- pragma inline(rem/2).
 X rem Y = Rem :-
     ( if Y = 0u64 then
-        throw(math.domain_error("uint64.rem: division by zero"))
+        throw(domain_error("uint64.rem: division by zero"))
     else
         Rem = unchecked_rem(X, Y)
     ).
@@ -621,7 +621,7 @@ X << Y = Result :-
         Result = unchecked_left_shift(X, Y)
     else
         Msg = "uint64.(<<): second operand is out of range",
-        throw(math.domain_error(Msg))
+        throw(domain_error(Msg))
     ).
 
 X >> Y = Result :-
@@ -629,7 +629,7 @@ X >> Y = Result :-
         Result = unchecked_right_shift(X, Y)
     else
         Msg = "uint64.(>>): second operand is out of range",
-        throw(math.domain_error(Msg))
+        throw(domain_error(Msg))
     ).
 
 %---------------------------------------------------------------------------%
@@ -647,7 +647,8 @@ num_zeros(U) = 64 - num_ones(U).
     N = __builtin_popcountl(U);
 #else
     U = U - ((U >> 1) & UINT64_C(0x5555555555555555));
-    U = (U & UINT64_C(0x3333333333333333)) + ((U >> 2) & UINT64_C(0x3333333333333333));
+    U = (U & UINT64_C(0x3333333333333333)) +
+        ((U >> 2) & UINT64_C(0x3333333333333333));
     U = (U + (U >> 4)) & UINT64_C(0x0f0f0f0f0f0f0f0f);
     U = U + (U >> 8);
     U = U + (U >> 16);

@@ -206,7 +206,7 @@
     % current compilation grade to the given stream.
     % This predicate is used to implement the `--output-grade-defines' option.
     %
-:- pred output_grade_defines(globals::in, io.output_stream::in,
+:- pred output_c_grade_defines(globals::in, io.output_stream::in,
     io::di, io::uo) is det.
 
     % Output the C compiler flags that specify where the C compiler should
@@ -300,7 +300,7 @@ gather_c_compiler_flags(Globals, PIC, AllCFlags) :-
 
     gather_c_include_dir_flags(Globals, InclOpt),
     get_framework_directories(Globals, FrameworkInclOpt),
-    gather_grade_defines(Globals, GradeDefinesOpts),
+    gather_c_grade_defines(Globals, GradeDefinesOpts),
 
     globals.lookup_bool_option(Globals, gcc_global_registers, GCC_Regs),
     (
@@ -336,6 +336,7 @@ gather_c_compiler_flags(Globals, PIC, AllCFlags) :-
         PIC = non_pic,
         CFLAGS_FOR_PIC = ""
     ),
+    globals.lookup_string_option(Globals, cflags_for_lto, CFLAGS_FOR_LTO),
     globals.lookup_bool_option(Globals, target_debug, Target_Debug),
     (
         Target_Debug = yes,
@@ -348,6 +349,7 @@ gather_c_compiler_flags(Globals, PIC, AllCFlags) :-
     ),
     globals.lookup_string_option(Globals, cflags_for_sanitizers,
         SanitizerOpts),
+    globals.get_c_compiler_type(Globals, C_CompilerType),
     globals.lookup_bool_option(Globals, use_trail, UseTrail),
     (
         UseTrail = yes,
@@ -361,7 +363,6 @@ gather_c_compiler_flags(Globals, PIC, AllCFlags) :-
         % Note that this will also affect the untagged version of the trail,
         % but that shouldn't matter.
         %
-        globals.get_c_compiler_type(Globals, C_CompilerType),
         (
             C_CompilerType = cc_gcc(_, _, _),
             globals.lookup_int_option(Globals, bytes_per_word, BytesPerWord),
@@ -433,7 +434,7 @@ gather_c_compiler_flags(Globals, PIC, AllCFlags) :-
     globals.lookup_string_option(Globals, target_arch, TargetArch),
     ( if
         globals.lookup_bool_option(Globals, highlevel_code, no),
-        globals.lookup_bool_option(Globals, gcc_global_registers, yes),
+        GCC_Regs = yes,
         string.prefix(TargetArch, "powerpc-apple-darwin")
     then
         AppleGCCRegWorkaroundOpt = "-fno-loop-optimize "
@@ -441,12 +442,33 @@ gather_c_compiler_flags(Globals, PIC, AllCFlags) :-
         AppleGCCRegWorkaroundOpt = ""
     ),
 
-    % Workaround performance problem(s) with gcc that causes the C files
-    % generated in debugging grades to compile very slowly at -O1 and above.
-    % (Changes here need to be reflected in scripts/mgnuc.in.)
+    % Last resort workarounds for C compiler bugs.
+    % Changes here need to be reflected in scripts/mgnuc.in.
+    %
+    globals.lookup_bool_option(Globals, exec_trace, ExecTrace),
     ( if
-        globals.lookup_bool_option(Globals, exec_trace, yes),
-        arch_is_apple_darwin(TargetArch)
+        % We need to disable C compiler optimizations in debugging grades
+        % in either of the two situations described below.
+        ExecTrace = yes,
+        (
+            % 1. On Apple Darwin systems there are performance problems with
+            % GCC that cause it to compile the C files generated in debugging
+            % grades very slowly at -O1 or greater.
+            %
+            % XXX we are also enabling this for clang; does it have the
+            % same performance problems?
+            %
+            arch_is_apple_darwin(TargetArch)
+        ;
+            % 2. There is a bug in GCC 9.[12] that results in an internal error
+            % in the LRA pass when compiling generated C files in debugging
+            % grades that also use global registers on x86_64 machines.
+            % See: <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=91430>
+            %
+            GCC_Regs = yes,
+            C_CompilerType = cc_gcc(yes(9), _, _),
+            string.prefix(TargetArch, "x86_64")
+        )
     then
         OverrideOpts = "-O0"
     else
@@ -473,6 +495,7 @@ gather_c_compiler_flags(Globals, PIC, AllCFlags) :-
         GradeDefinesOpts,
         CFLAGS_FOR_REGS, " ", CFLAGS_FOR_GOTOS, " ",
         CFLAGS_FOR_THREADS, " ", CFLAGS_FOR_PIC, " ",
+        CFLAGS_FOR_LTO, " ",
         Target_DebugOpt,
         SanitizerOpts, " ",
         TypeLayoutOpt,
@@ -487,9 +510,9 @@ gather_c_compiler_flags(Globals, PIC, AllCFlags) :-
 
 %-----------------------------------------------------------------------------%
 
-:- pred gather_grade_defines(globals::in, string::out) is det.
+:- pred gather_c_grade_defines(globals::in, string::out) is det.
 
-gather_grade_defines(Globals, GradeDefines) :-
+gather_c_grade_defines(Globals, GradeDefines) :-
     globals.lookup_bool_option(Globals, highlevel_code, HighLevelCode),
     (
         HighLevelCode = yes,
@@ -497,14 +520,6 @@ gather_grade_defines(Globals, GradeDefines) :-
     ;
         HighLevelCode = no,
         HighLevelCodeOpt = ""
-    ),
-    globals.lookup_bool_option(Globals, highlevel_data, HighLevelData),
-    (
-        HighLevelData = yes,
-        HighLevelDataOpt = "-DMR_HIGHLEVEL_DATA "
-    ;
-        HighLevelData = no,
-        HighLevelDataOpt = ""
     ),
     globals.lookup_bool_option(Globals, gcc_global_registers, GCC_Regs),
     (
@@ -687,19 +702,10 @@ gather_grade_defines(Globals, GradeDefines) :-
     globals.lookup_bool_option(Globals, use_trail, UseTrail),
     (
         UseTrail = yes,
-        UseTrailOpt = "-DMR_USE_TRAIL ",
-        globals.lookup_bool_option(Globals, trail_segments, TrailSegments),
-        (
-            TrailSegments = yes,
-            TrailSegOpt = "-DMR_TRAIL_SEGMENTS "
-        ;
-            TrailSegments = no,
-            TrailSegOpt = ""
-        )
+        UseTrailOpt = "-DMR_USE_TRAIL "
     ;
         UseTrail = no,
-        UseTrailOpt = "",
-        TrailSegOpt = ""
+        UseTrailOpt = ""
     ),
     globals.lookup_bool_option(Globals, use_minimal_model_stack_copy,
         MinimalModelStackCopy),
@@ -784,13 +790,11 @@ gather_grade_defines(Globals, GradeDefines) :-
     ),
     string.append_list([
         HighLevelCodeOpt,
-        HighLevelDataOpt,
         RegOpt, GotoOpt, AsmOpt,
         ParallelOpt,
         ThreadscopeOpt,
         GC_Opt,
-        ProfileCallsOpt, ProfileTimeOpt,
-        ProfileMemoryOpt, ProfileDeepOpt,
+        ProfileCallsOpt, ProfileTimeOpt, ProfileMemoryOpt, ProfileDeepOpt,
         RecordTermSizesOpt,
         NumPtagBitsOpt,
         ExtendOpt,
@@ -798,7 +802,6 @@ gather_grade_defines(Globals, GradeDefines) :-
         SourceDebugOpt,
         ExecTraceOpt,
         UseTrailOpt,
-        TrailSegOpt,
         MinimalModelOpt,
         PregeneratedDistOpt,
         SinglePrecFloatOpt,
@@ -1032,12 +1035,10 @@ compile_csharp_file(Globals, ErrorStream, ModuleAndImports,
     else
         Prefix = "-r:"
     ),
-    module_and_imports_get_foreign_import_modules(ModuleAndImports,
-        ForeignImportModules),
+    module_and_imports_get_c_j_cs_e_fims(ModuleAndImports, CJCsEFIMs),
     ForeignDeps = list.map(
         (func(FI) = fim_spec_module_name_from_module(FI, ModuleName)),
-        set.to_sorted_list(
-            get_all_fim_specs(ForeignImportModules))),
+        set.to_sorted_list(get_all_fim_specs(CJCsEFIMs))),
     module_and_imports_get_int_deps_set(ModuleAndImports, IntDeps),
     module_and_imports_get_imp_deps_set(ModuleAndImports, ImpDeps),
     set.union(IntDeps, ImpDeps, IntImpDeps),
@@ -1338,7 +1339,7 @@ do_make_init_obj_file(Globals, ErrorStream, MustCompile, ModuleName,
     module_name_to_file_name(Globals, do_create_dirs, "_init" ++ ObjExt,
         ModuleName, InitObjFileName, !IO),
     CompileCInitFile =
-        (pred(InitTargetFileName::in, Res::out, IO0::di, IO::uo) is det :-
+        ( pred(InitTargetFileName::in, Res::out, IO0::di, IO::uo) is det :-
             do_compile_c_file(Globals, ErrorStream, PIC, InitTargetFileName,
                 InitObjFileName, Res, IO0, IO)
         ),
@@ -1380,7 +1381,7 @@ make_erlang_program_init_file(Globals, ErrorStream, ModuleName, ModuleNames,
     module_name_to_file_name(Globals, do_create_dirs, "_init.beam",
         ModuleName, InitObjFileName, !IO),
     CompileErlangInitFile =
-        (pred(InitTargetFileName::in, Res::out, IO0::di, IO::uo) is det :-
+        ( pred(InitTargetFileName::in, Res::out, IO0::di, IO::uo) is det :-
             compile_erlang_file(Globals, ErrorStream, InitTargetFileName, Res,
                 IO0, IO)
         ),
@@ -1631,7 +1632,7 @@ link_module_list(Modules, ExtraObjFiles, Globals, Succeeded, !IO) :-
     (
         TargetType = executable,
         list.map(
-            (pred(ModuleStr::in, ModuleName::out) is det :-
+            ( pred(ModuleStr::in, ModuleName::out) is det :-
                 file_name_to_module_name(dir.det_basename(ModuleStr),
                     ModuleName)
             ), Modules, ModuleNames),
@@ -1824,6 +1825,8 @@ link_exe_or_shared_lib(Globals, ErrorStream, LinkTargetType, ModuleName,
         UndefOpt = "",
         ReserveStackSizeOpt = reserve_stack_size_flags(Globals)
     ),
+    
+    globals.lookup_string_option(Globals, linker_lto_flags, LTOOpts),
 
     % Should the executable be stripped?
     globals.lookup_bool_option(Globals, strip, Strip),
@@ -2015,6 +2018,7 @@ link_exe_or_shared_lib(Globals, ErrorStream, LinkTargetType, ModuleName,
                     LinkerStripOpt, " ",
                     UndefOpt, " ",
                     ThreadOpts, " ",
+                    LTOOpts, " ",
                     TraceOpts, " ",
                     ReserveStackSizeOpt, " ",
                     OutputOpt, quote_arg(OutputFileName), " ",
@@ -2867,14 +2871,6 @@ create_csharp_exe_or_lib(Globals, ErrorStream, LinkTargetType, MainModuleName,
     % NOTE: we use the -option style options in preference to the /option
     % style in order to avoid problems with POSIX style shells.
     globals.lookup_string_option(Globals, csharp_compiler, CSharpCompiler),
-    globals.lookup_bool_option(Globals, highlevel_data, HighLevelData),
-    (
-        HighLevelData = yes,
-        HighLevelDataOpt = "-define:MR_HIGHLEVEL_DATA"
-    ;
-        HighLevelData = no,
-        HighLevelDataOpt = ""
-    ),
     globals.lookup_bool_option(Globals, target_debug, Debug),
     (
         Debug = yes,
@@ -2936,7 +2932,6 @@ create_csharp_exe_or_lib(Globals, ErrorStream, LinkTargetType, MainModuleName,
     CmdArgs = string.join_list(" ", [
         NoLogoOpt,
         NoWarnLineNumberOpt,
-        HighLevelDataOpt,
         DebugOpt,
         TargetOption,
         "-out:" ++ OutputFileName,
@@ -3554,9 +3549,9 @@ output_c_compiler_flags(Globals, Stream, !IO) :-
 % Grade defines flags.
 %
 
-output_grade_defines(Globals, Stream, !IO) :-
+output_c_grade_defines(Globals, Stream, !IO) :-
     get_object_code_type(Globals, executable, _PIC),
-    gather_grade_defines(Globals, GradeDefines),
+    gather_c_grade_defines(Globals, GradeDefines),
     io.write_string(Stream, GradeDefines, !IO),
     io.nl(Stream, !IO).
 

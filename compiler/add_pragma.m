@@ -19,60 +19,21 @@
 
 %-----------------------------------------------------------------------------%
 
-:- inst item_pragma_info_inst(I) for item_pragma_info/1
-    --->    item_pragma_info(I, ground, ground).
-
-:- inst pragma_pass_2_inst for pragma_type/0
-    --->    pragma_foreign_decl(ground)
-    ;       pragma_foreign_code(ground)
-    ;       pragma_external_proc(ground)
-    ;       pragma_inline(ground)
-    ;       pragma_no_inline(ground)
-    ;       pragma_consider_used(ground)
-    ;       pragma_unused_args(ground)
-    ;       pragma_exceptions(ground)
-    ;       pragma_trailing_info(ground)
-    ;       pragma_mm_tabling_info(ground)
-    ;       pragma_obsolete_pred(ground)
-    ;       pragma_obsolete_proc(ground)
-    ;       pragma_no_detism_warning(ground)
-    ;       pragma_require_tail_recursion(ground)
-    ;       pragma_promise_eqv_clauses(ground)
-    ;       pragma_promise_pure(ground)
-    ;       pragma_promise_semipure(ground)
-    ;       pragma_terminates(ground)
-    ;       pragma_does_not_terminate(ground)
-    ;       pragma_check_termination(ground)
-    ;       pragma_mode_check_clauses(ground)
-    ;       pragma_require_feature_set(ground).
-
-:- inst pragma_pass_3_inst for pragma_type/0
-    --->    pragma_foreign_proc(ground)
-    ;       pragma_type_spec(ground)
-    ;       pragma_tabled(ground)
-    ;       pragma_fact_table(ground)
-    ;       pragma_oisu(ground)
-    ;       pragma_foreign_proc_export(ground)
-    ;       pragma_termination_info(ground)
-    ;       pragma_termination2_info(ground)
-    ;       pragma_structure_sharing(ground)
-    ;       pragma_structure_reuse(ground).
-
-:- inst ims_pragma_pass_2 ==
-    ims_item(item_pragma_info_inst(pragma_pass_2_inst)).
-:- inst ims_pragma_pass_3 ==
-    ims_item(item_pragma_info_inst(pragma_pass_3_inst)).
-
-%-----------------------------------------------------------------------------%
-
-:- pred add_pass_2_pragmas(
-    list(ims_item(item_pragma_info))::in(list_skel(ims_pragma_pass_2)),
-    module_info::in, module_info::out,
+:- pred add_decl_pragma(ims_item(item_decl_pragma_info)::in,
+    module_info::in, module_info::out, qual_info::in, qual_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-:- pred add_pass_3_pragmas(
-    list(ims_item(item_pragma_info))::in(list_skel(ims_pragma_pass_3)),
+:- pred add_impl_pragma(ims_item(item_impl_pragma_info)::in,
+    list(ims_item(item_tabled))::in, list(ims_item(item_tabled))::out,
     module_info::in, module_info::out, qual_info::in, qual_info::out,
+    list(error_spec)::in, list(error_spec)::out) is det.
+
+:- pred add_impl_pragma_tabled(ims_item(item_tabled)::in,
+    module_info::in, module_info::out, qual_info::in, qual_info::out,
+    list(error_spec)::in, list(error_spec)::out) is det.
+
+:- pred add_gen_pragma(item_generated_pragma_info::in,
+    module_info::in, module_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
 %-----------------------------------------------------------------------------%
@@ -131,44 +92,91 @@
 :- import_module varset.
 
 %-----------------------------------------------------------------------------%
+% XXX CLEANUP reorder the predicates in this module
 
-add_pass_2_pragmas([], !ModuleInfo, !Specs).
-add_pass_2_pragmas([SectionItem | SectionItems], !ModuleInfo, !Specs) :-
-    add_pass_2_pragma(SectionItem, !ModuleInfo, !Specs),
-    add_pass_2_pragmas(SectionItems, !ModuleInfo, !Specs).
-
-add_pass_3_pragmas([], !ModuleInfo, !QualInfo, !Specs).
-add_pass_3_pragmas([SectionItem | SectionItems],
-        !ModuleInfo, !QualInfo, !Specs) :-
-    add_pass_3_pragma(SectionItem, !ModuleInfo, !QualInfo, !Specs),
-    add_pass_3_pragmas(SectionItems, !ModuleInfo, !QualInfo, !Specs).
-
-%-----------------------------------------------------------------------------%
-
-:- pred add_pass_2_pragma(ims_item(item_pragma_info)::in(ims_pragma_pass_2),
-    module_info::in, module_info::out,
-    list(error_spec)::in, list(error_spec)::out) is det.
-
-add_pass_2_pragma(SectionItem, !ModuleInfo, !Specs) :-
+add_decl_pragma(SectionItem, !ModuleInfo, !QualInfo, !Specs) :-
     SectionItem = ims_item(ItemMercuryStatus, ItemPragmaInfo),
-    report_if_pragma_is_wrongly_in_interface(ItemMercuryStatus, ItemPragmaInfo,
-        !Specs),
     ItemPragmaInfo = item_pragma_info(Pragma, Context, _SeqNum),
     (
-        Pragma = pragma_foreign_decl(FDInfo),
+        Pragma = decl_pragma_obsolete_pred(ObsoletePredInfo),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        mark_pred_as_obsolete(ObsoletePredInfo, PredStatus, Context,
+            !ModuleInfo, !Specs)
+    ;
+        Pragma = decl_pragma_obsolete_proc(ObsoleteProcInfo),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        mark_proc_as_obsolete(ObsoleteProcInfo, PredStatus, Context,
+            !ModuleInfo, !Specs)
+    ;
+        Pragma = decl_pragma_type_spec(TypeSpecInfo),
+        add_pragma_type_spec(TypeSpecInfo, Context,
+            !ModuleInfo, !QualInfo, !Specs)
+    ;
+        Pragma = decl_pragma_oisu(OISUInfo),
+        add_pragma_oisu(OISUInfo, ItemMercuryStatus, Context,
+            !ModuleInfo, !Specs)
+    ;
+        Pragma = decl_pragma_terminates(PredNameArity),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        add_pred_marker("terminates", PredNameArity, PredStatus, Context,
+            marker_terminates,
+            [marker_check_termination, marker_does_not_terminate],
+            !ModuleInfo, !Specs)
+    ;
+        Pragma = decl_pragma_does_not_terminate(PredNameArity),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        add_pred_marker("does_not_terminate", PredNameArity, PredStatus,
+            Context, marker_does_not_terminate,
+            [marker_check_termination, marker_terminates], !ModuleInfo, !Specs)
+    ;
+        Pragma = decl_pragma_check_termination(PredNameArity),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        add_pred_marker("check_termination", PredNameArity, PredStatus,
+            Context, marker_check_termination,
+            [marker_terminates, marker_does_not_terminate],
+            !ModuleInfo, !Specs)
+    ;
+        Pragma = decl_pragma_termination_info(TermInfo),
+        add_pragma_termination_info(TermInfo, Context, !ModuleInfo, !Specs)
+    ;
+        Pragma = decl_pragma_termination2_info(Term2Info),
+        add_pragma_termination2_info(Term2Info, Context, !ModuleInfo, !Specs)
+    ;
+        Pragma = decl_pragma_structure_sharing(SharingInfo),
+        add_pragma_structure_sharing(SharingInfo, Context, !ModuleInfo, !Specs)
+    ;
+        Pragma = decl_pragma_structure_reuse(ReuseInfo),
+        add_pragma_structure_reuse(ReuseInfo, Context, !ModuleInfo, !Specs)
+    ).
+
+add_impl_pragma(SectionItem, !RevPragmaTabled,
+        !ModuleInfo, !QualInfo, !Specs) :-
+    SectionItem = ims_item(ItemMercuryStatus, ItemPragmaInfo),
+    ItemPragmaInfo = item_pragma_info(Pragma, Context, SeqNum),
+    (
+        Pragma = impl_pragma_foreign_decl(FDInfo),
         % XXX STATUS Check ItemMercuryStatus
         FDInfo = pragma_info_foreign_decl(Lang, IsLocal, CHeader),
         ForeignDeclCode = foreign_decl_code(Lang, IsLocal, CHeader, Context),
-        module_add_foreign_decl_code(ForeignDeclCode, !ModuleInfo)
+        module_add_foreign_decl_code_user(ForeignDeclCode, !ModuleInfo)
     ;
-        Pragma = pragma_foreign_code(FCInfo),
+        Pragma = impl_pragma_foreign_code(FCInfo),
         % XXX STATUS Check ItemMercuryStatus
         FCInfo = pragma_info_foreign_code(Lang, BodyCode),
         warn_suspicious_foreign_code(Lang, BodyCode, Context, !Specs),
         ForeignBodyCode = foreign_body_code(Lang, BodyCode, Context),
         module_add_foreign_body_code(ForeignBodyCode, !ModuleInfo)
     ;
-        Pragma = pragma_external_proc(ExternalInfo),
+        Pragma = impl_pragma_foreign_proc(FPInfo),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        add_pragma_foreign_proc(FPInfo, PredStatus, Context, yes(SeqNum),
+            !ModuleInfo, !Specs)
+    ;
+        Pragma = impl_pragma_foreign_proc_export(FEInfo),
+        add_pragma_foreign_proc_export(FEInfo, Context,
+            !ModuleInfo, !Specs)
+    ;
+        Pragma = impl_pragma_external_proc(ExternalInfo),
         % XXX STATUS Check ItemMercuryStatus
         ExternalInfo = pragma_info_external_proc(PredSymName, Arity, PorF,
             MaybeBackend),
@@ -202,7 +210,8 @@ add_pass_2_pragma(SectionItem, !ModuleInfo, !Specs) :-
             ),
             (
                 PredIds = [_ | _],
-                list.foldl(mark_pred_as_external, PredIds, !ModuleInfo)
+                list.foldl2(mark_pred_as_external(Context), PredIds,
+                    !ModuleInfo, !Specs)
             ;
                 PredIds = [],
                 module_info_get_preds(!.ModuleInfo, PredTable0),
@@ -215,7 +224,16 @@ add_pass_2_pragma(SectionItem, !ModuleInfo, !Specs) :-
             true
         )
     ;
-        Pragma = pragma_inline(PredSymNameArity),
+        Pragma = impl_pragma_fact_table(FTInfo),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        add_pragma_fact_table(FTInfo, PredStatus, Context, !ModuleInfo, !Specs)
+    ;
+        Pragma = impl_pragma_tabled(TabledInfo),
+        ItemPragmaTabledInfo = item_pragma_info(TabledInfo, Context, SeqNum),
+        TabledSectionItem = ims_item(ItemMercuryStatus, ItemPragmaTabledInfo),
+        !:RevPragmaTabled = [TabledSectionItem | !.RevPragmaTabled]
+    ;
+        Pragma = impl_pragma_inline(PredSymNameArity),
         item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
         % Note that mode_check_inline conflicts with inline because
         % it implies no_inline.
@@ -224,142 +242,21 @@ add_pass_2_pragma(SectionItem, !ModuleInfo, !Specs) :-
             [marker_user_marked_no_inline, marker_mode_check_clauses],
             !ModuleInfo, !Specs)
     ;
-        Pragma = pragma_no_inline(PredSymNameArity),
+        Pragma = impl_pragma_no_inline(PredSymNameArity),
         item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
         add_pred_marker("no_inline", PredSymNameArity, PredStatus, Context,
             marker_user_marked_no_inline, [marker_user_marked_inline],
             !ModuleInfo, !Specs)
     ;
-        Pragma = pragma_consider_used(PredSymNameArity),
+        Pragma = impl_pragma_consider_used(PredSymNameArity),
         item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
         add_pred_marker("consider_used", PredSymNameArity, PredStatus, Context,
             marker_consider_used, [], !ModuleInfo, !Specs)
     ;
-        % Used for inter-module unused argument elimination.
-        % This can only appear in .opt files.
-        Pragma = pragma_unused_args(UnusedArgsInfo),
-        ( if
-            ItemMercuryStatus = item_defined_in_other_module(ItemImport),
-            ItemImport = item_import_opt_int
-        then
-            add_pragma_unused_args(UnusedArgsInfo, Context,
-                !ModuleInfo, !Specs)
-        else
-            Pieces = [words("Error:"), pragma_decl("unused_args"),
-                words("declarations may appear only in"),
-                words("automatically generated optimization files."), nl],
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
-            !:Specs = [Spec | !.Specs]
-        )
-    ;
-        Pragma = pragma_exceptions(ExceptionsInfo),
-        ( if
-            ItemMercuryStatus = item_defined_in_other_module(ItemImport),
-            ItemImport = item_import_opt_int
-        then
-            add_pragma_exceptions(ExceptionsInfo, Context, !ModuleInfo, !Specs)
-        else
-            Pieces = [words("Error:"), pragma_decl("exceptions"),
-                words("declarations may appear only in"),
-                words("automatically generated optimization files."), nl],
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
-            !:Specs = [Spec | !.Specs]
-        )
-    ;
-        Pragma = pragma_trailing_info(TrailingInfo),
-        ( if
-            ItemMercuryStatus = item_defined_in_other_module(ItemImport),
-            ItemImport = item_import_opt_int
-        then
-            add_pragma_trailing_info(TrailingInfo, Context,
-                !ModuleInfo, !Specs)
-        else
-            Pieces = [words("Error:"), pragma_decl("trailing_info"),
-                words("declarations may appear only in"),
-                words("automatically generated optimization files."), nl],
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
-            !:Specs = [Spec | !.Specs]
-        )
-    ;
-        Pragma = pragma_mm_tabling_info(MMTablingInfo),
-        ( if
-            ItemMercuryStatus = item_defined_in_other_module(ItemImport),
-            ItemImport = item_import_opt_int
-        then
-            add_pragma_mm_tabling_info(MMTablingInfo, Context,
-                !ModuleInfo, !Specs)
-        else
-            Pieces = [words("Error:"), pragma_decl("mm_tabling_info"),
-                words("declarations may appear only in"),
-                words("automatically generated optimization files."), nl],
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
-            !:Specs = [Spec | !.Specs]
-        )
-    ;
-        Pragma = pragma_obsolete_pred(ObsoletePredInfo),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        mark_pred_as_obsolete(ObsoletePredInfo, PredStatus, Context,
-            !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_obsolete_proc(ObsoleteProcInfo),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        mark_proc_as_obsolete(ObsoleteProcInfo, PredStatus, Context,
-            !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_no_detism_warning(PredNameArity),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        add_pred_marker("no_determinism_warning", PredNameArity, PredStatus,
-            Context, marker_no_detism_warning, [], !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_require_tail_recursion(TailrecWarningPragma),
-        add_pragma_require_tail_recursion(TailrecWarningPragma, Context,
-            !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_promise_eqv_clauses(PredNameArity),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        add_pred_marker("promise_equivalent_clauses", PredNameArity,
-            PredStatus, Context, marker_promised_equivalent_clauses, [],
-            !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_promise_pure(PredNameArity),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        add_pred_marker("promise_pure", PredNameArity, PredStatus,
-            Context, marker_promised_pure, [], !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_promise_semipure(PredNameArity),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        add_pred_marker("promise_semipure", PredNameArity, PredStatus,
-            Context, marker_promised_semipure, [], !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_terminates(PredNameArity),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        add_pred_marker("terminates", PredNameArity, PredStatus, Context,
-            marker_terminates,
-            [marker_check_termination, marker_does_not_terminate],
-            !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_does_not_terminate(PredNameArity),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        add_pred_marker("does_not_terminate", PredNameArity, PredStatus,
-            Context, marker_does_not_terminate,
-            [marker_check_termination, marker_terminates], !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_check_termination(PredNameArity),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        add_pred_marker("check_termination", PredNameArity, PredStatus,
-            Context, marker_check_termination,
-            [marker_terminates, marker_does_not_terminate],
-            !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_mode_check_clauses(PredNameArity),
+        Pragma = impl_pragma_mode_check_clauses(PredNameArity),
         item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
         add_pred_marker("mode_check_clauses", PredNameArity, PredStatus,
             Context, marker_mode_check_clauses, [], !ModuleInfo, !Specs),
-
         % Allowing the predicate to be inlined could lead to code generator
         % aborts. This is because the caller that inlines this predicate may
         % then push other code into the disjunction or switch's branches,
@@ -369,23 +266,105 @@ add_pass_2_pragma(SectionItem, !ModuleInfo, !Specs) :-
             Context, marker_user_marked_no_inline, [marker_user_marked_inline],
             !ModuleInfo, !Specs)
     ;
-        Pragma = pragma_require_feature_set(RFSInfo),
+        Pragma = impl_pragma_no_detism_warning(PredNameArity),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        add_pred_marker("no_determinism_warning", PredNameArity, PredStatus,
+            Context, marker_no_detism_warning, [], !ModuleInfo, !Specs)
+    ;
+        Pragma = impl_pragma_require_tail_rec(TailrecWarningPragma),
+        add_pragma_require_tail_rec(TailrecWarningPragma, Context,
+            !ModuleInfo, !Specs)
+    ;
+        Pragma = impl_pragma_promise_pure(PredNameArity),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        add_pred_marker("promise_pure", PredNameArity, PredStatus,
+            Context, marker_promised_pure, [], !ModuleInfo, !Specs)
+    ;
+        Pragma = impl_pragma_promise_semipure(PredNameArity),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        add_pred_marker("promise_semipure", PredNameArity, PredStatus,
+            Context, marker_promised_semipure, [], !ModuleInfo, !Specs)
+    ;
+        Pragma = impl_pragma_promise_eqv_clauses(PredNameArity),
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        add_pred_marker("promise_equivalent_clauses", PredNameArity,
+            PredStatus, Context, marker_promised_equivalent_clauses, [],
+            !ModuleInfo, !Specs)
+    ;
+        Pragma = impl_pragma_require_feature_set(RFSInfo),
         RFSInfo = pragma_info_require_feature_set(FeatureSet),
         check_required_feature_set(FeatureSet, ItemMercuryStatus, Context,
             !ModuleInfo, !Specs)
     ).
 
+add_impl_pragma_tabled(SectionItem, !ModuleInfo, !QualInfo, !Specs) :-
+    SectionItem = ims_item(ItemMercuryStatus, ItemPragmaInfo),
+    ItemPragmaInfo = item_pragma_info(TabledInfo, Context, _SeqNum),
+    module_info_get_globals(!.ModuleInfo, Globals),
+    globals.lookup_bool_option(Globals, type_layout, TypeLayout),
+    (
+        TypeLayout = yes,
+        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
+        module_add_pragma_tabled(TabledInfo, Context, PredStatus,
+            !ModuleInfo, !QualInfo, !Specs)
+    ;
+        TypeLayout = no,
+        TabledInfo = pragma_info_tabled(EvalMethod, _, _, _),
+        Pieces = [words("Error:"),
+            pragma_decl(eval_method_to_string(EvalMethod)),
+            words("declaration requires type_ctor_layout structures."),
+            words("Don't use --no-type-layout to disable them."), nl],
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
+        !:Specs = [Spec | !.Specs]
+    ).
+
+add_gen_pragma(ItemPragmaInfo, !ModuleInfo, !Specs) :-
+    ItemPragmaInfo = item_pragma_info(Pragma, Context, _SeqNum),
+    (
+        Pragma = gen_pragma_unused_args(UnusedArgsInfo),
+        add_pragma_unused_args(UnusedArgsInfo, Context, !ModuleInfo, !Specs)
+    ;
+        Pragma = gen_pragma_exceptions(ExceptionsInfo),
+        add_pragma_exceptions(ExceptionsInfo, Context, !ModuleInfo, !Specs)
+    ;
+        Pragma = gen_pragma_trailing_info(TrailingInfo),
+        add_pragma_trailing_info(TrailingInfo, Context, !ModuleInfo, !Specs)
+    ;
+        Pragma = gen_pragma_mm_tabling_info(MMTablingInfo),
+        add_pragma_mm_tabling_info(MMTablingInfo, Context, !ModuleInfo, !Specs)
+    ).
+
 %-----------------------------------------------------------------------------%
 
-:- pred mark_pred_as_external(pred_id::in,
-    module_info::in, module_info::out) is det.
+:- pred mark_pred_as_external(prog_context::in, pred_id::in,
+    module_info::in, module_info::out,
+    list(error_spec)::in, list(error_spec)::out) is det.
 
-mark_pred_as_external(PredId, !ModuleInfo) :-
+mark_pred_as_external(Context, PredId, !ModuleInfo, !Specs) :-
     module_info_get_preds(!.ModuleInfo, PredTable0),
     map.lookup(PredTable0, PredId, PredInfo0),
-    pred_info_mark_as_external(PredInfo0, PredInfo),
-    map.det_update(PredId, PredInfo, PredTable0, PredTable),
-    module_info_set_preds(PredTable, !ModuleInfo).
+    pred_info_get_clauses_info(PredInfo0, ClausesInfo0),
+    clauses_info_get_clauses_rep(ClausesInfo0, ClausesRep0, _ItemNumbers),
+    IsEmpty = clause_list_is_empty(ClausesRep0),
+    (
+        IsEmpty = yes,
+        pred_info_mark_as_external(PredInfo0, PredInfo),
+        map.det_update(PredId, PredInfo, PredTable0, PredTable),
+        module_info_set_preds(PredTable, !ModuleInfo)
+    ;
+        IsEmpty = no,
+        PredOrFunc = pred_info_is_pred_or_func(PredInfo0),
+        pred_info_get_name(PredInfo0, PredName),
+        Arity = pred_info_orig_arity(PredInfo0),
+        SNA = sym_name_arity(unqualified(PredName), Arity),
+        Pieces = [words("The"), p_or_f(PredOrFunc),
+            unqual_sym_name_arity(SNA), words("has clauses,"),
+            words("so it cannot be marked as external."), nl],
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
+        !:Specs = [Spec | !.Specs]
+    ).
 
 %-----------------------------------------------------------------------------%
 
@@ -507,12 +486,11 @@ add_pragma_mm_tabling_info(MMTablingInfo, Context, !ModuleInfo, !Specs) :-
 
 %-----------------------------------------------------------------------------%
 
-:- pred add_pragma_require_tail_recursion(
-    pragma_info_require_tail_recursion::in, prog_context::in,
-    module_info::in, module_info::out,
+:- pred add_pragma_require_tail_rec(pragma_info_require_tail_rec::in,
+    prog_context::in, module_info::in, module_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-add_pragma_require_tail_recursion(Pragma, Context, !ModuleInfo, !Specs) :-
+add_pragma_require_tail_rec(Pragma, Context, !ModuleInfo, !Specs) :-
     Pragma ^ rtr_proc_id =
         pred_name_arity_mpf_mmode(PredSymName, Arity, MaybePF, MaybeMode),
     get_matching_pred_ids(!.ModuleInfo, PredSymName, Arity,
@@ -550,26 +528,28 @@ add_pragma_require_tail_recursion(Pragma, Context, !ModuleInfo, !Specs) :-
             then
                 map.lookup(Procs0, ProcId, Proc),
                 RequireTailrec = Pragma ^ rtr_require_tailrec,
-                add_pragma_require_tail_recursion_proc(RequireTailrec, Context,
+                add_pragma_require_tail_rec_proc(RequireTailrec, Context,
                     PredSymNameArity, ProcId - Proc,
                     PredInfo0, PredInfo, !Specs)
             else
                 PredInfo = PredInfo0,
                 PredOrFunc = pred_info_is_pred_or_func(PredInfo0),
-                SimpleCallId = simple_call_id(PredOrFunc, PredSymName, Arity),
+                PFSymNameArity =
+                    pf_sym_name_arity(PredOrFunc, PredSymName, Arity),
                 Pieces = [words("Error:"),
                     pragma_decl("require_tail_recursion"),
                     words("declaration for undeclared mode of"),
-                    simple_call(SimpleCallId), suffix("."), nl],
-                Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                    Context, Pieces),
+                    qual_pf_sym_name_orig_arity(PFSymNameArity),
+                    suffix("."), nl],
+                Spec = simplest_spec($pred, severity_error,
+                    phase_parse_tree_to_hlds, Context, Pieces),
                 !:Specs = [Spec | !.Specs]
             )
         ;
             MaybeMode = no,
             list.foldl2(
-                add_pragma_require_tail_recursion_proc(
-                    Pragma ^ rtr_require_tailrec, Context, PredSymNameArity),
+                add_pragma_require_tail_rec_proc(Pragma ^ rtr_require_tailrec,
+                    Context, PredSymNameArity),
                 Procs, PredInfo0, PredInfo, !Specs)
         ),
         module_info_set_pred_info(PredId, PredInfo, !ModuleInfo)
@@ -577,18 +557,17 @@ add_pragma_require_tail_recursion(Pragma, Context, !ModuleInfo, !Specs) :-
         PredIds = [_, _ | _],
         Pieces = [words("Error: ambiguous predicate or function in"),
             pragma_decl("require_tail_recursion"), words("pragma."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ).
 
-:- pred add_pragma_require_tail_recursion_proc(
-    require_tail_recursion::in, prog_context::in,
-    sym_name_and_arity::in, pair(proc_id, proc_info)::in,
+:- pred add_pragma_require_tail_rec_proc(require_tail_recursion::in,
+    prog_context::in, sym_name_arity::in, pair(proc_id, proc_info)::in,
     pred_info::in, pred_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-add_pragma_require_tail_recursion_proc(RequireTailrec, Context,
+add_pragma_require_tail_rec_proc(RequireTailrec, Context,
         SymNameAndArity, ProcId - ProcInfo0, !PredInfo, !Specs) :-
     proc_info_get_maybe_require_tailrec_info(ProcInfo0,
         MaybeRequireTailrecOrig),
@@ -596,15 +575,15 @@ add_pragma_require_tail_recursion_proc(RequireTailrec, Context,
         MaybeRequireTailrecOrig = yes(RequireTailrecOrig),
         MainPieces = [words("Error: conflicting"),
             pragma_decl("require_tail_recursion"), words("pragmas for"),
-            qual_sym_name_and_arity(SymNameAndArity),
+            qual_sym_name_arity(SymNameAndArity),
             words("or one of its modes.")],
         OrigPieces = [words("Earlier pragma is here.")],
         ( RequireTailrecOrig = suppress_tailrec_warnings(ContextOrig)
         ; RequireTailrecOrig = enable_tailrec_warnings(_, _, ContextOrig)
         ),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
             [simplest_msg(Context, MainPieces),
-             simplest_msg(ContextOrig, OrigPieces)]),
+            simplest_msg(ContextOrig, OrigPieces)]),
         !:Specs = [Spec | !.Specs]
     ;
         MaybeRequireTailrecOrig = no,
@@ -795,10 +774,10 @@ pragma_status_error(PredSymNameArity, Context, PragmaName, !Specs) :-
     PredSymNameArity = pred_name_arity(PredSymName, Arity),
     Pieces = [words("Error:"), pragma_decl(PragmaName),
         words("declaration for exported predicate or function"),
-        unqual_sym_name_and_arity(sym_name_arity(PredSymName, Arity)),
+        unqual_sym_name_arity(sym_name_arity(PredSymName, Arity)),
         words("must also be exported."), nl],
-    Msg = simple_msg(Context, [always(Pieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
 :- pred pragma_conflict_error(pred_name_arity::in, prog_context::in,
@@ -813,10 +792,10 @@ pragma_conflict_error(PredSymNameArity, Context, PragmaName, ConflictMarkers,
         words("declaration conflicts with previous")] ++
         list_to_pieces(ConflictNames) ++
         [words(choose_number(ConflictNames, "pragma for", "pragmas for")),
-        unqual_sym_name_and_arity(sym_name_arity(PredSymName, Arity)),
+        unqual_sym_name_arity(sym_name_arity(PredSymName, Arity)),
         suffix("."), nl],
-    Msg = simple_msg(Context, [always(Pieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
 %----------------------------------------------------------------------------%
@@ -852,7 +831,7 @@ mark_pred_as_obsolete(ObsoletePredInfo, PragmaStatus, Context,
             Context, DescPieces, !Specs)
     ).
 
-:- pred mark_pred_ids_as_obsolete(list(sym_name_and_arity)::in,
+:- pred mark_pred_ids_as_obsolete(list(sym_name_arity)::in,
     pred_status::in, list(pred_id)::in, bool::in, bool::out,
     pred_table::in, pred_table::out) is det.
 
@@ -874,7 +853,8 @@ mark_pred_ids_as_obsolete(ObsoleteInFavourOf, PragmaStatus, [PredId | PredIds],
         MaybeObsoleteInFavourOf = yes(ObsoleteInFavourOf)
     ;
         MaybeObsoleteInFavourOf0 = yes(ObsoleteInFavourOf0),
-        MaybeObsoleteInFavourOf = yes(ObsoleteInFavourOf0 ++ ObsoleteInFavourOf)
+        MaybeObsoleteInFavourOf =
+            yes(ObsoleteInFavourOf0 ++ ObsoleteInFavourOf)
     ),
     pred_info_set_obsolete_in_favour_of(MaybeObsoleteInFavourOf,
         PredInfo0, PredInfo),
@@ -910,7 +890,7 @@ mark_proc_as_obsolete(ObsoleteProcInfo, PragmaStatus, Context,
         else
             true
         ),
-        SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
+        PFSymNameArity = pf_sym_name_arity(PredOrFunc, SymName, Arity),
         ProcTransform =
             ( pred(ProcInfo0::in, ProcInfo::out) is det :-
                 proc_info_get_obsolete_in_favour_of(ProcInfo0,
@@ -926,7 +906,7 @@ mark_proc_as_obsolete(ObsoleteProcInfo, PragmaStatus, Context,
                 proc_info_set_obsolete_in_favour_of(MaybeObsoleteInFavourOf,
                     ProcInfo0, ProcInfo)
             ),
-        transform_selected_mode_of_pred(PredId, SimpleCallId, Modes,
+        transform_selected_mode_of_pred(PredId, PFSymNameArity, Modes,
             "obsolete_proc", Context, ProcTransform, !ModuleInfo, !Specs)
     ;
         MaybePredId = error1(Specs),
@@ -965,8 +945,8 @@ check_required_feature(Globals, Context, Feature, !Specs) :-
             IsConcurrencySupported = no,
             Pieces = [words("Error: this module must be compiled in a grade"),
                 words("that supports concurrent execution."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         ;
             IsConcurrencySupported = yes
@@ -984,7 +964,8 @@ check_required_feature(Globals, Context, Feature, !Specs) :-
                 quote("spf"), suffix("."), nl],
             Msg = simple_msg(Context,
                 [always(Pieces), verbose_only(verbose_once, VerbosePieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
+                [Msg]),
             !:Specs = [Spec | !.Specs]
         ;
             SinglePrecFloat = yes
@@ -1002,7 +983,8 @@ check_required_feature(Globals, Context, Feature, !Specs) :-
                 quote("spf"), suffix("."), nl],
             Msg = simple_msg(Context,
                 [always(Pieces), verbose_only(verbose_once, VerbosePieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
+                [Msg]),
             !:Specs = [Spec | !.Specs]
         ;
             SinglePrecFloat = no
@@ -1014,8 +996,8 @@ check_required_feature(Globals, Context, Feature, !Specs) :-
             IsTablingSupported = no,
             Pieces = [words("Error: this module must be compiled in a grade"),
                 words("that supports memoisation."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         ;
             IsTablingSupported = yes
@@ -1027,8 +1009,8 @@ check_required_feature(Globals, Context, Feature, !Specs) :-
             IsParConjSupported = no,
             Pieces = [words("Error: this module must be compiled in a grade"),
                 words("that supports executing conjuntions in parallel."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         ;
             IsParConjSupported = yes
@@ -1045,7 +1027,8 @@ check_required_feature(Globals, Context, Feature, !Specs) :-
                 words("or"), quote("trseg"), suffix("."), nl],
             Msg = simple_msg(Context,
                 [always(Pieces), verbose_only(verbose_once, VerbosePieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
+                [Msg]),
             !:Specs = [Spec | !.Specs]
         ;
             UseTrail = yes
@@ -1064,8 +1047,8 @@ check_required_feature(Globals, Context, Feature, !Specs) :-
         else
             Pieces = [words("Error: this module must be compiled using"),
                 words("the strict sequential semantics."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         )
     ;
@@ -1087,77 +1070,10 @@ check_required_feature(Globals, Context, Feature, !Specs) :-
             ),
             Pieces = [words("Error: this module must be compiled in a grade"),
                 words("that uses conservative garbage collection."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         )
-    ).
-
-%-----------------------------------------------------------------------------%
-%-----------------------------------------------------------------------------%
-
-:- pred add_pass_3_pragma(ims_item(item_pragma_info)::in(ims_pragma_pass_3),
-    module_info::in, module_info::out, qual_info::in, qual_info::out,
-    list(error_spec)::in, list(error_spec)::out) is det.
-
-add_pass_3_pragma(SectionItem, !ModuleInfo, !QualInfo, !Specs) :-
-    SectionItem = ims_item(ItemMercuryStatus, ItemPragmaInfo),
-    report_if_pragma_is_wrongly_in_interface(ItemMercuryStatus, ItemPragmaInfo,
-        !Specs),
-    ItemPragmaInfo = item_pragma_info(Pragma, Context, SeqNum),
-    (
-        Pragma = pragma_foreign_proc(FPInfo),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        add_pragma_foreign_proc(FPInfo, PredStatus, Context, yes(SeqNum),
-            !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_foreign_proc_export(FEInfo),
-        add_pragma_foreign_proc_export(FEInfo, Context,
-            !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_type_spec(TypeSpecInfo),
-        add_pragma_type_spec(TypeSpecInfo, Context,
-            !ModuleInfo, !QualInfo, !Specs)
-    ;
-        Pragma = pragma_tabled(TabledInfo),
-        module_info_get_globals(!.ModuleInfo, Globals),
-        globals.lookup_bool_option(Globals, type_layout, TypeLayout),
-        (
-            TypeLayout = yes,
-            item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-            module_add_pragma_tabled(TabledInfo, Context, PredStatus,
-                !ModuleInfo, !QualInfo, !Specs)
-        ;
-            TypeLayout = no,
-            TabledInfo = pragma_info_tabled(EvalMethod, _, _, _),
-            Pieces = [words("Error:"),
-                pragma_decl(eval_method_to_string(EvalMethod)),
-                words("declaration requires type_ctor_layout structures."),
-                words("Don't use --no-type-layout to disable them."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
-            !:Specs = [Spec | !.Specs]
-        )
-    ;
-        Pragma = pragma_fact_table(FTInfo),
-        item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
-        add_pragma_fact_table(FTInfo, PredStatus, Context, !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_oisu(OISUInfo),
-        add_pragma_oisu(OISUInfo, ItemMercuryStatus, Context,
-            !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_termination_info(TermInfo),
-        add_pragma_termination_info(TermInfo, Context, !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_termination2_info(Term2Info),
-        add_pragma_termination2_info(Term2Info, Context, !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_structure_sharing(SharingInfo),
-        add_pragma_structure_sharing(SharingInfo, Context, !ModuleInfo, !Specs)
-    ;
-        Pragma = pragma_structure_reuse(ReuseInfo),
-        add_pragma_structure_reuse(ReuseInfo, Context, !ModuleInfo, !Specs)
     ).
 
 %---------------------------------------------------------------------------%
@@ -1196,8 +1112,8 @@ add_pragma_foreign_proc_export(FPEInfo, Context, !ModuleInfo, !Specs) :-
                     words("for a procedure that has"),
                     words("a declared determinism of"),
                     fixed(determinism_to_string(Detism)), suffix("."), nl],
-                Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                    Context, Pieces),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_parse_tree_to_hlds, Context, Pieces),
                 !:Specs = [Spec | !.Specs]
             else
                 % Only add the foreign export if the specified language matches
@@ -1309,7 +1225,7 @@ add_pragma_fact_table(FTInfo, PredStatus, Context, !ModuleInfo, !Specs) :-
             % Create foreign_decls to declare extern variables.
             ForeignDeclCode = foreign_decl_code(lang_c, foreign_decl_is_local,
                 floi_literal(C_HeaderCode), Context),
-            module_add_foreign_decl_code(ForeignDeclCode, !ModuleInfo),
+            module_add_foreign_decl_code_aux(ForeignDeclCode, !ModuleInfo),
 
             module_add_fact_table_file(FileName, !ModuleInfo),
 
@@ -1320,11 +1236,11 @@ add_pragma_fact_table(FTInfo, PredStatus, Context, !ModuleInfo, !Specs) :-
         ;
             TailPredIds = [_ | _],     % >1 predicate found
             Pieces = [words("In"), quote("pragma fact_table"), words("for"),
-                qual_sym_name_and_arity(sym_name_arity(PredSymName, Arity)),
+                qual_sym_name_arity(sym_name_arity(PredSymName, Arity)),
                 suffix(":"), nl,
                 words("error: ambiguous predicate/function name."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         )
     ).
@@ -1447,9 +1363,8 @@ add_pragma_oisu(OISUInfo, ItemMercuryStatus, Context, !ModuleInfo, !Specs) :-
                 ),
                 StatusPieces = [quote("pragma oisu"),
                     words("declarations must always be exported."), nl],
-                StatusMsg = simple_msg(Context, [always(StatusPieces)]),
-                StatusSpec = error_spec(severity_error,
-                    phase_parse_tree_to_hlds, [StatusMsg]),
+                StatusSpec = simplest_spec($pred, severity_error,
+                    phase_parse_tree_to_hlds, Context, StatusPieces),
                 !:OISUSpecs = [StatusSpec | !.OISUSpecs]
             ),
 
@@ -1462,9 +1377,8 @@ add_pragma_oisu(OISUInfo, ItemMercuryStatus, Context, !ModuleInfo, !Specs) :-
                     TypePieces = [words("The type in a"), quote("pragma oisu"),
                         words("declaration must always be abstract exported."),
                         nl],
-                    TypeMsg = simple_msg(Context, [always(TypePieces)]),
-                    TypeSpec = error_spec(severity_error,
-                        phase_parse_tree_to_hlds, [TypeMsg]),
+                    TypeSpec = simplest_spec($pred, severity_error,
+                        phase_parse_tree_to_hlds, Context, TypePieces),
                     !:OISUSpecs = [TypeSpec | !.OISUSpecs]
                 )
             else
@@ -1505,12 +1419,11 @@ add_pragma_oisu(OISUInfo, ItemMercuryStatus, Context, !ModuleInfo, !Specs) :-
                 TypeCtor = type_ctor(TypeName, TypeArity),
                 DupPieces = [words("Duplicate"), pragma_decl("oisu"),
                     words("declarations for"),
-                    qual_sym_name_and_arity(
+                    qual_sym_name_arity(
                         sym_name_arity(TypeName, TypeArity)),
                     suffix("."), nl],
-                DupMsg = simple_msg(Context, [always(DupPieces)]),
-                DupSpec = error_spec(severity_error, phase_parse_tree_to_hlds,
-                    [DupMsg]),
+                DupSpec = simplest_spec($pred, severity_error,
+                    phase_parse_tree_to_hlds, Context, DupPieces),
                 !:Specs = [DupSpec | !.Specs]
             )
         ;
@@ -1540,13 +1453,13 @@ find_unique_pred_for_oisu(ModuleInfo, Context, TypeCtor, Kind,
                 fixed(Kind), words("predicate specification"),
                 words("within the"), quote("pragma oisu"),
                 words("declaration for"),
-                qual_sym_name_and_arity(sym_name_arity(TypeName, TypeArity)),
+                qual_sym_name_arity(sym_name_arity(TypeName, TypeArity)),
                 suffix(":"), nl,
                 words("error: predicate"),
-                qual_sym_name_and_arity(sym_name_arity(PredName, PredArity)),
+                qual_sym_name_arity(sym_name_arity(PredName, PredArity)),
                 words("is undefined."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg])
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces)
         ;
             LooseArityPredIds = [_ | _],
             list.map(lookup_pred_orig_arity(ModuleInfo),
@@ -1568,15 +1481,15 @@ find_unique_pred_for_oisu(ModuleInfo, Context, TypeCtor, Kind,
                 fixed(Kind), words("predicate specification"),
                 words("within the"), quote("pragma oisu"),
                 words("declaration for"),
-                qual_sym_name_and_arity(sym_name_arity(TypeName, TypeArity)),
+                qual_sym_name_arity(sym_name_arity(TypeName, TypeArity)),
                 suffix(":"), nl,
                 words("error: predicate"),
-                qual_sym_name_and_arity(sym_name_arity(PredName, PredArity)),
+                qual_sym_name_arity(sym_name_arity(PredName, PredArity)),
                 words("has the wrong arity."),
                 words("Actual arity is"), int_fixed(PredArity), suffix(","),
                 words("expected arity is")] ++ ExpArities ++ [suffix("."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg])
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces)
         ),
         !:Specs = [Spec | !.Specs],
         PredId = invalid_pred_id
@@ -1589,13 +1502,13 @@ find_unique_pred_for_oisu(ModuleInfo, Context, TypeCtor, Kind,
             fixed(Kind), words("predicate specification"),
             words("within the"), pragma_decl("oisu"),
             words("declaration for"),
-            qual_sym_name_and_arity(sym_name_arity(TypeName, TypeArity)),
+            qual_sym_name_arity(sym_name_arity(TypeName, TypeArity)),
             suffix(":"), nl,
             words("error: ambiguous predicate name"),
-            qual_sym_name_and_arity(sym_name_arity(PredName, PredArity)),
+            qual_sym_name_arity(sym_name_arity(PredName, PredArity)),
             suffix("."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs],
         PredId = invalid_pred_id
     ),
@@ -1627,7 +1540,7 @@ add_pragma_termination_info(TermInfo, Context, !ModuleInfo, !Specs) :-
         PredOrFunc, SymName, Arity, MaybePredId),
     (
         MaybePredId = ok1(PredId),
-        SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
+        PFSymNameArity = pf_sym_name_arity(PredOrFunc, SymName, Arity),
         add_context_to_arg_size_info(MaybePragmaArgSizeInfo, Context,
             MaybeArgSizeInfo),
         add_context_to_termination_info(MaybePragmaTerminationInfo, Context,
@@ -1639,7 +1552,7 @@ add_pragma_termination_info(TermInfo, Context, !ModuleInfo, !Specs) :-
                 proc_info_set_maybe_termination_info(MaybeTerminationInfo,
                     ProcInfo1, ProcInfo)
             ),
-        transform_selected_mode_of_pred(PredId, SimpleCallId, Modes,
+        transform_selected_mode_of_pred(PredId, PFSymNameArity, Modes,
             "termination_info", Context, ProcTransform, !ModuleInfo, !Specs)
     ;
         MaybePredId = error1(_Specs)
@@ -1664,24 +1577,24 @@ add_pragma_termination2_info(Term2Info, Context, !ModuleInfo, !Specs) :-
         PredOrFunc, SymName, Arity, MaybePredId),
     (
         MaybePredId = ok1(PredId),
-        SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
+        PFSymNameArity = pf_sym_name_arity(PredOrFunc, SymName, Arity),
         ProcTransform =
             ( pred(ProcInfo0::in, ProcInfo::out) is det :-
                 add_context_to_constr_termination_info(
                     MaybePragmaTerminationInfo, Context, MaybeTerminationInfo),
                 some [!TermInfo] (
                     proc_info_get_termination2_info(ProcInfo0, !:TermInfo),
-                    term2_info_set_import_success(MaybePragmaSuccessArgSizeInfo,
-                        !TermInfo),
-                    term2_info_set_import_failure(MaybePragmaFailureArgSizeInfo,
-                        !TermInfo),
+                    term2_info_set_import_success(
+                        MaybePragmaSuccessArgSizeInfo, !TermInfo),
+                    term2_info_set_import_failure(
+                        MaybePragmaFailureArgSizeInfo, !TermInfo),
                     term2_info_set_term_status(MaybeTerminationInfo,
                         !TermInfo),
                     proc_info_set_termination2_info(!.TermInfo,
                         ProcInfo0, ProcInfo)
                 )
             ),
-        transform_selected_mode_of_pred(PredId, SimpleCallId, Modes,
+        transform_selected_mode_of_pred(PredId, PFSymNameArity, Modes,
             "termination2_info", Context, ProcTransform, !ModuleInfo, !Specs)
     ;
         MaybePredId = error1(_Specs)
@@ -1707,10 +1620,10 @@ add_pragma_structure_sharing(SharingInfo, Context, !ModuleInfo, !Specs):-
             PredOrFunc, SymName, Arity, MaybePredId),
         (
             MaybePredId = ok1(PredId),
-            SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
+            PFSymNameArity = pf_sym_name_arity(PredOrFunc, SymName, Arity),
             ProcTransform = proc_info_set_imported_structure_sharing(HeadVars,
                 Types, SharingDomain),
-            transform_selected_mode_of_pred(PredId, SimpleCallId, Modes,
+            transform_selected_mode_of_pred(PredId, PFSymNameArity, Modes,
                 "structure_sharing", Context, ProcTransform,
                 !ModuleInfo, !Specs)
         ;
@@ -1744,10 +1657,10 @@ add_pragma_structure_reuse(ReuseInfo, Context, !ModuleInfo, !Specs):-
             PredOrFunc, SymName, Arity, MaybePredId),
         (
             MaybePredId = ok1(PredId),
-            SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
+            PFSymNameArity = pf_sym_name_arity(PredOrFunc, SymName, Arity),
             ProcTransform = proc_info_set_imported_structure_reuse(HeadVars,
                 Types, ReuseDomain),
-            transform_selected_mode_of_pred(PredId, SimpleCallId, Modes,
+            transform_selected_mode_of_pred(PredId, PFSymNameArity, Modes,
                 "structure_reuse", Context, ProcTransform, !ModuleInfo, !Specs)
         ;
             MaybePredId = error1(Specs),
@@ -1762,13 +1675,13 @@ add_pragma_structure_reuse(ReuseInfo, Context, !ModuleInfo, !Specs):-
 
 %----------------------------------------------------------------------------%
 
-:- pred transform_selected_mode_of_pred(pred_id::in, simple_call_id::in,
+:- pred transform_selected_mode_of_pred(pred_id::in, pf_sym_name_arity::in,
     list(mer_mode)::in, string::in, prog_context::in,
     pred(proc_info, proc_info)::in(pred(in, out) is det),
     module_info::in, module_info::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-transform_selected_mode_of_pred(PredId, SimpleCallId, Modes,
+transform_selected_mode_of_pred(PredId, PFSymNameArity, Modes,
         PragmaName, Context, ProcTransform, !ModuleInfo, !Specs) :-
     module_info_get_preds(!.ModuleInfo, PredTable0),
     map.lookup(PredTable0, PredId, PredInfo0),
@@ -1787,8 +1700,8 @@ transform_selected_mode_of_pred(PredId, SimpleCallId, Modes,
     else
         Pieces = [words("Error:"), pragma_decl(PragmaName),
             words("declaration for undeclared mode of"),
-            simple_call(SimpleCallId), suffix("."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+            qual_pf_sym_name_orig_arity(PFSymNameArity), suffix("."), nl],
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ).
@@ -1830,8 +1743,8 @@ look_up_pragma_pf_sym_arity(ModuleInfo, IsFullyQualified, FailHandling,
             Pieces = [words("Internal compiler error:"),
                 words("unknown predicate name in"), pragma_decl(PragmaName),
                 words("declaration."), nl],
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             Specs = [Spec]
         ),
         MaybePredId = error1(Specs)
@@ -1863,15 +1776,16 @@ look_up_pragma_pf_sym_arity(ModuleInfo, IsFullyQualified, FailHandling,
             Msg = simple_msg(Context,
                 [always(MainPieces),
                 verbose_only(verbose_always, VerbosePieces)]),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+            Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
+                [Msg]),
             Specs = [Spec]
         ;
             FailHandling = lfh_internal_error,
             Pieces = [words("Internal compiler error:"),
                 words("ambiguous predicate name in"), pragma_decl(PragmaName),
                 words("declaration."), nl],
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             Specs = [Spec]
         ),
         MaybePredId = error1(Specs)

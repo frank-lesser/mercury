@@ -48,8 +48,9 @@
     --->    rval_type_and_width(mlds_rval, mlds_type, arg_pos_width).
 
     % ml_gen_new_object(MaybeConsId, MaybeCtorName, Ptag, ExplicitSectag,
-    %   LHSVar, LHSType, ExtraRHSRvalsTypesWidths, RHSVarsTypesWidths, ArgModes,
-    %   FirstArgNum, TakeAddr, HowToConstruct, Context, Stmts, !Info):
+    %   LHSVar, LHSType, ExtraRHSRvalsTypesWidths, RHSVarsTypesWidths,
+    %   ArgModes, FirstArgNum, TakeAddr, HowToConstruct, Context,
+    %   Stmts, !Info):
     %
     % Generate a `new_object' statement, or a static constant, depending on the
     % value of the how_to_construct argument. The `ExtraRvalsTypesWidths'
@@ -97,15 +98,13 @@
 :- import_module hlds.hlds_code_util.
 :- import_module hlds.hlds_pred.
 :- import_module hlds.vartypes.
-:- import_module libs.
-:- import_module libs.globals.
-:- import_module libs.options.
 :- import_module mdbcomp.
 :- import_module mdbcomp.sym_name.
 :- import_module ml_backend.ml_closure_gen.
 :- import_module ml_backend.ml_code_util.
 :- import_module ml_backend.ml_type_gen.
 :- import_module ml_backend.ml_unify_gen_deconstruct.
+:- import_module ml_backend.ml_util.
 :- import_module parse_tree.builtin_lib_types.
 :- import_module parse_tree.prog_data_foreign.
 :- import_module parse_tree.prog_out.
@@ -113,6 +112,7 @@
 
 :- import_module int.
 :- import_module map.
+:- import_module one_or_more.
 :- import_module pair.
 :- import_module require.
 :- import_module term.
@@ -1560,8 +1560,7 @@ construct_ground_term_tagword_initializer_lld(RHSVarTypeWidth,
 %---------------------------------------------------------------------------%
 
 ml_generate_const_structs(ModuleInfo, Target, ConstStructMap, !GlobalData) :-
-    module_info_get_globals(ModuleInfo, Globals),
-    globals.lookup_bool_option(Globals, highlevel_data, HighLevelData),
+    HighLevelData = mlds_target_high_level_data(Target),
     Info = ml_const_struct_info(ModuleInfo, Target, HighLevelData),
 
     module_info_get_const_struct_db(ModuleInfo, ConstStructDb),
@@ -2423,7 +2422,8 @@ filled_bitfields_to_packed_word(Info, UseMap,
 find_best_matching_instance(Instances, FilledPackedWord,
         BestMissing, OldWordRval) :-
     Instances = one_or_more(HeadInstance, TailInstances),
-    HeadInstance = packed_word_instance(HeadFilledPackedWord, _HeadOldWordRval),
+    HeadInstance =
+        packed_word_instance(HeadFilledPackedWord, _HeadOldWordRval),
     count_matching_bitfields(HeadFilledPackedWord, FilledPackedWord,
         HeadMatches, HeadNonMatches, HeadMissing),
     find_best_matching_instance_loop(TailInstances, FilledPackedWord,

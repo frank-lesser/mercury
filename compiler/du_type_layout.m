@@ -130,6 +130,7 @@
 :- import_module map.
 :- import_module maybe.
 :- import_module multi_map.
+:- import_module one_or_more.
 :- import_module pair.
 :- import_module require.
 :- import_module string.
@@ -353,10 +354,8 @@ decide_simple_type_foreign_enum(_ModuleInfo, Params, TypeCtor, TypeDefn0,
         DirectArgPieces = [words("Error:"), type_ctor_sna(TypeCtor),
             words("has both a"), pragma_decl("foreign_enum"),
             words("declaration and a direct_arg specification."), nl],
-        DirectArgMsg = simple_msg(term.context_init,
-            [always(DirectArgPieces)]),
-        DirectArgSpec = error_spec(severity_error, phase_type_check,
-            [DirectArgMsg]),
+        DirectArgSpec = simplest_spec($pred, severity_error, phase_type_check,
+            term.context_init, DirectArgPieces),
         !:Specs = [DirectArgSpec | !.Specs]
     else
         true
@@ -368,10 +367,8 @@ decide_simple_type_foreign_enum(_ModuleInfo, Params, TypeCtor, TypeDefn0,
         NonEnumArgPieces = [words("Error:"), type_ctor_sna(TypeCtor),
             words("has a"), pragma_decl("foreign_enum"), words("declaration,"),
             words("but it has function symbols whose arity is not zero."), nl],
-        NonEnumArgMsg = simple_msg(term.context_init,
-            [always(NonEnumArgPieces)]),
-        NonEnumArgSpec = error_spec(severity_error, phase_type_check,
-            [NonEnumArgMsg]),
+        NonEnumArgSpec = simplest_spec($pred, severity_error, phase_type_check,
+            term.context_init, NonEnumArgPieces),
         !:Specs = [NonEnumArgSpec | !.Specs]
     ),
     list.map_foldl(add_repn_to_foreign_enum_ctor(TypeCtor, ForeignEnumTagMap),
@@ -447,8 +444,8 @@ decide_simple_type_dummy_or_mercury_enum(_ModuleInfo, Params,
         Pieces = [words("Error: all the function symbols of"),
             type_ctor_sna(TypeCtor), words("have arity zero,"),
             words("yet it has a direct_arg specification."), nl],
-        Msg = simple_msg(term.context_init, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_type_check, [Msg]),
+        Spec = simplest_spec($pred, severity_error, phase_type_check,
+            term.context_init, Pieces),
         !:Specs = [Spec | !.Specs]
     else
         true
@@ -522,8 +519,8 @@ decide_simple_type_notag(_ModuleInfo, Params, TypeCtor, TypeDefn0, Body0,
         Pieces = [words("Error:"), type_ctor_sna(TypeCtor),
             words("is a no_tag type,"),
             words("yet it has a direct_arg specification."), nl],
-        Msg = simple_msg(term.context_init, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_type_check, [Msg]),
+        Spec = simplest_spec($pred, severity_error, phase_type_check,
+            term.context_init, Pieces),
         !:Specs = [Spec | !.Specs]
     else
         true
@@ -602,10 +599,8 @@ add_foreign_if_word_aligned_ptr(ModuleInfo, Params, TypeCtor,
         DirectArgPieces = [words("Error:"), type_ctor_sna(TypeCtor),
             words("has a foreign language representation on this backend,"),
             words("but it also has a direct_arg specification."), nl],
-        DirectArgMsg = simple_msg(term.context_init,
-            [always(DirectArgPieces)]),
-        DirectArgSpec = error_spec(severity_error, phase_type_check,
-            [DirectArgMsg]),
+        DirectArgSpec = simplest_spec($pred, severity_error, phase_type_check,
+            term.context_init, DirectArgPieces),
         !:Specs = [DirectArgSpec | !.Specs]
     else
         true
@@ -806,7 +801,7 @@ decide_complex_du_type_general(ModuleInfo, Params, ComponentTypeMap,
             check_direct_arg_assertions(AssertedDirectArgFunctors,
                 NonDirectArgFunctors, !Specs),
             DirectArgFunctorNames =
-                list.map(constructor_to_sym_name_and_arity, DirectArgFunctors)
+                list.map(constructor_to_sym_name_arity, DirectArgFunctors)
         ;
             MaybeDirectArgs = direct_args_disabled,
             DirectArgFunctors = [],
@@ -1909,7 +1904,7 @@ take_local_packable_functors_constant_sectag_bits(ArgPackBits,
 
 :- pred is_direct_arg_ctor(component_type_map::in, module_name::in,
     type_status::in, bool::in, bool::in,
-    list(sym_name_and_arity)::in, constructor::in) is semidet.
+    list(sym_name_arity)::in, constructor::in) is semidet.
 
 is_direct_arg_ctor(ComponentTypeMap, TypeCtorModule, TypeStatus,
         TypeIsImported, TypeDefinedHere, AssertedDirectArgCtors, Ctor) :-
@@ -2172,7 +2167,7 @@ is_foreign_type_body_for_target(ForeignType, Target, Assertions) :-
     % nevertheless appears in AssertedDirectArgCtors, generate an error message
     % for it.
     %
-:- pred check_direct_arg_assertions(list(sym_name_and_arity)::in,
+:- pred check_direct_arg_assertions(list(sym_name_arity)::in,
     list(constructor)::in, list(error_spec)::in, list(error_spec)::out) is det.
 
 check_direct_arg_assertions(_AssertedDirectArgCtors, [], !Specs).
@@ -2181,20 +2176,20 @@ check_direct_arg_assertions(AssertedDirectArgCtors, [Ctor | Ctors], !Specs) :-
     SymNameArity = sym_name_arity(SymName, Arity),
     ( if list.contains(AssertedDirectArgCtors, SymNameArity) then
         Pieces = [words("Error:"),
-            unqual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+            unqual_sym_name_arity(sym_name_arity(SymName, Arity)),
             words("cannot be represented as a direct pointer"),
             words("to its sole argument."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_type_check, [Msg]),
+        Spec = simplest_spec($pred, severity_error, phase_type_check,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs]
     else
         true
     ),
     check_direct_arg_assertions(AssertedDirectArgCtors, Ctors, !Specs).
 
-:- func constructor_to_sym_name_and_arity(constructor) = sym_name_and_arity.
+:- func constructor_to_sym_name_arity(constructor) = sym_name_arity.
 
-constructor_to_sym_name_and_arity(ctor(_, _, Name, _Args, Arity, _)) =
+constructor_to_sym_name_arity(ctor(_, _, Name, _Args, Arity, _)) =
     sym_name_arity(Name, Arity).
 
 %---------------------------------------------------------------------------%
@@ -2273,7 +2268,7 @@ inform_about_any_suboptimal_packing(Params, CtorSymName, CtorContext,
         list.length(CtorArgRepns, CtorArity),
         CtorSymNameArity = sym_name_arity(CtorSymName, CtorArity),
         StartPieces = [words("The arguments of the constructor"),
-            unqual_sym_name_and_arity(CtorSymNameArity),
+            unqual_sym_name_arity(CtorSymNameArity),
             words("could be packed more tightly."),
             words("Here is one arrangement for the arguments"),
             words("which take up less than one word each"),
@@ -2291,8 +2286,8 @@ inform_about_any_suboptimal_packing(Params, CtorSymName, CtorContext,
         list.map(describe_sub_word_bin, SubWordBins, SubWordBinPieceLists),
         Pieces = StartPieces ++ list.condense(SubWordBinPieceLists)
             ++ EndPieces,
-        Msg = simple_msg(CtorContext, [always(Pieces)]),
-        Spec = error_spec(severity_informational, phase_type_check, [Msg]),
+        Spec = simplest_spec($pred, severity_informational, phase_type_check,
+            CtorContext, Pieces),
         !:Specs = [Spec | !.Specs]
     else
         true
@@ -2528,7 +2523,7 @@ find_initial_args_packable_within_limit(Params, ComponentTypeMap, Limit,
 
 type_ctor_sna(TypeCtor) = Piece :-
     TypeCtor = type_ctor(TypeCtorSymName, TypeCtorArity),
-    Piece = qual_sym_name_and_arity(
+    Piece = qual_sym_name_arity(
         sym_name_arity(TypeCtorSymName, TypeCtorArity)).
 
 %---------------------------------------------------------------------------%
@@ -3127,17 +3122,27 @@ setup_decide_du_params(Globals, DirectArgMap, Params) :-
     ),
 
     % Compute MaybePrimaryTags.
-    globals.lookup_int_option(Globals, num_ptag_bits, NumPtagBits),
-    ( if NumPtagBits = 0 then
+    (
+        Target = target_c,
+        globals.lookup_int_option(Globals, num_ptag_bits, NumPtagBits),
+        % We require the use of two or three primary tags when targeting C.
+        ( if NumPtagBits = 2 then
+            MaybePrimaryTags = max_primary_tag(ptag(3u8), NumPtagBits)
+        else if NumPtagBits = 3 then
+            MaybePrimaryTags = max_primary_tag(ptag(7u8), NumPtagBits)
+        else
+            % handle_options.m should have generated an error if num_ptag_bits
+            % is not 2 or 3, which should have meant that its caller in
+            % mercury_compile_main.m stops execution before
+            % du_type_layout.m is invoked.
+            unexpected($pred, "target_c but NumPtagBits not 2 or 3")
+        )
+    ;
+        ( Target = target_java
+        ; Target = target_csharp
+        ; Target = target_erlang
+        ),
         MaybePrimaryTags = no_primary_tags
-    else if NumPtagBits = 2 then
-        MaybePrimaryTags = max_primary_tag(ptag(3u8), NumPtagBits)
-    else if NumPtagBits = 3 then
-        MaybePrimaryTags = max_primary_tag(ptag(7u8), NumPtagBits)
-    else
-        MaxPtagInt = (1 << NumPtagBits) - 1,
-        MaxPtagUint8 = uint8.det_from_int(MaxPtagInt),
-        MaybePrimaryTags = max_primary_tag(ptag(MaxPtagUint8), NumPtagBits)
     ),
 
     % Compute ArgPackBits.
@@ -3160,7 +3165,6 @@ setup_decide_du_params(Globals, DirectArgMap, Params) :-
         AllowPackingMiniTypes),
 
     % Compute MaybeDirectArgs.
-    globals.lookup_bool_option(Globals, highlevel_data, HighLevelData),
     (
         Target = target_c,
         globals.lookup_bool_option(Globals, allow_direct_args,
@@ -3172,7 +3176,6 @@ setup_decide_du_params(Globals, DirectArgMap, Params) :-
             TermSizeCells),
         ( if
             AllowDirectArgs = yes,
-            HighLevelData = no,
             TermSizeWords = no,
             TermSizeCells = no
         then
@@ -3186,13 +3189,8 @@ setup_decide_du_params(Globals, DirectArgMap, Params) :-
         ; Target = target_erlang
         ),
         % Direct arg functors have not (yet) been implemented on these targets.
-        MaybeDirectArgs = direct_args_disabled
-    ),
+        MaybeDirectArgs = direct_args_disabled,
 
-    (
-        HighLevelData = no
-    ;
-        HighLevelData = yes,
         expect(unify(AllowDoubleWords, no), $pred,
             "AllowDoubleWords != no"),
         expect(unify(AllowPackingInts, no), $pred,

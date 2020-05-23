@@ -30,6 +30,11 @@
 
 :- func options_variables_init = options_variables.
 
+    % Read all options files specified by `--options-file' options.
+    %
+:- pred read_options_files(globals::in, options_variables::in,
+    maybe(options_variables)::out, io::di, io::uo) is det.
+
     % Read a single options file, without searching
     % --options-search-directories.
     % This is used to read the configuration file.
@@ -48,10 +53,17 @@
 :- pred read_args_file(globals::in, file_name::in, maybe(list(string))::out,
     io::di, io::uo) is det.
 
-    % Read all options files specified by `--options-file' options.
+%-----------------------------------------------------------------------------%
+
+    % Look up $(MAIN_TARGET).
     %
-:- pred read_options_files(globals::in, options_variables::in,
-    maybe(options_variables)::out, io::di, io::uo) is det.
+:- pred lookup_main_target(globals::in, options_variables::in,
+    maybe(list(string))::out, io::di, io::uo) is det.
+
+    % Look up $(MERCURY_STDLIB_DIR).
+    %
+:- pred lookup_mercury_stdlib_dir(globals::in, options_variables::in,
+    maybe(list(string))::out, io::di, io::uo) is det.
 
     % Look up the DEFAULT_MCFLAGS variable.
     %
@@ -68,16 +80,6 @@
     %
 :- pred lookup_mmc_module_options(globals::in, options_variables::in,
     module_name::in, maybe(list(string))::out, io::di, io::uo) is det.
-
-    % Look up $(MAIN_TARGET).
-    %
-:- pred lookup_main_target(globals::in, options_variables::in,
-    maybe(list(string))::out, io::di, io::uo) is det.
-
-    % Look up $(MERCURY_STDLIB_DIR).
-    %
-:- pred lookup_mercury_stdlib_dir(globals::in, options_variables::in,
-    maybe(list(string))::out, io::di, io::uo) is det.
 
 %-----------------------------------------------------------------------------%
 %-----------------------------------------------------------------------------%
@@ -112,8 +114,6 @@
 :- type found_options_file_error
     --->    found_options_file_error.
 
-:- type options_variables == map(options_variable, options_variable_value).
-
 :- type options_variable_value
     --->    options_variable_value(
                 list(char),
@@ -126,7 +126,49 @@
     ;       command_line
     ;       environment.
 
+:- type options_variables == map(options_variable, options_variable_value).
+
 options_variables_init = map.init.
+
+%-----------------------------------------------------------------------------%
+
+read_options_files(Globals, Variables0, MaybeVariables, !IO) :-
+    promise_equivalent_solutions [OptionsFileResult, !:IO] (
+        try_io(read_options_file_lookup_params(Globals, Variables0),
+            OptionsFileResult, !IO)
+    ),
+    (
+        OptionsFileResult = succeeded(Variables),
+        MaybeVariables = yes(Variables)
+    ;
+        OptionsFileResult = exception(Exception),
+        ( if Exception = univ(found_options_file_error) then
+            MaybeVariables = no
+        else
+            rethrow(OptionsFileResult)
+        )
+    ).
+
+read_options_file(Globals, OptionsFile, Variables0, MaybeVariables, !IO) :-
+    promise_equivalent_solutions [OptionsFileResult, !:IO] (
+        try_io(
+            ( pred((Variables1)::out, !.IO::di, !:IO::uo) is det :-
+                read_options_file_params(Globals, error, no_search, no,
+                    OptionsFile, Variables0, Variables1, !IO)
+            ),
+            OptionsFileResult, !IO)
+    ),
+    (
+        OptionsFileResult = succeeded(Variables),
+        MaybeVariables = yes(Variables)
+    ;
+        OptionsFileResult = exception(Exception),
+        ( if Exception = univ(found_options_file_error) then
+            MaybeVariables = no
+        else
+            rethrow(OptionsFileResult)
+        )
+    ).
 
 read_args_file(Globals, OptionsFile, MaybeMCFlags, !IO) :-
     read_options_file(Globals, OptionsFile, options_variables_init,
@@ -153,44 +195,6 @@ read_args_file(Globals, OptionsFile, MaybeMCFlags, !IO) :-
     ;
         MaybeVariables = no,
         MaybeMCFlags = no
-    ).
-
-read_options_file(Globals, OptionsFile, Variables0, MaybeVariables, !IO) :-
-    promise_equivalent_solutions [OptionsFileResult, !:IO] (
-        try_io(
-            ( pred((Variables1)::out, !.IO::di, !:IO::uo) is det :-
-                read_options_file_params(Globals, error, no_search, no,
-                    OptionsFile, Variables0, Variables1, !IO)
-            ),
-            OptionsFileResult, !IO)
-    ),
-    (
-        OptionsFileResult = succeeded(Variables),
-        MaybeVariables = yes(Variables)
-    ;
-        OptionsFileResult = exception(Exception),
-        ( if Exception = univ(found_options_file_error) then
-            MaybeVariables = no
-        else
-            rethrow(OptionsFileResult)
-        )
-    ).
-
-read_options_files(Globals, Variables0, MaybeVariables, !IO) :-
-    promise_equivalent_solutions [OptionsFileResult, !:IO] (
-        try_io(read_options_file_lookup_params(Globals, Variables0),
-            OptionsFileResult, !IO)
-    ),
-    (
-        OptionsFileResult = succeeded(Variables),
-        MaybeVariables = yes(Variables)
-    ;
-        OptionsFileResult = exception(Exception),
-        ( if Exception = univ(found_options_file_error) then
-            MaybeVariables = no
-        else
-            rethrow(OptionsFileResult)
-        )
     ).
 
 :- pred read_options_file_lookup_params(globals::in,
@@ -295,7 +299,7 @@ read_options_file_params(Globals, ErrorIfNotExist, Search, MaybeDirName,
                 else
                     ErrorFile = FileToFind
                 ),
-                ErrorSpec = error_spec(severity_error, phase_read_files,
+                ErrorSpec = error_spec($pred, severity_error, phase_read_files,
                     [error_msg(no, do_not_treat_as_first, 0,
                         [always([words("Error reading options file"),
                             quote(ErrorFile), suffix(".")])])]),
@@ -1138,7 +1142,7 @@ lookup_options_variable(Globals, Vars, OptionsVariableClass, FlagsVar, Result,
                     list_to_pieces(
                         list.map(func(Lib) = add_quotes(Lib), BadLibs))]
                     ++ [suffix(".")],
-                ErrorSpec = error_spec(severity_error, phase_read_files,
+                ErrorSpec = error_spec($pred, severity_error, phase_read_files,
                     [error_msg(no, do_not_treat_as_first, 0,
                         [always(Pieces)])]),
                 write_error_spec_ignore(ErrorSpec, Globals, !IO),
@@ -1204,7 +1208,7 @@ lookup_variable_words_maybe_env(LookupEnv, Vars, VarName, Result, !IO) :-
             Result = var_result_set(EnvWords)
         ;
             SplitResult = error(Msg),
-            ErrorSpec = error_spec(severity_error, phase_read_files,
+            ErrorSpec = error_spec($pred, severity_error, phase_read_files,
                 [error_msg(no, do_not_treat_as_first, 0,
                     [always([words("Error: in environment variable"),
                         quote(VarName), suffix(":"), words(Msg), nl])]

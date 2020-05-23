@@ -41,6 +41,7 @@ MCFLAGS-bug271			= --allow-stubs --no-warn-stubs
 MCFLAGS-bug300			= --optimize-constructor-last-call
 MCFLAGS-bug457			= --loop-invariants --intermodule-optimization
 MCFLAGS-bug483			= --warn-unused-imports --halt-at-warn
+MCFLAGS-bug493			= --loop-invariants
 MCFLAGS-compl_unify_bug		= -O3
 MCFLAGS-constraint_prop_bug	= -O0 --common-struct --local-constraint-propagation
 MCFLAGS-csharp_hello		= --no-intermodule-optimization
@@ -53,6 +54,9 @@ MCFLAGS-exists_cast_bug		= --trace rep -O0 --optimize-saved-vars-const
 MCFLAGS-explicit_quant		= --halt-at-warn
 MCFLAGS-foreign_underscore_var	= --halt-at-warn
 MCFLAGS-fzn_debug_abort		= --trace rep
+# XXX we should pass --ssdb-trace deep or --ss-debug to gh89
+# but that currently doesn't work in non ssdb grades.
+MCFLAGS-gh89 = --intermodule-optimization -O3 --no-warn-missing-opt-files
 MCFLAGS-higher_order4		= -O3
 MCFLAGS-higher_order_implied_mode = -O-1
 MCFLAGS-ho_and_type_spec_bug	= -O4
@@ -117,4 +121,5 @@ MCFLAGS-vn_float		= -O5
 MCFLAGS-zero_arity		= --infer-modes
 MGNUCFLAGS-reg_bug		= --no-ansi
 MCFLAGS-reg_bug			= --no-ansi-c
+MCFLAGS-unknown_warning		= --no-halt-at-warn
 MCFLAGS-use_import_only_for_instance	= --warn-unused-imports --halt-at-warn

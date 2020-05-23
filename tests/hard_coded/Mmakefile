@@ -3,8 +3,6 @@
 #-----------------------------------------------------------------------------#
 
 THIS_DIR = hard_coded
-SUBDIRS =
-TESTS_DIR = ..
 MAYBE_J1 =
 
 #-----------------------------------------------------------------------------#
@@ -54,10 +52,10 @@ ORDINARY_PROGS = \
 	cc_nondet_disj \
 	change_hunk_test \
 	char_signed \
-	char_to_string \
 	char_unicode \
 	checked_nondet_tailcall \
 	checked_nondet_tailcall_noinline \
+	closeable_channel_test \
 	closure_extension \
 	common_type_cast \
 	compare_spec \
@@ -365,15 +363,16 @@ ORDINARY_PROGS = \
 	string_compare_substrings \
 	string_count_codepoints_ilseq \
 	string_first_char \
-	string_first_char_ilseq \
 	string_fold_ilseq \
 	string_from_char_list_ilseq \
+	string_from_code_unit_list \
 	string_index_ilseq \
 	string_index_next_ilseq \
 	string_loop \
 	string_presuffix \
 	string_prev_index_ilseq \
 	string_set_char \
+	string_set_char_ilseq \
 	string_split \
 	string_split_2 \
 	string_string \
@@ -406,6 +405,9 @@ ORDINARY_PROGS = \
 	test_infinity \
 	test_int_hash \
 	test_keys_and_values \
+	test_map_filter \
+	test_one_or_more \
+	test_one_or_more_chunk \
 	test_pretty_printer \
 	test_pretty_printer_defaults \
 	test_semaphore \
@@ -752,6 +754,7 @@ ifeq "$(findstring profdeep,$(GRADE))" ""
 		bitwise_uint64 \
 		bitwise_uint8 \
 		bit_buffer_test \
+		char_to_string \
 		cmp_int16 \
 		cmp_int32 \
 		cmp_int64 \
@@ -770,6 +773,8 @@ ifeq "$(findstring profdeep,$(GRADE))" ""
 		map_merge_test \
 		mutable_excp \
 		null_char \
+		string_append_pieces \
+		string_first_char_ilseq \
 		take_split_upto \
 		test_array2d \
 		test_injection \
@@ -898,7 +903,7 @@ PROGS = \
 #-----------------------------------------------------------------------------#
 
 TESTS = $(sort $(PROGS))
-include $(TESTS_DIR)/Mmake.common
+include ../Mmake.common
 
 # Module-specific options should go in Mercury.options so they can be found
 # by `mmc --make'.

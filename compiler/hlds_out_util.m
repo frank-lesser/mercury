@@ -267,6 +267,8 @@ pred_id_to_string(ModuleInfo, PredId) = Str :-
     ).
 
 pred_info_id_to_string(PredInfo) = Str :-
+    % XXX CLEANUP Either this function should replace write_origin in
+    % hlds_out_pred.m, or vice versa.
     Module = pred_info_module(PredInfo),
     Name = pred_info_name(PredInfo),
     Arity = pred_info_orig_arity(PredInfo),
@@ -286,18 +288,22 @@ pred_info_id_to_string(PredInfo) = Str :-
         Origin = origin_instance_method(MethodName, MethodConstraints),
         MethodConstraints = instance_method_constraints(ClassId,
             InstanceTypes, _, _),
-        MethodStr = simple_call_id_to_string(PredOrFunc, MethodName,
+        MethodStr = pf_sym_name_orig_arity_to_string(PredOrFunc, MethodName,
             Arity),
         ClassId = class_id(ClassName, _),
         ClassStr = sym_name_to_string(ClassName),
         TypeStrs = mercury_type_list_to_string(varset.init, InstanceTypes),
-        Str = string.append_list([
-            "instance method ", MethodStr,
-            " for `", ClassStr, "(", TypeStrs, ")'"
-        ])
+        string.format("instance method %s for `%s(%s)'",
+            [s(MethodStr), s(ClassStr), s(TypeStrs)], Str)
     ;
-        Origin = origin_class_method,
-        Str = "class method"
+        Origin = origin_class_method(ClassId, MethodId),
+        ClassId = class_id(ClassSymName, ClassArity),
+        MethodId = pf_sym_name_arity(MethodPredOrFunc,
+            MethodSymName, MethodArity),
+        string.format("class method %s %s/%d for %s/%d",
+            [s(pred_or_func_to_string(MethodPredOrFunc)),
+            s(sym_name_to_string(MethodSymName)), i(MethodArity),
+            s(sym_name_to_string(ClassSymName)), i(ClassArity)], Str)
     ;
         Origin = origin_assertion(FileName, LineNumber),
         ( if pred_info_is_promise(PredInfo, PromiseType) then
@@ -306,11 +312,11 @@ pred_info_id_to_string(PredInfo) = Str :-
                 s(FileName), i(LineNumber)])
         else
             SymName = qualified(Module, Name),
-            Str = simple_call_id_to_string(PredOrFunc, SymName, Arity)
+            Str = pf_sym_name_orig_arity_to_string(PredOrFunc, SymName, Arity)
         )
     ;
         Origin = origin_tabling(BasePredId, TablingAuxPredKind),
-        BasePredIdStr = simple_call_id_to_string(BasePredId),
+        BasePredIdStr = pf_sym_name_orig_arity_to_string(BasePredId),
         (
             TablingAuxPredKind = tabling_aux_pred_stats,
             Str = "table statistics predicate for " ++ BasePredIdStr
@@ -321,7 +327,7 @@ pred_info_id_to_string(PredInfo) = Str :-
     ;
         Origin = origin_solver_type(TypeCtorSymName, TypeCtorArity,
             SolverAuxPredKind),
-        TypeStr = sym_name_and_arity_to_string(
+        TypeStr = sym_name_arity_to_string(
             sym_name_arity(TypeCtorSymName, TypeCtorArity)),
         (
             SolverAuxPredKind = solver_type_to_ground_pred,
@@ -346,7 +352,7 @@ pred_info_id_to_string(PredInfo) = Str :-
         ; Origin = origin_user(_)
         ),
         SymName = qualified(Module, Name),
-        Str = simple_call_id_to_string(PredOrFunc, SymName, Arity)
+        Str = pf_sym_name_orig_arity_to_string(PredOrFunc, SymName, Arity)
     ).
 
 write_pred_proc_id(ModuleInfo, proc(PredId, ProcId), !IO) :-
@@ -504,7 +510,7 @@ start_in_message_to_pieces(First, !Pieces) :-
 %
 
 call_id_to_string(plain_call_id(PredCallId)) =
-    simple_call_id_to_string(PredCallId).
+    pf_sym_name_orig_arity_to_string(PredCallId).
 call_id_to_string(generic_call_id(GenericCallId)) =
     generic_call_id_to_string(GenericCallId).
 
@@ -512,7 +518,7 @@ generic_call_id_to_string(gcid_higher_order(Purity, PredOrFunc, _)) =
     purity_prefix_to_string(Purity) ++ "higher-order "
     ++ prog_out.pred_or_func_to_full_str(PredOrFunc) ++ " call".
 generic_call_id_to_string(gcid_class_method(_ClassId, MethodId)) =
-    simple_call_id_to_string(MethodId).
+    pf_sym_name_orig_arity_to_string(MethodId).
 generic_call_id_to_string(gcid_event_call(EventName)) =
     "event " ++ EventName.
 generic_call_id_to_string(gcid_cast(CastType)) =
@@ -564,7 +570,7 @@ call_arg_id_to_string(CallId, ArgNum, PredMarkers) = Str :-
 
 arg_number_to_string(CallId, ArgNum) = Str :-
     (
-        CallId = plain_call_id(simple_call_id(PredOrFunc, _, Arity)),
+        CallId = plain_call_id(pf_sym_name_arity(PredOrFunc, _, Arity)),
         ( if
             PredOrFunc = pf_function,
             Arity = ArgNum

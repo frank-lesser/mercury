@@ -38,6 +38,7 @@
 :- import_module cord.
 :- import_module list.
 :- import_module maybe.
+:- import_module one_or_more.
 :- import_module pair.
 :- import_module term.
 :- import_module varset.
@@ -319,7 +320,7 @@ map_parser_one_or_more(Parser, Head, Tail, Result) :-
         ;
             HeadResult = ok1(HeadItem),
             TailResult = ok1(TailItems),
-            Result = ok1(one_or_more_cons(HeadItem, TailItems))
+            Result = ok1(one_or_more.cons(HeadItem, TailItems))
         )
     ).
 
@@ -366,7 +367,7 @@ accumulate_conflict_specs(Context, ConflictingWhatInWhat, Specified,
     then
         Pieces = [words("Error:"), words(ConflictingWhatInWhat),
             suffix(":"), nl, words(Diagnosis), suffix("."), nl],
-        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     else

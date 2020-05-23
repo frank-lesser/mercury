@@ -26,7 +26,7 @@
 % considered used:
 %   - a type-info (or part of a type-info) of a type parameter of the
 %     type of a variable that is used (for example, if a variable
-%     of type list(T) is used, then TypeInfo_for_T is used)
+%     of type list(T) is used, then the type_info for T is used)
 %
 % The first step is to determine which arguments of which predicates are used
 % locally to their predicate. For each unused argument, a set of other
@@ -511,8 +511,8 @@ initialise_vardep([Var | Vars], !VarDep) :-
 
     % For each variable, ensure the typeinfos describing the type parameters
     % of the type of the variable depend on the head variable. For example,
-    % if HeadVar1 has type list(T), then TypeInfo_for_T is used if HeadVar1
-    % is used.
+    % if HeadVar1 has type list(T), then the type_info for T is used
+    % if HeadVar1 is used.
     %
 :- pred setup_typeinfo_deps(list(prog_var)::in, vartypes::in,
     pred_proc_id::in, rtti_varmaps::in, var_dep::in, var_dep::out) is det.
@@ -1852,7 +1852,7 @@ report_unused_args(_ModuleInfo, PredInfo, UnusedArgs) = Spec :-
     Arity = pred_info_orig_arity(PredInfo),
     SNA = sym_name_arity(qualified(ModuleName, PredName), Arity),
     Pieces1 = [words("In"), fixed(pred_or_func_to_full_str(PredOrFunc)),
-        qual_sym_name_and_arity(SNA), suffix(":"), nl, words("warning:")],
+        qual_sym_name_arity(SNA), suffix(":"), nl, words("warning:")],
     ( if NumArgs = 1 then
         Pieces2 = [words("argument") | format_arg_list(UnusedArgs)] ++
             [words("is unused."), nl]
@@ -1860,8 +1860,8 @@ report_unused_args(_ModuleInfo, PredInfo, UnusedArgs) = Spec :-
         Pieces2 = [words("arguments") | format_arg_list(UnusedArgs)] ++
             [words("are unused."), nl]
     ),
-    Msg = simple_msg(Context, [always(Pieces1 ++ Pieces2)]),
-    Spec = error_spec(severity_warning, phase_code_gen, [Msg]).
+    Spec = simplest_spec($pred, severity_warning, phase_code_gen,
+        Context, Pieces1 ++ Pieces2).
 
 :- func format_arg_list(list(int)) = list(format_component).
 

@@ -1,7 +1,7 @@
 %---------------------------------------------------------------------------%
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
-% Copyright (C) 2016-2018 The Mercury team.
+% Copyright (C) 2016-2020 The Mercury team.
 % This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
@@ -83,13 +83,13 @@
 
     % Truncating integer division.
     %
-    % Throws a `math.domain_error' exception if the right operand is zero.
+    % Throws a `domain_error' exception if the right operand is zero.
     %
 :- func (uint::in) div (uint::in) = (uint::uo) is det.
 
     % Truncating integer division.
     %
-    % Throws a `math.domain_error' exception if the right operand is zero.
+    % Throws a `domain_error' exception if the right operand is zero.
     %
 :- func (uint::in) // (uint::in) = (uint::uo) is det.
 
@@ -105,14 +105,14 @@
     % Modulus.
     % X mod Y = X - (X div Y) * Y
     %
-    % Throws a `math.domain_error' exception if the right operand is zero.
+    % Throws a `domain_error' exception if the right operand is zero.
     %
 :- func (uint::in) mod (uint::in) = (uint::uo) is det.
 
     % Remainder.
     % X rem Y = X - (X // Y) * Y.
     %
-    % Throws a `math.domain_error/` exception if the right operand is zero.
+    % Throws a `domain_error/` exception if the right operand is zero.
     %
 :- func (uint::in) rem (uint::in) = (uint::uo) is det.
 
@@ -187,12 +187,21 @@
 :- func uint_to_doc(uint) = pretty_printer.doc.
 
 %---------------------------------------------------------------------------%
+%
+% Computing hashes of uints.
+%
+
+    % Compute a hash value for a uint.
+    %
+:- func hash(uint) = int.
+:- pred hash(uint::in, int::out) is det.
+
+%---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
 
 :- implementation.
 
 :- import_module exception.
-:- import_module math.
 :- import_module require.
 :- import_module string.
 
@@ -302,7 +311,7 @@ X div Y = X // Y.
 :- pragma inline('//'/2).
 X // Y = Div :-
     ( if Y = 0u then
-        throw(math.domain_error("uint.'//': division by zero"))
+        throw(domain_error("uint.'//': division by zero"))
     else
         Div = unchecked_quotient(X, Y)
     ).
@@ -315,7 +324,7 @@ X mod Y = X rem Y.
 :- pragma inline(rem/2).
 X rem Y = Rem :-
     ( if Y = 0u then
-        throw(math.domain_error("uint.rem: division by zero"))
+        throw(domain_error("uint.rem: division by zero"))
     else
         Rem = unchecked_rem(X, Y)
     ).
@@ -327,7 +336,7 @@ X << Y = Result :-
         Result = unchecked_left_shift(X, Y)
     else
         Msg = "uint.(<<): second operand is out of range",
-        throw(math.domain_error(Msg))
+        throw(domain_error(Msg))
     ).
 
 X >> Y = Result :-
@@ -335,7 +344,7 @@ X >> Y = Result :-
         Result = unchecked_right_shift(X, Y)
     else
         Msg = "uint.(>>): second operand is out of range",
-        throw(math.domain_error(Msg))
+        throw(domain_error(Msg))
     ).
 
 %---------------------------------------------------------------------------%
@@ -420,6 +429,43 @@ odd(X) :-
 %---------------------------------------------------------------------------%
 
 uint_to_doc(X) = str(string.uint_to_string(X)).
+
+%---------------------------------------------------------------------------%
+
+% The integer hash functions below are originally from:
+%
+%  http://www.concentric.net/~Ttwang/tech/inthash.htm
+%
+% The above link is now dead; the last version can be found at:
+%
+%  https://web.archive.org/web/20121102023700/http://www.concentric.net/~Ttwang/tech/inthash.htm
+%
+% The algorithms from that page that we use are:
+%
+%   public int hash32shiftmult(int key)
+%   public long hash64shift(long key)
+
+hash(!.Key) = Hash :-
+    C2 = 0x_27d4_eb2d_u, % A prime or odd constant.
+    ( if bits_per_uint = 32 then
+        !:Key = (!.Key `xor` 61_u) `xor` (!.Key >> 16),
+        !:Key = !.Key + (!.Key << 3),
+        !:Key = !.Key `xor` (!.Key >> 4),
+        !:Key = !.Key * C2,
+        !:Key = !.Key `xor` (!.Key >> 15)
+    else
+        !:Key = (\ !.Key) + (!.Key << 21), % !:Key = (!.Key << 21) - !.Key - 1
+        !:Key = !.Key `xor` (!.Key >> 24),
+        !:Key = (!.Key + (!.Key << 3)) + (!.Key << 8), % !.Key * 265
+        !:Key = !.Key `xor` (!.Key >> 14),
+        !:Key = (!.Key + (!.Key << 2)) + (!.Key << 4), % !.Key * 21
+        !:Key = !.Key `xor` (!.Key >> 28),
+        !:Key = !.Key + (!.Key << 31)
+    ),
+    Hash = uint.cast_to_int(!.Key).
+
+hash(UInt, Hash) :-
+    Hash = hash(UInt).
 
 %---------------------------------------------------------------------------%
 :- end_module uint.

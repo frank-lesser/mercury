@@ -295,6 +295,7 @@
 :- import_module bool.
 :- import_module int.
 :- import_module maybe.
+:- import_module one_or_more.
 :- import_module require.
 :- import_module set.
 :- import_module term.
@@ -712,7 +713,7 @@ inst_lookup(ModuleInfo, InstName, Inst) :-
         module_info_get_inst_table(ModuleInfo, InstTable),
         inst_table_get_user_insts(InstTable, UserInstTable),
         list.length(Args, Arity),
-        ( if map.search(UserInstTable, inst_id(Name, Arity), InstDefn) then
+        ( if map.search(UserInstTable, inst_ctor(Name, Arity), InstDefn) then
             InstDefn = hlds_inst_defn(_VarSet, Params, InstBody, _MMTC,
                 _Context, _Status),
             InstBody = eqv_inst(Inst0),
@@ -1294,12 +1295,12 @@ mode_get_insts_semidet(ModuleInfo, user_defined_mode(Name, Args),
     % XXX This is a makeshift fix for a problem that requires more
     % investigation (without this fix the compiler occasionally
     % throws an exception in mode_get_insts/4).
-    ( if map.search(ModeDefns, mode_id(Name, Arity), HLDS_Mode0) then
+    ( if map.search(ModeDefns, mode_ctor(Name, Arity), HLDS_Mode0) then
         HLDS_Mode = HLDS_Mode0
     else
         Name = unqualified(String),
         BuiltinName = qualified(mercury_public_builtin_module, String),
-        map.search(ModeDefns, mode_id(BuiltinName, Arity), HLDS_Mode)
+        map.search(ModeDefns, mode_ctor(BuiltinName, Arity), HLDS_Mode)
     ),
     HLDS_Mode = hlds_mode_defn(_VarSet, Params, ModeDefn, _Context, _Status),
     ModeDefn = hlds_mode_body(Mode0),

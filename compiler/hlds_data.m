@@ -32,6 +32,7 @@
 :- import_module list.
 :- import_module map.
 :- import_module maybe.
+:- import_module one_or_more.
 
 :- implementation.
 
@@ -950,7 +951,7 @@ set_type_defn_prev_errors(X, !Defn) :-
                 % currently use it to allow the representation of
                 % "where direct_arg is []" annotations on types,
                 % such as in tests/invalid/where_direct_arg.m.
-                dur_direct_arg_ctors        :: maybe(list(sym_name_and_arity))
+                dur_direct_arg_ctors        :: maybe(list(sym_name_arity))
             ).
 
 :- type constructor_repn
@@ -1087,7 +1088,8 @@ constructor_cons_ids(TypeCtor, Ctors) = SortedConsIds :-
 
 gather_constructor_cons_ids(_TypeCtor, [], !ConsIds).
 gather_constructor_cons_ids(TypeCtor, [Ctor | Ctors], !ConsIds) :-
-    Ctor = ctor(_Ordinal, _MaybeExistConstraints, SymName, _Args, Arity, _Ctxt),
+    Ctor = ctor(_Ordinal, _MaybeExistConstraints, SymName,
+        _Args, Arity, _Ctxt),
     ConsId = cons(SymName, Arity, TypeCtor),
     !:ConsIds = [ConsId | !.ConsIds],
     gather_constructor_cons_ids(TypeCtor, Ctors, !ConsIds).

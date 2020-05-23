@@ -55,11 +55,14 @@
 :- import_module list.
 :- import_module map.
 :- import_module maybe.
+:- import_module one_or_more.
 :- import_module set.
 :- import_module string.
 :- import_module term.
 :- import_module term_to_xml.
 :- import_module varset.
+
+%-----------------------------------------------------------------------------%
 
     % Record all the locations of comments in a file.
     %
@@ -90,29 +93,35 @@ xml_documentation(ModuleInfo, !IO) :-
     module_name_to_file_name(Globals, do_create_dirs, ".xml",
         ModuleName, FileName, !IO),
 
-    lookup_module_source_file(ModuleName, SrcFileName, !IO),
-    io.open_input(SrcFileName, SrcResult, !IO),
+    lookup_module_source_file(ModuleName, MaybeSrcFileName, !IO),
     (
-        SrcResult = ok(SrcStream),
-        build_comments(SrcStream, comments(map.init), Comments, !IO),
-
-        % XXX We should find the ":- module " declaration
-        % and get the comment from there.
-        ModuleComment = get_comment_forwards(Comments, 1),
-
-        io.open_output(FileName, OpenResult, !IO),
+        MaybeSrcFileName = yes(SrcFileName),
+        io.open_input(SrcFileName, SrcResult, !IO),
         (
-            OpenResult = ok(Stream),
-            MIXmlDoc = module_info_xml_doc(Comments, ModuleComment,
-                ModuleInfo),
-            write_xml_doc(Stream, MIXmlDoc, !IO)
+            SrcResult = ok(SrcStream),
+            build_comments(SrcStream, comments(map.init), Comments, !IO),
+
+            % XXX We should find the ":- module " declaration
+            % and get the comment from there.
+            ModuleComment = get_comment_forwards(Comments, 1),
+
+            io.open_output(FileName, OpenResult, !IO),
+            (
+                OpenResult = ok(Stream),
+                MIXmlDoc = module_info_xml_doc(Comments, ModuleComment,
+                    ModuleInfo),
+                write_xml_doc(Stream, MIXmlDoc, !IO)
+            ;
+                OpenResult = error(Err),
+                unable_to_open_file(FileName, Err, !IO)
+            )
         ;
-            OpenResult = error(Err),
-            unable_to_open_file(FileName, Err, !IO)
+            SrcResult = error(SrcErr),
+            unable_to_open_file(SrcFileName, SrcErr, !IO)
         )
     ;
-        SrcResult = error(SrcErr),
-        unable_to_open_file(SrcFileName, SrcErr, !IO)
+        MaybeSrcFileName = no,
+        unexpected($pred, "no source file name")
     ).
 
 %-----------------------------------------------------------------------------%
@@ -375,7 +384,7 @@ type_documentation(C, type_ctor(TypeName, TypeArity), TypeDefn, !Xmls) :-
         XmlVisibility = type_visibility_to_xml(TypeStatus),
 
         Tag = type_xml_tag(TypeBody),
-        Id = attr("id", sym_name_and_arity_to_id("type", TypeName, TypeArity)),
+        Id = attr("id", sym_name_arity_to_id("type", TypeName, TypeArity)),
         Children = [XmlName, XmlTypeParams, XmlVisibility,
                 prog_context_to_xml(Context) |
                 type_body_to_xml(C, TVarset, TypeBody)],
@@ -440,7 +449,7 @@ constructor_to_xml(C, TVarset, Ctor) = Xml :-
         ExistConstraints =
             cons_exist_constraints(ExistQVars, Constraints, _, _)
     ),
-    Id = attr("id", sym_name_and_arity_to_id("ctor", Name, Arity)),
+    Id = attr("id", sym_name_arity_to_id("ctor", Name, Arity)),
     XmlName = name_to_xml(Name),
     XmlContext = prog_context_to_xml(Context),
     XmlArgs = xml_list("ctor_args", constructor_arg_to_xml(C, TVarset), Args),
@@ -476,7 +485,7 @@ mer_type_to_xml(TVarset, type_variable(TVar, _)) =
     type_param_to_xml(TVarset, TVar).
 mer_type_to_xml(TVarset, defined_type(TypeName, Args, _)) = Xml :-
     Ref = attr("ref",
-        sym_name_and_arity_to_id("type", TypeName, length(Args))),
+        sym_name_arity_to_id("type", TypeName, length(Args))),
     XmlName = name_to_xml(TypeName),
     XmlArgs = xml_list("type_args", mer_type_to_xml(TVarset), Args),
     Xml = elem("type", [Ref], [XmlName, XmlArgs]).
@@ -554,7 +563,7 @@ predicate_documentation(C, PredInfo) = Xml :-
         IsPredOrFunc = pf_function,
         Tag = "function"
     ),
-    Id = sym_name_and_arity_to_id(Tag, PredName, Arity),
+    Id = sym_name_arity_to_id(Tag, PredName, Arity),
 
     XmlName = name_to_xml(PredName),
     XmlContext = prog_context_to_xml(Context),
@@ -629,7 +638,7 @@ mer_mode_to_xml(InstVarSet, Mode) = Xml :-
     ;
         Mode = user_defined_mode(Name, Args),
         Ref = attr("ref",
-            sym_name_and_arity_to_id("mode", Name, length(Args))),
+            sym_name_arity_to_id("mode", Name, length(Args))),
         XmlArgs = xml_list("mode_args", mer_inst_to_xml(InstVarSet), Args),
         Xml = elem("user_defined_mode", [Ref], [name_to_xml(Name), XmlArgs])
     ).
@@ -679,7 +688,7 @@ mer_inst_to_xml(InstVarSet, Inst) = Xml :-
 :- func inst_name_to_xml(inst_varset, inst_name) = xml.
 
 inst_name_to_xml(InstVarSet, user_inst(Name, Insts)) = Xml :-
-    Ref = attr("ref", sym_name_and_arity_to_id("inst", Name, length(Insts))),
+    Ref = attr("ref", sym_name_arity_to_id("inst", Name, length(Insts))),
     XmlName = name_to_xml(Name),
     XmlInsts = xml_list("inst_args", mer_inst_to_xml(InstVarSet), Insts),
     Xml = elem("user_inst", [Ref], [XmlName, XmlInsts]).
@@ -779,7 +788,7 @@ class_documentation(C, PredTable, class_id(Name, Arity), ClassDefn, !Xml) :-
         typeclass_status_defined_in_this_module(TypeClassStatus),
     (
         DefinedInThisModule = yes,
-        Id = sym_name_and_arity_to_id("class", Name, Arity),
+        Id = sym_name_arity_to_id("class", Name, Arity),
 
         Context = ClassDefn ^ classdefn_context,
         TVarset = ClassDefn ^ classdefn_tvarset,
@@ -856,7 +865,7 @@ prog_context_to_xml(context(FileName, LineNumber)) =
 
 prog_constraint_to_xml(TVarset, Constraint) = Xml :-
     Constraint = constraint(ClassName, ArgTypes),
-    Id = sym_name_and_arity_to_id("constraint", ClassName,
+    Id = sym_name_arity_to_id("constraint", ClassName,
         list.length(ArgTypes)),
     XmlName = name_to_xml(ClassName),
     XmlTypes = xml_list("constraint_types", mer_type_to_xml(TVarset),
@@ -954,9 +963,9 @@ sym_name_to_id(Prefix, Name) = prefixed_sym_name(Prefix, Name).
     % arity, A, into a string with prefix, P, prefixed to the
     % generated name.
     %
-:- func sym_name_and_arity_to_id(string, sym_name, int) = string.
+:- func sym_name_arity_to_id(string, sym_name, int) = string.
 
-sym_name_and_arity_to_id(Prefix, Name, Arity) =
+sym_name_arity_to_id(Prefix, Name, Arity) =
     prefixed_sym_name(Prefix, Name) ++ "-" ++ int_to_string(Arity).
 
 :- func prefixed_sym_name(string, sym_name) = string.

@@ -1,5 +1,5 @@
 #!/bin/sh
-# vim: ts=4 sw=4 et
+# vim: ts=4 sw=4 et ft=sh
 #---------------------------------------------------------------------------#
 # Copyright (C) 1995-2001 The University of Melbourne.
 # This file may only be copied under the terms of the GNU General
@@ -103,6 +103,13 @@ Options:
     --test-params
         When executing the test suite, use the stage 2 Mmake.params
         file.
+    --keep-success-log-files
+        Keep every test case's .log file, renamed as a .kept_log file,
+        even if the test passes. It can be useful to compare these files
+        in a known-good workspace with the corresponding log files
+        in a workspace containing a change that fails some test cases.
+        Note that unneeded .kept_log files must be deleted manually;
+        they do *not* get deleted by any mmake targets.
     --stop-after-stage-2
         Stop after building stage 2, even if it is successful.
     --use-subdirs
@@ -353,6 +360,11 @@ while test $# -gt 0; do
 
     --test-params)
         test_params=true ;;
+
+    --keep-success-log-files)
+        KEEP_SUCCESS_LOG_FILES=keep_success_log_files
+        export KEEP_SUCCESS_LOG_FILES
+        ;;
 
     --stop-after-stage-2)
         stop_after_stage_2=true ;;
@@ -694,23 +706,23 @@ then
         set +x
         echo linking stage 2... 1>&2
         cd $stage2dir
+        $LN_S $root/RESERVED_MACRO_NAMES .
+
         mkdir compiler
         cd compiler
         # Break up the links into several chunks.
         # This is needed to cope with small limits
         # on the size of argument vectors.
-
         $LN_S $root/compiler/[a-h]*.m .
         $LN_S $root/compiler/[i-o]*.m .
         $LN_S $root/compiler/[p-s]*.m .
         $LN_S $root/compiler/[t-z]*.m .
         $LN_S $root/compiler/notes .
-
         cp $root/compiler/Mmake* $root/compiler/Mercury.options .
         cp $root/compiler/*_FLAGS.in .
         cp $root/compiler/.mgnu* .
+
         cd $root/$stage2dir
-        $LN_S $root/RESERVED_MACRO_NAMES .
         mkdir library
         cd library
         $LN_S $root/library/[a-l]*.m .
@@ -727,6 +739,7 @@ then
         cp $root/library/.mgnu* .
         $LN_S $root/library/$STD_LIB_NAME.init .
         $LN_S $root/library/RESERVED_MACRO_NAMES .
+
         cd $root/$stage2dir
         mkdir mdbcomp
         cd mdbcomp
@@ -736,6 +749,7 @@ then
         cp $root/mdbcomp/.mgnu* .
         $LN_S $root/mdbcomp/$MDBCOMP_LIB_NAME.init .
         $LN_S $root/mdbcomp/RESERVED_MACRO_NAMES .
+
         cd $root/$stage2dir
         mkdir browser
         cd browser
@@ -745,6 +759,7 @@ then
         cp $root/browser/.mgnu* .
         $LN_S $root/browser/$BROWSER_LIB_NAME.init .
         $LN_S $root/browser/RESERVED_MACRO_NAMES .
+
         cd $root/$stage2dir
         mkdir ssdb
         cd ssdb
@@ -754,6 +769,15 @@ then
         cp $root/ssdb/.mgnu* .
         $LN_S $root/ssdb/$SSDB_LIB_NAME.init .
         $LN_S $root/ssdb/RESERVED_MACRO_NAMES .
+
+        cd $root/$stage2dir
+        mkdir grade_lib
+        cd grade_lib
+        $LN_S $root/grade_lib/*.m .
+        cp $root/grade_lib/Mmake* $root/grade_lib/Mercury.options .
+        cp $root/grade_lib/*_FLAGS.in .
+        cp $root/grade_lib/.mgnu* .
+
         cd $root/$stage2dir
         mkdir mfilterjavac
         cd mfilterjavac
@@ -785,6 +809,7 @@ then
             cp $root/runtime/.mgnu* .
             $LN_S $root/runtime/machdeps .
             $LN_S $root/runtime/RESERVED_MACRO_NAMES .
+
             cd $root/$stage2dir
             rm -f trace
             mkdir trace
@@ -795,6 +820,7 @@ then
             cp $root/trace/Mmake* .
             cp $root/trace/.mgnu* .
             $LN_S $root/trace/RESERVED_MACRO_NAMES .
+
             cd $root/$stage2dir
             rm -f robdd
             mkdir robdd
@@ -840,6 +866,7 @@ then
         $LN_S $root/scripts .
         $LN_S $root/tools .
         $LN_S $root/util .
+
         if $copy_slice
         then
             mkdir slice
@@ -852,6 +879,7 @@ then
         else
             $LN_S $root/slice .
         fi
+
         if $copy_profilers
         then
             mkdir profiler
@@ -861,6 +889,7 @@ then
             cp $root/profiler/*_FLAGS.in .
             cp $root/profiler/.mgnu* .
             cd $root/$stage2dir
+
             mkdir deep_profiler
             cd deep_profiler
             $LN_S $root/deep_profiler/*.m .
@@ -873,6 +902,7 @@ then
             $LN_S $root/profiler .
             $LN_S $root/deep_profiler .
         fi
+
         $LN_S $root/conf* .
         $LN_S $root/aclocal.m4 .
         $LN_S $root/m4 .
@@ -906,6 +936,12 @@ then
         then
             /bin/rm -f ssdb/Mmake.ssdb.params
             cp $root/Mmake.stage.ssdb.params ssdb/Mmake.ssdb.params
+        fi
+        if test -f $root/Mmake.stage.grade_lib.params
+        then
+            /bin/rm -f grade_lib/Mmake.grade_lib.params
+            cp $root/Mmake.stage.grade_lib.params \
+                grade_lib/Mmake.grade_lib.params
         fi
         if test -f $root/Mmake.stage.deep.params
         then
@@ -975,7 +1011,7 @@ then
                 # will not run if we are using `mmc --make', so run them now.
                 if (cd $stage2dir && \
                     $MMAKE compiler/COMP_FLAGS library/LIB_FLAGS \
-                    mdbcomp/MDBCOMP_FLAGS \
+                    mdbcomp/MDBCOMP_FLAGS grade_lib/GRADE_LIB_FLAGS \
                     profiler/PROF_FLAGS deep_profiler/DEEP_FLAGS)
                 then
                     echo "building of stage 2 flags files successful"
@@ -992,6 +1028,7 @@ then
             dep_mdbcomp \
             dep_browser dep_browser_aux \
             dep_ssdb \
+            dep_grade_lib \
             dep_compiler \
             dep_slice \
             dep_profiler dep_profiler_aux \
@@ -1083,6 +1120,20 @@ then
         # We use "mmake" instead $MMAKE because we don't want to override
         # the mmc in $PATH with the one in scripts, since that one will
         # probably refer to a nonexistent executable in /usr/local/mercury-DEV.
+
+        if (cd $stage2dir/grade_lib && \
+            unset MMAKE && \
+            unset MMAKE_VPATH && \
+            unset MMAKE_DIR && \
+            unset MERCURY_CONFIG_DIR && \
+            unset MERCURY_STDLIB_DIR && \
+            mmake $mmake_opts $mmake_jobs all $ENVGRADE)
+        then
+            echo "building of stage 2 grade_lib successful"
+        else
+            echo "building of stage 2 grade_lib not successful"
+            exit 1
+        fi
 
         if (cd $stage2dir/slice && \
             unset MMAKE && \
@@ -1309,6 +1360,7 @@ EOF
 
     echo linking stage 3... 1>&2
     set +x
+
     cd $stage3dir
     mkdir compiler
     cd compiler
@@ -1320,10 +1372,10 @@ EOF
     $LN_S $root/compiler/[p-s]*.m .
     $LN_S $root/compiler/[t-z]*.m .
     $LN_S $root/compiler/notes .
-
     cp $root/compiler/Mmake* $root/compiler/Mercury.options .
     cp $root/compiler/*_FLAGS.in .
     cp $root/compiler/.mgnu* .
+
     cd $root/$stage3dir
     mkdir library
     cd library
@@ -1339,6 +1391,7 @@ EOF
     cp $root/library/INTER_FLAGS* .
     cp $root/library/.mgnu* .
     $LN_S $root/library/$STD_LIB_NAME.init .
+
     cd $root/$stage3dir
     mkdir mdbcomp
     cd mdbcomp
@@ -1347,6 +1400,7 @@ EOF
     cp $root/mdbcomp/*_FLAGS.in .
     cp $root/mdbcomp/.mgnu* .
     $LN_S $root/mdbcomp/$MDBCOMP_LIB_NAME.init .
+
     cd $root/$stage3dir
     mkdir browser
     cd browser
@@ -1355,6 +1409,7 @@ EOF
     cp $root/browser/*_FLAGS.in .
     cp $root/browser/.mgnu* .
     $LN_S $root/browser/$BROWSER_LIB_NAME.init .
+
     cd $root/$stage3dir
     mkdir ssdb
     cd ssdb
@@ -1363,6 +1418,7 @@ EOF
     cp $root/ssdb/*_FLAGS.in .
     cp $root/ssdb/.mgnu* .
     $LN_S $root/ssdb/$SSDB_LIB_NAME.init .
+
     cd $root/$stage3dir
     $LN_S $root/$stage2dir/boehm_gc .
     $LN_S $root/$stage2dir/java .
@@ -1374,12 +1430,23 @@ EOF
     $LN_S $root/scripts .
     $LN_S $root/tools .
     $LN_S $root/util .
+
+    cd $root/$stage3dir
+    mkdir grade_lib
+    cd grade_lib
+    $LN_S $root/grade_lib/*.m .
+    cp $root/grade_lib/Mmake* $root/grade_lib/Mercury.options .
+    cp $root/grade_lib/*_FLAGS.in .
+    cp $root/grade_lib/.mgnu* .
+
+    cd $root/$stage3dir
     mkdir slice
     cd slice
     $LN_S $root/slice/*.m .
     cp $root/slice/Mmake* $root/slice/Mercury.options .
     cp $root/slice/*_FLAGS.in .
     cp $root/slice/.mgnu* .
+
     cd $root/$stage3dir
     mkdir profiler
     cd profiler
@@ -1387,6 +1454,7 @@ EOF
     cp $root/profiler/Mmake* $root/profiler/Mercury.options .
     cp $root/profiler/*_FLAGS.in .
     cp $root/profiler/.mgnu* .
+
     cd $root/$stage3dir
     mkdir deep_profiler
     cd deep_profiler
@@ -1394,6 +1462,7 @@ EOF
     cp $root/deep_profiler/Mmake* $root/deep_profiler/Mercury.options .
     cp $root/deep_profiler/*_FLAGS.in .
     cp $root/deep_profiler/.mgnu* .
+
     cd $root/$stage3dir
     mkdir mfilterjavac
     cd mfilterjavac
@@ -1401,6 +1470,7 @@ EOF
     cp $root/mfilterjavac/Mmake* $root/mfilterjavac/Mercury.options .
     cp $root/mfilterjavac/*_FLAGS.in .
     cp $root/mfilterjavac/.mgnu* .
+
     cd $root/$stage3dir
     $LN_S $root/conf* .
     $LN_S $root/aclocal.m4 .
@@ -1445,6 +1515,7 @@ EOF
         dep_browser dep_browser_aux \
         dep_ssdb \
         dep_compiler \
+        dep_grade_lib \
         dep_slice \
         dep_profiler dep_profiler_aux \
         dep_deep_profiler \
@@ -1565,6 +1636,20 @@ EOF
         fi
     fi
 
+    if (cd $stage3dir/grade_lib && \
+        unset MMAKE && \
+        unset MMAKE_VPATH && \
+        unset MMAKE_DIR && \
+        unset MERCURY_CONFIG_DIR && \
+        unset MERCURY_STDLIB_DIR && \
+        mmake $mmake_opts $mmake_jobs ${target_ext}s)
+    then
+        echo "building of stage 3 grade_lib successful"
+    else
+        echo "building of stage 3 grade_lib not successful"
+        exit 1
+    fi
+
     if (cd $stage3dir/slice && \
         unset MMAKE && \
         unset MMAKE_VPATH && \
@@ -1637,7 +1722,7 @@ EOF
     fi
 
     for dir in library mdbcomp browser ssdb compiler \
-        slice profiler deep_profiler mfilterjavac
+        grade_lib slice profiler deep_profiler mfilterjavac
     do
         # `mmake cs' in the compiler directory doesn't build
         # `mercury_compile_init.c', so we only compare the `.c'
@@ -1864,6 +1949,7 @@ then
             grade_subdirs
             hard_coded
             invalid
+            invalid_make_int
             invalid_purity
             invalid_submodules
             misc_tests
@@ -1879,6 +1965,7 @@ then
             trailing
             typeclasses
             valid
+            valid_make_int
             valid_seq
             warnings"
 

@@ -71,7 +71,6 @@
 
 :- import_module bool.
 :- import_module char.
-:- import_module float.
 :- import_module int.
 :- import_module int8.
 :- import_module int16.
@@ -289,14 +288,7 @@ mlds_output_cast_rval(Opts, Type, Rval, !IO) :-
     mlds_output_cast(Opts, Type, !IO),
     % Cast the *whole* of Rval, not just an initial subrval.
     io.write_char('(', !IO),
-    ( if
-        Opts ^ m2co_highlevel_data = yes,
-        Rval = ml_const(mlconst_float(Float))
-    then
-        mlds_output_float_bits(Opts, Float, !IO)
-    else
-        mlds_output_rval(Opts, Rval, !IO)
-    ),
+    mlds_output_rval(Opts, Rval, !IO),
     io.write_char(')', !IO).
 
 %---------------------%
@@ -400,47 +392,9 @@ mlds_output_boxed_rval_generic(Opts, Rval, !IO) :-
 :- pragma inline(mlds_output_boxed_rval_float/4).
 
 mlds_output_boxed_rval_float(Opts, Rval, !IO) :-
-    ( if
-        Rval = ml_const(mlconst_float(Float)),
-        Opts ^ m2co_highlevel_data = yes
-    then
-        mlds_output_float_bits(Opts, Float, !IO)
-    else
-        io.write_string("MR_box_float(", !IO),
-        mlds_output_rval(Opts, Rval, !IO),
-        io.write_string(")", !IO)
-    ).
-
-    % Output the bit layout of a floating point literal as an integer, so that
-    % it can be cast to a pointer type. We manage to avoid this in all but one
-    % situation: in high-level data grades, when the program contains a ground
-    % term, of which a sub-term is a no-tag wrapper around float.
-    %
-    % Technically we should avoid doing this when --cross-compiling is
-    % enabled.
-    %
-    % XXX the problem is the field type in the C struct which is generated for
-    % the type which has the no-tag argument. The generated field type is a
-    % pointer to the struct for the no-tag type, yet the no-tag optimisation is
-    % used, so the field type should either be the struct for the no-tag type
-    % (not a pointer) or the type which the no-tag type wraps (which itself may
-    % be a no-tag type, etc.)
-    %
-:- pred mlds_output_float_bits(mlds_to_c_opts::in, float::in, io::di, io::uo)
-    is det.
-
-mlds_output_float_bits(Opts, Float, !IO) :-
-    expect(unify(Opts ^ m2co_highlevel_data, yes), $pred,
-        "should only be required with --high-level-data"),
-    SinglePrecFloat = Opts ^ m2co_single_prec_float,
-    (
-        SinglePrecFloat = yes,
-        String = float32_bits_string(Float)
-    ;
-        SinglePrecFloat = no,
-        String = float64_bits_string(Float)
-    ),
-    io.format("%s /* float-bits: %g */", [s(String), f(Float)], !IO).
+    io.write_string("MR_box_float(", !IO),
+    mlds_output_rval(Opts, Rval, !IO),
+    io.write_string(")", !IO).
 
 :- pred mlds_output_boxed_rval_int64(mlds_to_c_opts::in,
     mlds_rval::in, io::di, io::uo) is det.
@@ -758,10 +712,10 @@ mlds_output_binop(Opts, Op, X, Y, !IO) :-
         ; Op = float_ge, OpStr = ">="
         ; Op = float_lt, OpStr = "<"
         ; Op = float_gt, OpStr = ">"
-        ; Op = float_plus, OpStr = "+"
-        ; Op = float_minus, OpStr = "-"
-        ; Op = float_times, OpStr = "*"
-        ; Op = float_divide, OpStr = "/"
+        ; Op = float_add, OpStr = "+"
+        ; Op = float_sub, OpStr = "-"
+        ; Op = float_mul, OpStr = "*"
+        ; Op = float_div, OpStr = "/"
         ),
         io.write_string("(", !IO),
         mlds_output_bracketed_rval(Opts, X, !IO),
@@ -771,10 +725,12 @@ mlds_output_binop(Opts, Op, X, Y, !IO) :-
         mlds_output_bracketed_rval(Opts, Y, !IO),
         io.write_string(")", !IO)
     ;
-        Op = unsigned_le,
+        ( Op = unsigned_lt, OpStr = "<"
+        ; Op = unsigned_le, OpStr = "<="
+        ),
         io.write_string("(((MR_Unsigned) ", !IO),
         mlds_output_rval_as_unsigned_op_arg(Opts, 2147483647, X, !IO),
-        io.write_string(") <= ((MR_Unsigned) ", !IO),
+        io.format(") %s ((MR_Unsigned) ", [s(OpStr)], !IO),
         mlds_output_rval_as_unsigned_op_arg(Opts, 2147483647, Y, !IO),
         io.write_string("))", !IO)
     ;
@@ -858,8 +814,8 @@ mlds_output_binop(Opts, Op, X, Y, !IO) :-
         mlds_output_rval_as_op_arg(Opts, Y, !IO),
         io.write_string(")", !IO)
     ;
-        ( Op = unchecked_left_shift(_), OpStr = "<<"
-        ; Op = unchecked_right_shift(_), OpStr = ">>"
+        ( Op = unchecked_left_shift(_, ShiftType), OpStr = "<<"
+        ; Op = unchecked_right_shift(_, ShiftType), OpStr = ">>"
         ),
         io.write_string("(", !IO),
         mlds_output_rval_as_op_arg(Opts, X, !IO),
@@ -870,7 +826,15 @@ mlds_output_binop(Opts, Op, X, Y, !IO) :-
         % is a small constant.
         ( if Y = ml_const(mlconst_int(YInt)) then
             io.write_int(YInt, !IO)
+        else if Y = ml_const(mlconst_uint(YUInt)) then
+            io.write_uint(YUInt, !IO)
         else
+            (
+                ShiftType = shift_by_int
+            ;
+                ShiftType = shift_by_uint,
+                io.write_string("(int) ", !IO)
+            ),
             mlds_output_rval_as_op_arg(Opts, Y, !IO)
         ),
         io.write_string(")", !IO)

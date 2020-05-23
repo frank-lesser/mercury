@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2010-2012 The University of Melbourne.
-% Copyright (C) 2013-2018 The Mercury team.
+% Copyright (C) 2013-2018, 2020 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %---------------------------------------------------------------------------%
@@ -77,10 +77,12 @@
 :- import_module parse_tree.prog_type.
 
 :- import_module int.
+:- import_module int32.
 :- import_module map.
 :- import_module require.
 :- import_module string.
 :- import_module term.
+:- import_module uint32.
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
@@ -443,8 +445,6 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = int_mul(int_type_int)
         ; Op = int_div(int_type_int)
         ; Op = int_mod(int_type_int)
-        ; Op = unchecked_left_shift(int_type_int)
-        ; Op = unchecked_right_shift(int_type_int)
         ; Op = bitwise_and(int_type_int)
         ; Op = bitwise_or(int_type_int)
         ; Op = bitwise_xor(int_type_int)
@@ -459,7 +459,6 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = int_gt(_)
         ; Op = int_le(_)
         ; Op = int_ge(_)
-        ; Op = unsigned_le
         ; Op = int_add(int_type_uint)
         ; Op = int_sub(int_type_uint)
         ; Op = int_mul(int_type_uint)
@@ -468,8 +467,6 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = bitwise_and(int_type_uint)
         ; Op = bitwise_or(int_type_uint)
         ; Op = bitwise_xor(int_type_uint)
-        ; Op = unchecked_left_shift(int_type_uint)
-        ; Op = unchecked_right_shift(int_type_uint)
         ; Op = int_add(int_type_int32)
         ; Op = int_sub(int_type_int32)
         ; Op = int_mul(int_type_int32)
@@ -478,8 +475,6 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = bitwise_and(int_type_int32)
         ; Op = bitwise_or(int_type_int32)
         ; Op = bitwise_xor(int_type_int32)
-        ; Op = unchecked_left_shift(int_type_int32)
-        ; Op = unchecked_right_shift(int_type_int32)
         ; Op = int_add(int_type_uint32)
         ; Op = int_sub(int_type_uint32)
         ; Op = int_mul(int_type_uint32)
@@ -488,8 +483,6 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = bitwise_and(int_type_uint32)
         ; Op = bitwise_or(int_type_uint32)
         ; Op = bitwise_xor(int_type_uint32)
-        ; Op = unchecked_left_shift(int_type_uint32)
-        ; Op = unchecked_right_shift(int_type_uint32)
         ; Op = int_add(int_type_int64)
         ; Op = int_sub(int_type_int64)
         ; Op = int_mul(int_type_int64)
@@ -498,8 +491,6 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = bitwise_and(int_type_int64)
         ; Op = bitwise_or(int_type_int64)
         ; Op = bitwise_xor(int_type_int64)
-        ; Op = unchecked_left_shift(int_type_int64)
-        ; Op = unchecked_right_shift(int_type_int64)
         ; Op = int_add(int_type_uint64)
         ; Op = int_sub(int_type_uint64)
         ; Op = int_mul(int_type_uint64)
@@ -508,12 +499,10 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = bitwise_and(int_type_uint64)
         ; Op = bitwise_or(int_type_uint64)
         ; Op = bitwise_xor(int_type_uint64)
-        ; Op = unchecked_left_shift(int_type_uint64)
-        ; Op = unchecked_right_shift(int_type_uint64)
-        ; Op = float_plus
-        ; Op = float_minus
-        ; Op = float_times
-        ; Op = float_divide
+        ; Op = float_add
+        ; Op = float_sub
+        ; Op = float_mul
+        ; Op = float_div
         ; Op = float_eq
         ; Op = float_ne
         ; Op = float_lt
@@ -534,6 +523,48 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         output_rval_for_csharp(Info, Y, !IO),
         io.write_string(")", !IO)
     ;
+        Op = unsigned_lt,
+        io.write_string("((uint) ", !IO),
+        output_rval_for_csharp(Info, X, !IO),
+        io.write_string(" < (uint) ", !IO),
+        output_rval_for_csharp(Info, Y, !IO),
+        io.write_string(")", !IO)
+    ;
+        Op = unsigned_le,
+        io.write_string("((uint) ", !IO),
+        output_rval_for_csharp(Info, X, !IO),
+        io.write_string(" <= (uint) ", !IO),
+        output_rval_for_csharp(Info, Y, !IO),
+        io.write_string(")", !IO)
+    ;
+        ( Op = unchecked_left_shift(IntType, ShiftType)
+        ; Op = unchecked_right_shift(IntType, ShiftType)
+        ),
+        ( IntType = int_type_int
+        ; IntType = int_type_uint
+        ; IntType = int_type_int32
+        ; IntType = int_type_uint32
+        ; IntType = int_type_int64
+        ; IntType = int_type_uint64
+        ),
+        io.write_string("(", !IO),
+        output_rval_for_csharp(Info, X, !IO),
+        io.write_string(" ", !IO),
+        output_binary_op_for_csharp(Op, !IO),
+        io.write_string(" ", !IO),
+        % C# does not automatically promote uints to ints, since
+        % half of all uints are too big to be represented as ints.
+        % However, the only valid shift amounts are very small,
+        % so for valid shift amounts, the cast cannot lose information.
+        (
+            ShiftType = shift_by_int
+        ;
+            ShiftType = shift_by_uint,
+            io.write_string("(int)", !IO)
+        ),
+        output_rval_for_csharp(Info, Y, !IO),
+        io.write_string(")", !IO)
+    ;
         ( Op = int_add(int_type_int8)
         ; Op = int_sub(int_type_int8)
         ; Op = int_mul(int_type_int8)
@@ -541,14 +572,29 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = int_mod(int_type_int8)
         ; Op = bitwise_and(int_type_int8)
         ; Op = bitwise_xor(int_type_int8)
-        ; Op = unchecked_left_shift(int_type_int8)
-        ; Op = unchecked_right_shift(int_type_int8)
         ),
         io.write_string("(sbyte)(", !IO),
         output_rval_for_csharp(Info, X, !IO),
         io.write_string(" ", !IO),
         output_binary_op_for_csharp(Op, !IO),
         io.write_string(" ", !IO),
+        output_rval_for_csharp(Info, Y, !IO),
+        io.write_string(")", !IO)
+    ;
+        ( Op = unchecked_left_shift(int_type_int8, ShiftType)
+        ; Op = unchecked_right_shift(int_type_int8, ShiftType)
+        ),
+        io.write_string("(sbyte)(", !IO),
+        output_rval_for_csharp(Info, X, !IO),
+        io.write_string(" ", !IO),
+        output_binary_op_for_csharp(Op, !IO),
+        io.write_string(" ", !IO),
+        (
+            ShiftType = shift_by_int
+        ;
+            ShiftType = shift_by_uint,
+            io.write_string("(int)", !IO)
+        ),
         output_rval_for_csharp(Info, Y, !IO),
         io.write_string(")", !IO)
     ;
@@ -571,14 +617,29 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = bitwise_and(int_type_uint8)
         ; Op = bitwise_or(int_type_uint8)
         ; Op = bitwise_xor(int_type_uint8)
-        ; Op = unchecked_left_shift(int_type_uint8)
-        ; Op = unchecked_right_shift(int_type_uint8)
         ),
         io.write_string("(byte)(", !IO),
         output_rval_for_csharp(Info, X, !IO),
         io.write_string(" ", !IO),
         output_binary_op_for_csharp(Op, !IO),
         io.write_string(" ", !IO),
+        output_rval_for_csharp(Info, Y, !IO),
+        io.write_string(")", !IO)
+    ;
+        ( Op = unchecked_left_shift(int_type_uint8, ShiftType)
+        ; Op = unchecked_right_shift(int_type_uint8, ShiftType)
+        ),
+        io.write_string("(byte)(", !IO),
+        output_rval_for_csharp(Info, X, !IO),
+        io.write_string(" ", !IO),
+        output_binary_op_for_csharp(Op, !IO),
+        io.write_string(" ", !IO),
+        (
+            ShiftType = shift_by_int
+        ;
+            ShiftType = shift_by_uint,
+            io.write_string("(int)", !IO)
+        ),
         output_rval_for_csharp(Info, Y, !IO),
         io.write_string(")", !IO)
     ;
@@ -590,14 +651,29 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = bitwise_and(int_type_int16)
         ; Op = bitwise_or(int_type_int16)
         ; Op = bitwise_xor(int_type_int16)
-        ; Op = unchecked_left_shift(int_type_int16)
-        ; Op = unchecked_right_shift(int_type_int16)
         ),
         io.write_string("(short)(", !IO),
         output_rval_for_csharp(Info, X, !IO),
         io.write_string(" ", !IO),
         output_binary_op_for_csharp(Op, !IO),
         io.write_string(" ", !IO),
+        output_rval_for_csharp(Info, Y, !IO),
+        io.write_string(")", !IO)
+    ;
+        ( Op = unchecked_left_shift(int_type_int16, ShiftType)
+        ; Op = unchecked_right_shift(int_type_int16, ShiftType)
+        ),
+        io.write_string("(short)(", !IO),
+        output_rval_for_csharp(Info, X, !IO),
+        io.write_string(" ", !IO),
+        output_binary_op_for_csharp(Op, !IO),
+        io.write_string(" ", !IO),
+        (
+            ShiftType = shift_by_int
+        ;
+            ShiftType = shift_by_uint,
+            io.write_string("(int)", !IO)
+        ),
         output_rval_for_csharp(Info, Y, !IO),
         io.write_string(")", !IO)
     ;
@@ -609,14 +685,29 @@ output_binop_for_csharp(Info, Op, X, Y, !IO) :-
         ; Op = bitwise_and(int_type_uint16)
         ; Op = bitwise_or(int_type_uint16)
         ; Op = bitwise_xor(int_type_uint16)
-        ; Op = unchecked_left_shift(int_type_uint16)
-        ; Op = unchecked_right_shift(int_type_uint16)
         ),
         io.write_string("(ushort)(", !IO),
         output_rval_for_csharp(Info, X, !IO),
         io.write_string(" ", !IO),
         output_binary_op_for_csharp(Op, !IO),
         io.write_string(" ", !IO),
+        output_rval_for_csharp(Info, Y, !IO),
+        io.write_string(")", !IO)
+    ;
+        ( Op = unchecked_left_shift(int_type_uint16, ShiftType)
+        ; Op = unchecked_right_shift(int_type_uint16, ShiftType)
+        ),
+        io.write_string("(ushort)(", !IO),
+        output_rval_for_csharp(Info, X, !IO),
+        io.write_string(" ", !IO),
+        output_binary_op_for_csharp(Op, !IO),
+        io.write_string(" ", !IO),
+        (
+            ShiftType = shift_by_int
+        ;
+            ShiftType = shift_by_uint,
+            io.write_string("(int)", !IO)
+        ),
         output_rval_for_csharp(Info, Y, !IO),
         io.write_string(")", !IO)
     ).
@@ -630,8 +721,8 @@ output_binary_op_for_csharp(Op, !IO) :-
         ; Op = int_mul(_), OpStr = "*"
         ; Op = int_div(_), OpStr = "/"
         ; Op = int_mod(_), OpStr = "%"
-        ; Op = unchecked_left_shift(_), OpStr = "<<"
-        ; Op = unchecked_right_shift(_), OpStr = ">>"
+        ; Op = unchecked_left_shift(_, _), OpStr = "<<"
+        ; Op = unchecked_right_shift(_, _), OpStr = ">>"
         ; Op = bitwise_and(_), OpStr = "&"
         ; Op = bitwise_or(_), OpStr = "|"
         ; Op = bitwise_xor(_), OpStr = "^"
@@ -651,10 +742,10 @@ output_binary_op_for_csharp(Op, !IO) :-
         ; Op = float_lt, OpStr = "<"
         ; Op = float_gt, OpStr = ">"
 
-        ; Op = float_plus, OpStr = "+"
-        ; Op = float_minus, OpStr = "-"
-        ; Op = float_times, OpStr = "*"
-        ; Op = float_divide, OpStr = "/"
+        ; Op = float_add, OpStr = "+"
+        ; Op = float_sub, OpStr = "-"
+        ; Op = float_mul, OpStr = "*"
+        ; Op = float_div, OpStr = "/"
         ),
         io.write_string(OpStr, !IO)
     ;
@@ -673,6 +764,7 @@ output_binary_op_for_csharp(Op, !IO) :-
         ; Op = str_ne
         ; Op = string_unsafe_index_code_unit
         ; Op = pointer_equal_conservative
+        ; Op = unsigned_lt
         ; Op = unsigned_le
         ; Op = compound_eq
         ; Op = compound_lt
@@ -799,12 +891,14 @@ output_int_const_for_csharp(N, !IO) :-
     % in mlds_to_java_data.m.
     ( if
         N > 0,
-        N >> 31 = 1
+        not int32.from_int(N, _I32),
+        uint32.from_int(N, U32)
     then
         % The bit pattern fits in 32 bits, but is too big for a positive
-        % integer. The C# compiler will give an error about this, unless we
+        % integer. The C# compiler will report an error about this unless we
         % tell it otherwise.
-        io.format("unchecked((int) 0x%x)", [i(N /\ 0xffffffff)], !IO)
+        N32 = uint32.cast_to_int(U32),
+        io.format("unchecked((int) 0x%x)", [i(N32)], !IO)
     else
         io.write_int(N, !IO)
     ).

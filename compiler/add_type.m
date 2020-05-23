@@ -68,6 +68,7 @@
 :- import_module map.
 :- import_module maybe.
 :- import_module multi_map.
+:- import_module one_or_more.
 :- import_module require.
 :- import_module string.
 :- import_module term.
@@ -146,9 +147,9 @@ module_add_type_defn(TypeStatus0, NeedQual, ItemTypeDefnInfo,
         then
             SolverPieces = [words("Error: the definition"),
                 words("(as opposed to the name) of a solver type such as"),
-                unqual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+                unqual_sym_name_arity(sym_name_arity(SymName, Arity)),
                 words("must not be exported from its defining module."), nl],
-            SolverSpec = simplest_spec(severity_error,
+            SolverSpec = simplest_spec($pred, severity_error,
                 phase_parse_tree_to_hlds, Context, SolverPieces),
             Specs0 = [SolverSpec]
         else
@@ -239,7 +240,7 @@ check_for_duplicate_type_declaration(TypeCtor, OldDefn, NewStatus, NewContext,
         SecondIsExported =
             type_status_is_exported_to_non_submodules(SecondStatus),
         TypeCtor = type_ctor(SymName, Arity),
-        SNA = unqual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+        SNA = unqual_sym_name_arity(sym_name_arity(SymName, Arity)),
         ( if FirstIsExported = SecondIsExported then
             Severity = severity_warning,
             DupPieces = [words("Warning: duplicate declaration for type "),
@@ -269,7 +270,7 @@ check_for_duplicate_type_declaration(TypeCtor, OldDefn, NewStatus, NewContext,
         DupMsg = simplest_msg(SecondContext, DupPieces),
         FirstPieces = [words("The previous declaration was here."), nl],
         FirstMsg = simplest_msg(FirstContext, FirstPieces),
-        DupSpec = error_spec(Severity, phase_parse_tree_to_hlds,
+        DupSpec = error_spec($pred, Severity, phase_parse_tree_to_hlds,
             [DupMsg, FirstMsg]),
         !:Specs = [DupSpec | !.Specs]
     else
@@ -394,9 +395,9 @@ module_add_type_defn_foreign(TypeStatus0, TypeStatus1, TypeCtor,
         )
     else
         ForeignDeclPieces = [words("Error: type "),
-            unqual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+            unqual_sym_name_arity(sym_name_arity(SymName, Arity)),
             words("defined as foreign_type without being declared."), nl],
-        ForeignDeclSpec = simplest_spec(severity_error,
+        ForeignDeclSpec = simplest_spec($pred, severity_error,
             phase_parse_tree_to_hlds, Context, ForeignDeclPieces),
         !:Specs = [ForeignDeclSpec | !.Specs],
         !:FoundInvalidType = found_invalid_type
@@ -649,7 +650,7 @@ check_for_dummy_type_with_unify_compare(TypeStatus, TypeCtor, DetailsDu,
     then
         TypeCtor = type_ctor(SymName, Arity),
         DummyMainPieces = [words("Error: the type"),
-            unqual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+            unqual_sym_name_arity(sym_name_arity(SymName, Arity)),
             words("contains no information,"),
             words("and as such it is not allowed to have"),
             words("user-defined equality or comparison."), nl],
@@ -659,7 +660,7 @@ check_for_dummy_type_with_unify_compare(TypeStatus, TypeCtor, DetailsDu,
         DummyMsg = simple_msg(Context,
             [always(DummyMainPieces),
             verbose_only(verbose_once, DummyVerbosePieces)]),
-        DummySpec = error_spec(severity_error, phase_parse_tree_to_hlds,
+        DummySpec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
             [DummyMsg]),
         !:Specs = [DummySpec | !.Specs],
         !:FoundInvalidType = found_invalid_type
@@ -690,7 +691,7 @@ check_for_polymorphic_eqv_type_with_monomorphic_body(TypeStatus, TypeCtor,
     then
         TypeCtor = type_ctor(SymName, Arity),
         PolyEqvPieces = [words("Error: the type"),
-            unqual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+            unqual_sym_name_arity(sym_name_arity(SymName, Arity)),
             words("is a polymorphic equivalence type"),
             words("with a monomorphic definition."),
             words("The export of such types as abstract types"),
@@ -698,8 +699,8 @@ check_for_polymorphic_eqv_type_with_monomorphic_body(TypeStatus, TypeCtor,
         PolyEqvMsg = simple_msg(Context,
             [always(PolyEqvPieces),
             verbose_only(verbose_once, abstract_monotype_workaround)]),
-        PolyEqvSpec = error_spec(severity_error, phase_parse_tree_to_hlds,
-            [PolyEqvMsg]),
+        PolyEqvSpec = error_spec($pred, severity_error,
+            phase_parse_tree_to_hlds, [PolyEqvMsg]),
         !:Specs = [PolyEqvSpec | !.Specs],
         !:FoundInvalidType = found_invalid_type
     else
@@ -773,7 +774,7 @@ check_for_inconsistent_solver_nosolver_type(TypeCtor, OldDefn, NewBody,
             )
         ),
         TypeCtor = type_ctor(SymName, Arity),
-        SNA = unqual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+        SNA = unqual_sym_name_arity(sym_name_arity(SymName, Arity)),
         MainPieces = [words("Error:"), words(ThisDeclOrDefn),
             words("of type"), SNA, words(ThisIsOrIsnt), suffix(","),
             words("but its"), words(OldDeclOrDefn),
@@ -782,7 +783,7 @@ check_for_inconsistent_solver_nosolver_type(TypeCtor, OldDefn, NewBody,
             nl],
         MainMsg = simplest_msg(NewContext, MainPieces),
         OldMsg = simplest_msg(OldContext, OldPieces),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
             [MainMsg, OldMsg]),
         !:Specs = [Spec | !.Specs],
         !:FoundInvalidType = found_invalid_type
@@ -844,7 +845,7 @@ check_for_inconsistent_foreign_type_visibility(TypeCtor,
         )
     then
         TypeCtor = type_ctor(SymName, Arity),
-        SNA = unqual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+        SNA = unqual_sym_name_arity(sym_name_arity(SymName, Arity)),
         (
             OldIsAbstract = old_defn_is_abstract,
             Pieces = [words("Error: the definition of the foreign type"),
@@ -871,7 +872,7 @@ check_for_inconsistent_foreign_type_visibility(TypeCtor,
             CmpRes = (>),
             Context = OldContext
         ),
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs],
         !:FoundInvalidType = found_invalid_type,
@@ -1020,12 +1021,12 @@ add_type_defn_ctor(Ctor, TypeCtor, TypeCtorModuleName, TVarSet,
         Pieces = [words("Error: constructor"), quote(QualifiedConsIdStr),
             words("for type"), quote(TypeCtorStr),
             words("multiply defined."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     else
         some [!OtherConsIds] (
-            % Schedule the addition of the fully-qualified cons_id
+            % Schedule the addition of the fully qualified cons_id
             % into the cons_table.
             MainConsId = QualifiedConsIdA,
             !:OtherConsIds = [QualifiedConsIdB],
@@ -1119,7 +1120,7 @@ add_ctor_field_name(FieldName, FieldDefn, NeedQual, PartialQuals,
         PrevPieces = [words("Here is the previous definition of field"),
             quote(FieldString), suffix("."), nl],
         PrevMsg = simplest_msg(OrigContext, PrevPieces),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
             [HereMsg, PrevMsg]),
         !:Specs = [Spec | !.Specs]
     else
@@ -1173,7 +1174,7 @@ check_foreign_type_for_current_target(TypeCtor, ForeignTypeBody, PrevErrors,
     else
         LangStr = compilation_target_string(Target),
         MainPieces = [words("Error: the type"),
-            unqual_sym_name_and_arity(sym_name_arity(Name, Arity)),
+            unqual_sym_name_arity(sym_name_arity(Name, Arity)),
             words("has no definition that is valid when targeting"),
             fixed(LangStr), suffix(";"),
             words("neither a Mercury definition,"),
@@ -1183,7 +1184,8 @@ check_foreign_type_for_current_target(TypeCtor, ForeignTypeBody, PrevErrors,
             words("on other back-ends, but none for this back-end."), nl],
         Msg = simple_msg(Context,
             [always(MainPieces), verbose_only(verbose_always, VerbosePieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
+            [Msg]),
         !:Specs = [Spec | !.Specs],
         FoundInvalidType = found_invalid_type
     ).

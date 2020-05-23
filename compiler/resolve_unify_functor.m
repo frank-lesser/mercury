@@ -69,6 +69,7 @@
 :- import_module int.
 :- import_module map.
 :- import_module maybe.
+:- import_module one_or_more.
 :- import_module require.
 :- import_module term_io.
 :- import_module varset.
@@ -213,9 +214,9 @@ resolve_unify_functor(ModuleInfo, X0, ConsId0, ArgVars0, Mode0,
             Goal = true_goal,
             Pieces = [words("Error: reference to"),
                 words("undeclared function or predicate"),
-                qual_sym_name_and_arity(sym_name_arity(Name, Arity)),
+                qual_sym_name_arity(sym_name_arity(Name, Arity)),
                 suffix("."), nl],
-            Spec = simplest_spec(severity_error, phase_type_check,
+            Spec = simplest_spec($pred, severity_error, phase_type_check,
                 Context, Pieces),
             IsPlainUnify = is_unknown_ref(Spec)
         )

@@ -866,8 +866,14 @@ binop_to_strcord(BinOp) = Cord :-
         ; BinOp = int_mul(IntType), OpStr = "mul"
         ; BinOp = int_div(IntType), OpStr = "div"
         ; BinOp = int_mod(IntType), OpStr = "mod"
-        ; BinOp = unchecked_left_shift(IntType),  OpStr = "raw_left_shift"
-        ; BinOp = unchecked_right_shift(IntType), OpStr = "raw_right_shift"
+        ; BinOp = unchecked_left_shift(IntType, shift_by_int),
+            OpStr = "raw_left_shift"
+        ; BinOp = unchecked_left_shift(IntType, shift_by_uint),
+            OpStr = "raw_left_ushift"
+        ; BinOp = unchecked_right_shift(IntType, shift_by_int),
+            OpStr = "raw_right_shift"
+        ; BinOp = unchecked_right_shift(IntType, shift_by_uint),
+            OpStr = "raw_right_ushift"
         ; BinOp = bitwise_and(IntType), OpStr = "bitwise_and"
         ; BinOp = bitwise_or(IntType),  OpStr = "bitwise_or"
         ; BinOp = bitwise_xor(IntType), OpStr = "bitwise_xor"
@@ -880,6 +886,9 @@ binop_to_strcord(BinOp) = Cord :-
         ),
         Cord = strcord(OpStr) ++
             strcord("<") ++ int_type_to_strcord(IntType) ++ strcord(">")
+    ;
+        BinOp = unsigned_lt,
+        Cord = strcord("unsigned_lt")
     ;
         BinOp = unsigned_le,
         Cord = strcord("unsigned_le")
@@ -924,16 +933,16 @@ binop_to_strcord(BinOp) = Cord :-
         BinOp = str_cmp,
         Cord = strcord("str_cmp")
     ;
-        BinOp = float_plus,
+        BinOp = float_add,
         Cord = strcord("float_add")
     ;
-        BinOp = float_minus,
+        BinOp = float_sub,
         Cord = strcord("float_sub")
     ;
-        BinOp = float_times,
+        BinOp = float_mul,
         Cord = strcord("float_mul")
     ;
-        BinOp = float_divide,
+        BinOp = float_div,
         Cord = strcord("float_div")
     ;
         BinOp = float_eq,

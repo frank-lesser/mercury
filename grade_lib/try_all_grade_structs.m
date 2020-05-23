@@ -106,8 +106,7 @@ generate_llds_tests(GradeStructure) :-
     (
         generate_c_gc(CGc),
         ( CTrail = c_trail_no
-        ; CTrail = c_trail_yes(grade_var_trail_segments_no)
-        ; CTrail = c_trail_yes(grade_var_trail_segments_yes)
+        ; CTrail = c_trail_yes
         ),
         (
             LLDSPerfProf = llds_perf_prof_none
@@ -161,8 +160,7 @@ generate_llds_tests(GradeStructure) :-
     ;
         generate_thread_safe_c_gc(ThreadSafeCGc),
         ( CTrail = c_trail_no
-        ; CTrail = c_trail_yes(grade_var_trail_segments_no)
-        ; CTrail = c_trail_yes(grade_var_trail_segments_yes)
+        ; CTrail = c_trail_yes
         ),
         ( TScopeProf = grade_var_tscope_prof_no
         ; TScopeProf = grade_var_tscope_prof_yes
@@ -197,9 +195,6 @@ generate_mlds_tests(GradeStructure) :-
 :- pred generate_mlds_c_target(mlds_target::out) is multi.
 
 generate_mlds_c_target(MLDSCTarget) :-
-    ( MLDSCDataRep = mlds_c_datarep_heap_cells
-    ; MLDSCDataRep = mlds_c_datarep_classes
-    ),
     (
         generate_c_gc(CGc),
         (
@@ -220,14 +215,13 @@ generate_mlds_c_target(MLDSCTarget) :-
         MLDSCThreadSafe = mlds_c_thread_safe_yes(ThreadSafeCGc)
     ),
     ( CTrail = c_trail_no
-    ; CTrail = c_trail_yes(grade_var_trail_segments_no)
-    ; CTrail = c_trail_yes(grade_var_trail_segments_yes)
+    ; CTrail = c_trail_yes
     ),
     MercFile = grade_var_merc_file_no,
     generate_grade_var_low_tag_bits_use(LowTagBitsUse),
     generate_grade_var_merc_float(MercFloat),
-    MLDSCTarget = mlds_target_c(MLDSCDataRep, MLDSCThreadSafe,
-        CTrail, MercFile, LowTagBitsUse, MercFloat).
+    MLDSCTarget = mlds_target_c(MLDSCThreadSafe, CTrail, MercFile,
+        LowTagBitsUse, MercFloat).
 
 %---------------------%
 

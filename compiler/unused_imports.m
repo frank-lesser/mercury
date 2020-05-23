@@ -59,6 +59,7 @@
 :- import_module mdbcomp.
 :- import_module mdbcomp.builtin_modules.
 :- import_module mdbcomp.sym_name.
+:- import_module parse_tree.item_util.
 :- import_module parse_tree.prog_data.
 :- import_module parse_tree.prog_data_used_modules.
 :- import_module parse_tree.prog_item.
@@ -69,6 +70,7 @@
 :- import_module io.
 :- import_module map.
 :- import_module maybe.
+:- import_module one_or_more.
 :- import_module pair.
 :- import_module set.
 :- import_module string.
@@ -147,9 +149,7 @@ maybe_warn_about_avail(TopModuleName,
         HeadAvail = avail_module(_, _, HeadContext),
         maybe_generate_redundant_avail_warnings(ModuleName, SortedAvails,
             [], !Specs),
-        ( if
-            set.member(ModuleName, UnusedAnywhereImports)
-        then
+        ( if set.member(ModuleName, UnusedAnywhereImports) then
             AnywhereSpec = generate_unused_warning(TopModuleName,
                 ModuleName, ImportOrUse, HeadContext, aoi_anywhere),
             !:Specs = [AnywhereSpec | !.Specs],
@@ -233,7 +233,7 @@ maybe_generate_redundant_avail_warnings(ModuleName, [Avail | Avails],
             words("for"), qual_sym_name(ModuleName),
             words("is redundant."), nl],
         MainMsg = simplest_msg(Context, MainPieces),
-        Spec = error_spec(severity_informational, phase_code_gen,
+        Spec = error_spec($pred, severity_informational, phase_code_gen,
             [MainMsg | PrevMsgs]),
         !:Specs = [Spec | !.Specs]
     ),
@@ -302,7 +302,8 @@ generate_unused_warning(TopModuleName, UnusedModuleName, ImportOrUse,
         words("has a"), decl(ImportOrUseDeclName),
         words("declaration"), words(DeclInTheLocn), suffix(","),
         words("but is not used"), words(NotUsedInTheLocn), suffix("."), nl],
-    Spec = simplest_spec(severity_warning, phase_code_gen, Context, Pieces).
+    Spec = simplest_spec($pred, severity_warning, phase_code_gen,
+        Context, Pieces).
 
 %-----------------------------------------------------------------------------%
 %-----------------------------------------------------------------------------%
@@ -480,10 +481,10 @@ prog_constraint_used_modules(Visibility, Constraint, !UsedModules) :-
 %-----------------------------------------------------------------------------%
 %-----------------------------------------------------------------------------%
 
-:- pred user_inst_used_modules(inst_id::in, hlds_inst_defn::in,
+:- pred user_inst_used_modules(inst_ctor::in, hlds_inst_defn::in,
     used_modules::in, used_modules::out) is det.
 
-user_inst_used_modules(_InstId, InstDefn, !UsedModules) :-
+user_inst_used_modules(_InstCtor, InstDefn, !UsedModules) :-
     InstDefn = hlds_inst_defn(_InstVarSet, _InstParams, InstBody,
         InstForTypeCtor, _Context, InstStatus),
     DefinedInThisModule = inst_status_defined_in_this_module(InstStatus),
@@ -519,10 +520,10 @@ type_ctor_used_modules(Visibility, TypeCtor, !UsedModules) :-
 %-----------------------------------------------------------------------------%
 %-----------------------------------------------------------------------------%
 
-:- pred mode_used_modules(mode_id::in, hlds_mode_defn::in,
+:- pred mode_used_modules(mode_ctor::in, hlds_mode_defn::in,
     used_modules::in, used_modules::out) is det.
 
-mode_used_modules(mode_id(Name, _Arity), ModeDefn, !UsedModules) :-
+mode_used_modules(mode_ctor(Name, _Arity), ModeDefn, !UsedModules) :-
     ModeStatus = ModeDefn ^ mode_status,
     DefinedInThisModule = mode_status_defined_in_this_module(ModeStatus),
     (
@@ -737,7 +738,7 @@ hlds_goal_used_modules(Goal, !UsedModules) :-
         (
             Call = class_method(_, _, ClassId, CallId),
             ClassId = class_id(ClassName, _),
-            CallId = simple_call_id(_, MethodName, _),
+            CallId = pf_sym_name_arity(_, MethodName, _),
             record_sym_name_module_as_used(visibility_private, ClassName,
                 !UsedModules),
             record_sym_name_module_as_used(visibility_private, MethodName,

@@ -132,7 +132,7 @@ esac
 
 #-----------------------------------------------------------------------------#
 #
-# Determine what C compiler to use
+# Determine what C compiler to use.
 #
 
 # The code in config.guess that distinguishes between the i*86 and x86_64
@@ -165,23 +165,23 @@ case "$mercury_cv_cc_type" in
         MERCURY_HAVE_CLANG=yes
         MERCURY_CLANG_VERSION
         C_COMPILER_TYPE="clang_${mercury_cv_clang_version}"
-    ;;
+        ;;
 
     gcc)
         MERCURY_HAVE_GCC=yes
         MERCURY_GCC_VERSION
         C_COMPILER_TYPE="gcc_${mercury_cv_gcc_version}"
-    ;;
+        ;;
 
     msvc)
         MERCURY_HAVE_MSVC=yes
         MERCURY_MSVC_VERSION
         C_COMPILER_TYPE="msvc_${mercury_cv_msvc_version}"
-    ;;
+        ;;
 
     *)
         C_COMPILER_TYPE="unknown"
-    ;;
+        ;;
 esac
 
 #-----------------------------------------------------------------------------#
@@ -251,9 +251,36 @@ then
 **** See README.MacOS for further details.])
             exit 1
             fi
-        ;;
+            ;;
     esac
 fi
+
+#-----------------------------------------------------------------------------#
+
+# Warn about using Xcode 11 on Mac OS X.
+
+case "$host" in
+    *apple*darwin*)
+        AC_MSG_WARN(
+[
+**** Note that versions of Xcode 11 prior to Xcode 11.4 have bugs
+**** that prevent Mercury programs from working correctly.
+**** See README.MacOS for further details.])
+        ;;
+esac
+
+#-----------------------------------------------------------------------------#
+
+# Ensure that the user does not try to build MSYS executables; we do not
+# (currently) support that.
+
+case "$host" in *-pc-msys)
+    AC_MSG_ERROR(
+[
+***** The $host architecture is not supported.
+***** You probably meant to use one of: x86_64-pc-mingw32, x86_64-pc-mingw64.])
+    ;;
+esac
 
 #-----------------------------------------------------------------------------#
 
@@ -568,7 +595,8 @@ EOF
             --grade none.gc \
             --warn-insts-without-matching-type \
             --warn-known-bad-format-calls \
-            --simplest-msg-2019-09-22 \
+            --obsolete-proc-2019-10-23 \
+            --github-85--2020-03-24 \
             --no-detect-libgrades \
             --output-grade-string \
             --shlib-linker-install-name-flag "-dummy_flag" \
@@ -1229,6 +1257,17 @@ AC_CHECK_LIB(m, sin, [MATH_LIB=-lm], [MATH_LIB=])
 
 #-----------------------------------------------------------------------------#
 #
+# Check whether the user wants to disable the use of shared libraries.
+#
+
+AC_ARG_ENABLE(shared-libs,
+    AC_HELP_STRING([--disable-shared-libs],
+      [do not build shared version of the library even if that is supported]),
+    [mercury_cv_enable_shared_libs="$enableval"],
+    [mercury_cv_enable_shared_libs=yes])
+
+#-----------------------------------------------------------------------------#
+#
 # Check whether to use symbolic links
 #
 
@@ -1283,7 +1322,7 @@ AC_ARG_WITH(csharp-compiler,
     mercury_cv_with_csharp_compiler="")
 MERCURY_CHECK_DOTNET
 
-# The Roslyn (i.e. Microsoft) C# compiler does not support signing assmblies
+# The Roslyn (i.e. Microsoft) C# compiler does not support signing assemblies
 # with a strong name on non-Windows platforms.  If we are using that compiler
 # on a non-Windows platform then only delay sign the assembly.
 
@@ -2600,7 +2639,43 @@ case "$ac_cv_prog_gcc" in yes)
         mips-*)
             CFLAGS_FOR_GOTOS="$CFLAGS_FOR_GOTOS -fomit-frame-pointer"
             ;;
-        i*86-*|x86_64*)
+        i*86-*)
+            # On x86-64 and x86, GCC labels do not work correctly with
+            # -ftree-dominator-opts.
+            CFLAGS_FOR_GOTOS="$CFLAGS_FOR_GOTOS $CFLAGS_FOR_NO_TREE_DOMINATOR_OPTS"
+            CFLAGS_FOR_REGS="-fno-builtin -fno-omit-frame-pointer"
+
+            # An old hack allowing non-local gotos to work with PIC on x86
+            # will no longer work with GCC 5+ (see mercury_goto.h).
+            # The following disables non-local gotos if dynamic linking
+            # is enabled, even though statically linked libraries (non-PIC)
+            # would still work.
+            # Alternatively, we may wish to consider using non-PIC in shared
+            # libraries, accepting whatever drawbacks that entails.
+            #
+            # XXX Not all platforms use PIC for dynamic linking, so this should
+            # be contingent on CFLAGS_FOR_PIC which is set further down. 
+            #
+            case $C_COMPILER_TYPE in
+                gcc_3_*|gcc_4_*) ;;
+                gcc_*)
+                    if test "$mercury_cv_enable_shared_libs" = yes
+                    then
+                        # XXX Make an exception for Windows since it doesn't use
+                        # PIC and we don't yet support DLLs anyway.
+                        case "$host" in
+                            *cygwin*|*mingw*)
+                                ;;
+                            *)
+                                mercury_cv_asm_labels=no
+                                mercury_cv_gcc_labels=no
+                                ;;
+                        esac
+                    fi
+                    ;;
+            esac
+            ;;
+        x86_64*)
             # On x86-64 and x86, GCC labels do not work correctly with
             # -ftree-dominator-opts.
             CFLAGS_FOR_GOTOS="$CFLAGS_FOR_GOTOS $CFLAGS_FOR_NO_TREE_DOMINATOR_OPTS"
@@ -3217,12 +3292,22 @@ case "$host" in
         esac
         ;;
 
-    *-w64-mingw*)
-        CFLAGS_FOR_THREADS="$WIN32_GC_THREADLIB"
-        BOEHM_CFLAGS_FOR_THREADS="-DGC_THREADS $WIN32_GC_THREADLIB"
-        THREAD_LIBS="-lpthread"
-        ENABLE_BOEHM_THREAD_LOCAL_ALLOC="-DTHREAD_LOCAL_ALLOC"
-        ENABLE_BOEHM_PARALLEL_MARK="-DPARALLEL_MARK"
+    *-w64-mingw*|x86_64-pc-mingw*)
+        THREAD_LIBS=""
+        case "$mercury_cv_cc_type" in
+            msvc)
+                CFLAGS_FOR_THREADS="-DGC_THREADS -MD"
+                LDFLAGS_FOR_THREADS="-MD"
+                LD_LIBFLAGS_FOR_THREADS="-MD"
+                ;;
+            *)
+                CFLAGS_FOR_THREADS="$WIN32_GC_THREADLIB"
+                BOEHM_CFLAGS_FOR_THREADS="-DGC_THREADS $WIN32_GC_THREADLIB"
+                THREAD_LIBS="-lpthread"
+                ENABLE_BOEHM_THREAD_LOCAL_ALLOC="-DTHREAD_LOCAL_ALLOC"
+                ENABLE_BOEHM_PARALLEL_MARK="-DPARALLEL_MARK"
+                ;;
+        esac
         ;;
 
     *apple*darwin*)
@@ -3438,8 +3523,12 @@ esac
 #
 case "$C_COMPILER_TYPE" in
     gcc_4_1_*|gcc_4_2_*)
-        case "$host" in x86_64*apple*darwin*) BEST_LLDS_BASE_GRADE=none ;;
-    esac
+        case "$host" in
+            x86_64*apple*darwin*)
+                BEST_LLDS_BASE_GRADE=none
+                ;;
+        esac
+        ;;
 esac
 
 # Force the use of the none grade on x86/Darwin systems.
@@ -3462,10 +3551,10 @@ BEST_DEBUG_BASE_GRADE=$BEST_LLDS_BASE_GRADE
 # efficiency too much.
 
 case $BEST_LLDS_BASE_GRADE in
-    none|fast|jump)
+    none|fast|jump|reg|asm_jump)
         DEFAULT_BASE_GRADE=hlc
         ;;
-    asm_fast|asm_jump|reg)
+    asm_fast)
         DEFAULT_BASE_GRADE=$BEST_LLDS_BASE_GRADE
         ;;
     *)
@@ -3834,24 +3923,21 @@ if test "$enable_prof_grades" = yes; then
 fi
 
 if test "$enable_trail_grades" = yes; then
-    # Add `.trseg' (--use-trail --trail-segments) grades.
-    # We don't install the fixed size trail `.tr' grades by
-    # default as they are less useful.
-    LIBGRADES="$LIBGRADES $DEFAULT_BASE_GRADE.gc.trseg"
+    LIBGRADES="$LIBGRADES $DEFAULT_BASE_GRADE.gc.tr"
     if test $DEFAULT_BASE_GRADE = hlc; then
-        LIBGRADES="$LIBGRADES $BEST_LLDS_BASE_GRADE.gc.debug.trseg.stseg"
+        LIBGRADES="$LIBGRADES $BEST_LLDS_BASE_GRADE.gc.debug.tr.stseg"
     else
         # $DEFAULT_BASE_GRADE must be an LLDS grade
-        LIBGRADES="$LIBGRADES $DEFAULT_BASE_GRADE.gc.debug.trseg.stseg hlc.gc.trseg"
+        LIBGRADES="$LIBGRADES $DEFAULT_BASE_GRADE.gc.debug.tr.stseg hlc.gc.tr"
     fi
     if test "$enable_inefficient_grades" = yes; then
         if test "$enable_nogc_grades" = yes; then
-            LIBGRADES="$LIBGRADES $DEFAULT_BASE_GRADE.trseg"
+            LIBGRADES="$LIBGRADES $DEFAULT_BASE_GRADE.tr"
         fi
         if test $mercury_cv_profiling = yes &&
            test "$enable_prof_grades" = yes
         then
-            LIBGRADES="$LIBGRADES $DEFAULT_BASE_GRADE.gc.prof.trseg"
+            LIBGRADES="$LIBGRADES $DEFAULT_BASE_GRADE.gc.prof.tr"
         fi
     fi
 fi
@@ -3922,7 +4008,7 @@ then
     LIBGRADES="$LIBGRADES $BEST_LLDS_BASE_GRADE.gc.stseg"
     if test "$enable_trail_grades" = "yes"
     then
-        LIBGRADES="$LIBGRADES $BEST_LLDS_BASE_GRADE.gc.trseg.stseg"
+        LIBGRADES="$LIBGRADES $BEST_LLDS_BASE_GRADE.gc.tr.stseg"
     fi
 fi
 
@@ -4360,216 +4446,226 @@ ALLOW_UNDEFINED=""
 ERROR_UNDEFINED=""
 DEFAULT_LINKAGE="shared"
 
-case "$host" in
-    i*86-*-linux|i*86-*-linux-gnu|x86_64-*-linux*)
-        case $ac_cv_prog_gcc in
-            yes)
-                AC_MSG_RESULT(yes)
-                EXT_FOR_SHARED_LIB=so
-                AC_MSG_CHECKING(if linker supports --no-undefined)
-                rm -f conftest*
-                if test "$mercury_cv_thread_local_storage" = yes; then
-                    # --no-undefined doesn't work with TLS
-                    # and older versions of glibc.
-                    echo "__thread int x;
-                    int main(void) { return x; }" > conftest.c
-                    $CC -Wl,--no-undefined -fPIC -shared \
-                        -o conftest conftest.c 2>/dev/null
-                else
-                    echo "int main(void) { return 0; }" > conftest.c
-                    $CC -Wl,--no-undefined -o conftest conftest.c
-                fi
-                if test -f conftest; then
+if test "$mercury_cv_enable_shared_libs" = "yes"; then
+    case "$host" in
+        i*86-*-linux|i*86-*-linux-gnu|x86_64-*-linux*)
+            case $ac_cv_prog_gcc in
+                yes)
                     AC_MSG_RESULT(yes)
-                    ERROR_UNDEFINED="-Wl,--no-undefined"
-
-                    AC_MSG_CHECKING(for ld-linux.so)
+                    EXT_FOR_SHARED_LIB=so
+                    AC_MSG_CHECKING(if linker supports --no-undefined)
                     rm -f conftest*
-                    echo "int main(void) { return 0; }" > conftest.c
-                    $CC -o conftest conftest.c
-                    ld_linux=`ldd ./conftest | \
-                        awk '/ld-linux/{print $1;}'`
-                    case $ld_linux in
-                        /lib/ld-linux.so*)
-                            AC_MSG_RESULT($ld_linux)
-                            SHARED_LIBS="$SHARED_LIBS $ld_linux"
-                            SHARED_LIBS_SH="$SHARED_LIBS_SH $ld_linux"
-                            ;;
-                        *)
-                            AC_MSG_RESULT(no)
-                            ;;
-                    esac
-                else
+                    if test "$mercury_cv_thread_local_storage" = yes; then
+                        # --no-undefined doesn't work with TLS
+                        # and older versions of glibc.
+                        echo "__thread int x;
+                        int main(void) { return x; }" > conftest.c
+                        $CC -Wl,--no-undefined -fPIC -shared \
+                            -o conftest conftest.c 2>/dev/null
+                    else
+                        echo "int main(void) { return 0; }" > conftest.c
+                        $CC -Wl,--no-undefined -o conftest conftest.c
+                    fi
+                    if test -f conftest; then
+                        AC_MSG_RESULT(yes)
+                        ERROR_UNDEFINED="-Wl,--no-undefined"
+    
+                        AC_MSG_CHECKING(for ld-linux.so)
+                        rm -f conftest*
+                        echo "int main(void) { return 0; }" > conftest.c
+                        $CC -o conftest conftest.c
+                        ld_linux=`ldd ./conftest | \
+                            awk '/ld-linux/{print $1;}'`
+                        case $ld_linux in
+                            /lib/ld-linux.so*)
+                                AC_MSG_RESULT($ld_linux)
+                                SHARED_LIBS="$SHARED_LIBS $ld_linux"
+                                SHARED_LIBS_SH="$SHARED_LIBS_SH $ld_linux"
+                                ;;
+                            *)
+                                AC_MSG_RESULT(no)
+                                ;;
+                        esac
+                    else
+                        AC_MSG_RESULT(no)
+                    fi
+                    rm -f conftest*
+                    ;;
+                *)
                     AC_MSG_RESULT(no)
-                fi
-                rm -f conftest*
-                ;;
-            *)
-                AC_MSG_RESULT(no)
-                ;;
-        esac
-
-        # On x86_64 machines we use -fPIC rather than -fpic
-        # in order to avoid limits on the size of the global
-        # offset table implied by the latter.
-        case "$host" in
-            x86_64-*-linux*)
-                CFLAGS_FOR_PIC="-fPIC -DMR_PIC"
-                ;;
-        esac
-        ;;
-    m68*-linux|m68*-linux-gnu)
-        AC_MSG_RESULT(yes)
-        EXT_FOR_SHARED_LIB=so
-        ;;
-    *-freebsd*)
-        # Tested on FreeBSD 10.1 i386/amd64.
-        AC_MSG_RESULT(yes)
-        EXT_FOR_SHARED_LIB=so
-        ;;
-    *-openbsd*)
-        AC_MSG_RESULT(yes)
-        EXT_FOR_SHARED_LIB=so
-        ;;
-    i*86-*-solaris2.*)
-        AC_MSG_RESULT(yes)
-
-        # XXX For Solaris/SPARC, we don't link in libgcc.a.
-        # Why not?  Do we need to do the same thing for Solaris/x86?
-        #SHARED_LIBS="$(MATH_LIB) -lc"  # don't link in libgcc.a
-        #SHARED_LIBS_SH="$MATH_LIB -lc" # don't link in libgcc.a
-
-        # XXX We need -mimpure-text because libraries such as
-        # libreadline.a might be installed with only the .a rather
-        # than the .so, and not compiled with -fpic,
-        # and we need to link against them when creating shared libs.
-        LINK_SHARED_OBJ="$CC -shared -mimpure-text"
-        LINK_SHARED_OBJ_SH="$CC -shared -mimpure-text"
-
-        # XXX We should use the following.
-        # However, this causes problems on mundroo.cs.mu.oz.au,
-        # due to the readline library being installed only as
-        # libreadline.a, with no corresponding libreadline.so.
-        #ERROR_UNDEFINED="-Wl,-z,defs"
-
-        EXE_RPATH_OPT="-R"
-        EXE_RPATH_SEP=" -R"
-        SHLIB_RPATH_OPT="-R"
-        SHLIB_RPATH_SEP=" -R"
-        EXT_FOR_SHARED_LIB=so
-        DEFAULT_LINKAGE=static
-        ;;
-    sparc-sun-solaris2.*)
-        AC_MSG_RESULT(yes)
-        SHARED_LIBS="$(MATH_LIB) -lc"   # don't link in libgcc.a
-        SHARED_LIBS_SH="$MATH_LIB -lc"  # don't link in libgcc.a
-        LINK_SHARED_OBJ="$CC -shared -mimpure-text"
-        LINK_SHARED_OBJ_SH="$CC -shared -mimpure-text"
-        ERROR_UNDEFINED="-Wl,-z,defs"
-        EXE_RPATH_OPT="-R"
-        EXE_RPATH_SEP=" -R"
-        SHLIB_RPATH_OPT="-R"
-        SHLIB_RPATH_SEP=" -R"
-        CFLAGS_FOR_PIC="-fpic -DMR_PIC" # used only for libgc.{a,so}
-        EXT_FOR_PIC_OBJECTS=o
-
-        # Note that despite the above definition of CFLAGS_FOR_PIC,
-        # we don't use `-fpic' for shared libraries on Solaris
-        # (the definition of EXT_FOR_PIC_OBJECTS=o means that
-        # CFLAGS_FOR_PIC will be used only for building libgc.a
-        # and libgc.so.)
-        #
-        # The reason for this is that shared libraries work without it
-        # (well, at least they are shared on disk -- although the code is
-        # not shared at runtime), and using `-fpic' would reduce efficiency.
-        #
-        # It works because the Solaris dynamic linker will actually do
-        # the fixups at runtime for non-PIC code. (The code is mapped
-        # copy-on-write, and when the linker does the fixups, it gets copied.
-        # Hence the lack of runtime sharing.) We need to link with
-        # `gcc -shared -mimpure-text' rather than `gcc -shared', because
-        # `gcc -shared' passes `-z text' to the linker, which causes it to
-        # report an error if any runtime fixups would be needed.
-        #
-        # If you *do* use `-fpic', you must also use `-DMR_PIC'.
-        #
-        # See runtime/mercury_goto.h for the code that handles PIC on SPARCs.
-        # Note that mixing PIC and non-PIC code is fine on SPARCs.
-
-        EXT_FOR_SHARED_LIB=so
-        ;;
-    *-cygwin*)
-        # Disabled for now, since it hasn't been tested.
-        # xxx_MSG_RESULT(yes)
-        # EXT_FOR_SHARED_LIB=dll
-        # USE_DLLS=yes
-        AC_MSG_RESULT(disabled for now because it is untested)
-
-        CFLAGS_FOR_PIC=
-        EXT_FOR_PIC_OBJECTS=o
-        DEFAULT_LINKAGE=static
-        ;;
-    *mingw*)
-        # disabled for now, since it hasn't been tested
-        # xxx_MSG_RESULT(yes)
-        # EXT_FOR_SHARED_LIB=dll
-        # USE_DLLS=yes
-        AC_MSG_RESULT(disabled for now because it is untested)
-
-        CFLAGS_FOR_PIC=
-        EXT_FOR_PIC_OBJECTS=o
-        DEFAULT_LINKAGE=static
-        ;;
-    *apple*darwin*)
-        # If the compiler is gcc or clang then use Darwin style dynamic
-        # linking. Otherwise use static linking.
-        case "$C_COMPILER_TYPE" in
-            gcc*|clang*)
-                AC_MSG_RESULT(yes)
-                SHLIB_USE_INSTALL_NAME="--shlib-linker-use-install-name"
-                SHLIB_INSTALL_NAME_FLAG="-install_name "
-                EXT_FOR_SHARED_LIB=dylib
-                CFLAGS_FOR_PIC="-fPIC -DMR_PIC"
-                ERROR_UNDEFINED="-undefined error"
-                # The MACOSX_DEPLOYMENT_TARGET environment variable needs to be
-                # set so we can use the `-undefined dynamic_lookup' option.
-                SET_MACOSX_DEPLOYMENT_TARGET="\
-                    MACOSX_DEPLOYMENT_TARGET=$DEPLOYMENT_TARGET; \
-                    export MACOSX_DEPLOYMENT_TARGET"
-                AC_SUBST(SET_MACOSX_DEPLOYMENT_TARGET)
-                LINK_SHARED_OBJ="$CC -multiply_defined suppress \
-                     -dynamiclib -single_module"
-                LINK_SHARED_OBJ_SH="$CC -multiply_defined \
-                    suppress -dynamiclib -single_module"
-                ALLOW_UNDEFINED="-undefined dynamic_lookup"
+                    ;;
+            esac
+    
+            # On x86_64 machines we use -fPIC rather than -fpic
+            # in order to avoid limits on the size of the global
+            # offset table implied by the latter.
+            case "$host" in
+                x86_64-*-linux*)
+                    CFLAGS_FOR_PIC="-fPIC -DMR_PIC"
+                    ;;
+            esac
             ;;
-
-            *)
-                CFLAGS_FOR_PIC=
-                EXT_FOR_PIC_OBJECTS=o
-                DEFAULT_LINKAGE=static
-                AC_MSG_RESULT(no)
+        m68*-linux|m68*-linux-gnu)
+            AC_MSG_RESULT(yes)
+            EXT_FOR_SHARED_LIB=so
             ;;
-        esac
-        ;;
-    arm*-linux|arm*-linux-gnu)
-        AC_MSG_RESULT(yes)
-        EXT_FOR_SHARED_LIB=so
-        # One can build gcc with a default PIC register other than sl
-        # so let's force it. If you change this,
-        # update MR_ARM_PIC_REG in runtime/mercury_goto.h as well.
-        CFLAGS_FOR_PIC="-mpic-register=sl $CFLAGS_FOR_PIC"
-        ;;
-    *)
-        # CFLAGS_FOR_PIC is used by boehm_gc/Makefile when creating libgc.a.
-        # If the system doesn't support shared libraries,
-        # then we should set it to empty, not `-fpic'.
-        CFLAGS_FOR_PIC=
-        EXT_FOR_PIC_OBJECTS=o
-        DEFAULT_LINKAGE=static
-        AC_MSG_RESULT(no)
-        ;;
-esac
+        *-freebsd*)
+            # Tested on FreeBSD 10.1 i386/amd64.
+            AC_MSG_RESULT(yes)
+            EXT_FOR_SHARED_LIB=so
+            ;;
+        *-openbsd*)
+            AC_MSG_RESULT(yes)
+            EXT_FOR_SHARED_LIB=so
+            ;;
+        i*86-*-solaris2.*)
+            AC_MSG_RESULT(yes)
+    
+            # XXX For Solaris/SPARC, we don't link in libgcc.a.
+            # Why not?  Do we need to do the same thing for Solaris/x86?
+            #SHARED_LIBS="$(MATH_LIB) -lc"  # don't link in libgcc.a
+            #SHARED_LIBS_SH="$MATH_LIB -lc" # don't link in libgcc.a
+    
+            # XXX We need -mimpure-text because libraries such as
+            # libreadline.a might be installed with only the .a rather
+            # than the .so, and not compiled with -fpic,
+            # and we need to link against them when creating shared libs.
+            LINK_SHARED_OBJ="$CC -shared -mimpure-text"
+            LINK_SHARED_OBJ_SH="$CC -shared -mimpure-text"
+    
+            # XXX We should use the following.
+            # However, this causes problems on mundroo.cs.mu.oz.au,
+            # due to the readline library being installed only as
+            # libreadline.a, with no corresponding libreadline.so.
+            #ERROR_UNDEFINED="-Wl,-z,defs"
+    
+            EXE_RPATH_OPT="-R"
+            EXE_RPATH_SEP=" -R"
+            SHLIB_RPATH_OPT="-R"
+            SHLIB_RPATH_SEP=" -R"
+            EXT_FOR_SHARED_LIB=so
+            DEFAULT_LINKAGE=static
+            ;;
+        sparc-sun-solaris2.*)
+            AC_MSG_RESULT(yes)
+            SHARED_LIBS="$(MATH_LIB) -lc"   # don't link in libgcc.a
+            SHARED_LIBS_SH="$MATH_LIB -lc"  # don't link in libgcc.a
+            LINK_SHARED_OBJ="$CC -shared -mimpure-text"
+            LINK_SHARED_OBJ_SH="$CC -shared -mimpure-text"
+            ERROR_UNDEFINED="-Wl,-z,defs"
+            EXE_RPATH_OPT="-R"
+            EXE_RPATH_SEP=" -R"
+            SHLIB_RPATH_OPT="-R"
+            SHLIB_RPATH_SEP=" -R"
+            CFLAGS_FOR_PIC="-fpic -DMR_PIC" # used only for libgc.{a,so}
+            EXT_FOR_PIC_OBJECTS=o
+    
+            # Note that despite the above definition of CFLAGS_FOR_PIC,
+            # we don't use `-fpic' for shared libraries on Solaris
+            # (the definition of EXT_FOR_PIC_OBJECTS=o means that
+            # CFLAGS_FOR_PIC will be used only for building libgc.a
+            # and libgc.so.)
+            #
+            # The reason for this is that shared libraries work without it
+            # (well, at least they are shared on disk -- although the code is
+            # not shared at runtime), and using `-fpic' would reduce efficiency.
+            #
+            # It works because the Solaris dynamic linker will actually do
+            # the fixups at runtime for non-PIC code. (The code is mapped
+            # copy-on-write, and when the linker does the fixups, it gets copied.
+            # Hence the lack of runtime sharing.) We need to link with
+            # `gcc -shared -mimpure-text' rather than `gcc -shared', because
+            # `gcc -shared' passes `-z text' to the linker, which causes it to
+            # report an error if any runtime fixups would be needed.
+            #
+            # If you *do* use `-fpic', you must also use `-DMR_PIC'.
+            #
+            # See runtime/mercury_goto.h for the code that handles PIC on SPARCs.
+            # Note that mixing PIC and non-PIC code is fine on SPARCs.
+    
+            EXT_FOR_SHARED_LIB=so
+            ;;
+        *-cygwin*)
+            # Disabled for now, since it hasn't been tested.
+            # xxx_MSG_RESULT(yes)
+            # EXT_FOR_SHARED_LIB=dll
+            # USE_DLLS=yes
+            AC_MSG_RESULT(disabled for now because it is untested)
+    
+            CFLAGS_FOR_PIC=
+            EXT_FOR_PIC_OBJECTS=o
+            DEFAULT_LINKAGE=static
+            ;;
+        *mingw*)
+            # disabled for now, since it hasn't been tested
+            # xxx_MSG_RESULT(yes)
+            # EXT_FOR_SHARED_LIB=dll
+            # USE_DLLS=yes
+            AC_MSG_RESULT(disabled for now because it is untested)
+    
+            CFLAGS_FOR_PIC=
+            EXT_FOR_PIC_OBJECTS=o
+            DEFAULT_LINKAGE=static
+            ;;
+        *apple*darwin*)
+            # If the compiler is gcc or clang then use Darwin style dynamic
+            # linking. Otherwise use static linking.
+            case "$C_COMPILER_TYPE" in
+                gcc*|clang*)
+                    AC_MSG_RESULT(yes)
+                    SHLIB_USE_INSTALL_NAME="--shlib-linker-use-install-name"
+                    SHLIB_INSTALL_NAME_FLAG="-install_name "
+                    EXT_FOR_SHARED_LIB=dylib
+                    CFLAGS_FOR_PIC="-fPIC -DMR_PIC"
+                    ERROR_UNDEFINED="-undefined error"
+                    # The MACOSX_DEPLOYMENT_TARGET environment variable needs to be
+                    # set so we can use the `-undefined dynamic_lookup' option.
+                    SET_MACOSX_DEPLOYMENT_TARGET="\
+                        MACOSX_DEPLOYMENT_TARGET=$DEPLOYMENT_TARGET; \
+                        export MACOSX_DEPLOYMENT_TARGET"
+                    AC_SUBST(SET_MACOSX_DEPLOYMENT_TARGET)
+                    LINK_SHARED_OBJ="$CC -multiply_defined suppress \
+                         -dynamiclib -single_module"
+                    LINK_SHARED_OBJ_SH="$CC -multiply_defined \
+                        suppress -dynamiclib -single_module"
+                    ALLOW_UNDEFINED="-undefined dynamic_lookup"
+                    ;;
+    
+                *)
+                    CFLAGS_FOR_PIC=
+                    EXT_FOR_PIC_OBJECTS=o
+                    DEFAULT_LINKAGE=static
+                    AC_MSG_RESULT(no)
+                    ;;
+            esac
+            ;;
+        arm*-linux|arm*-linux-gnu)
+            AC_MSG_RESULT(yes)
+            EXT_FOR_SHARED_LIB=so
+            # One can build gcc with a default PIC register other than sl
+            # so let's force it. If you change this,
+            # update MR_ARM_PIC_REG in runtime/mercury_goto.h as well.
+            CFLAGS_FOR_PIC="-mpic-register=sl $CFLAGS_FOR_PIC"
+            ;;
+        *)
+            # CFLAGS_FOR_PIC is used by boehm_gc/Makefile when creating libgc.a.
+            # If the system doesn't support shared libraries,
+            # then we should set it to empty, not `-fpic'.
+            CFLAGS_FOR_PIC=
+            EXT_FOR_PIC_OBJECTS=o
+            DEFAULT_LINKAGE=static
+            AC_MSG_RESULT(no)
+            ;;
+    esac
+else
+    # CFLAGS_FOR_PIC is used by boehm_gc/Makefile when creating libgc.a.
+    # If the system doesn't support shared libraries,
+    # then we should set it to empty, not `-fpic'.
+    CFLAGS_FOR_PIC=
+    EXT_FOR_PIC_OBJECTS=o
+    DEFAULT_LINKAGE=static
+    AC_MSG_RESULT(no)
+fi
 
 #-----------------------------------------------------------------------------#
 #
@@ -4620,9 +4716,9 @@ case "$mercury_cv_cc_type" in
                 case "$C_COMPILER_TYPE" in
                     gcc_4_2_*)
                         CFLAGS_FOR_OPT="$CFLAGS_FOR_OPT -fno-tree-vrp"
-                    ;;
+                        ;;
                 esac
-            ;;
+                ;;
         esac
 
         CFLAGS_FOR_DEBUG="-g"
@@ -5169,14 +5265,15 @@ AC_SUBST(NSL_LIBRARY)
 
 #-----------------------------------------------------------------------------#
 #
-# Check for dynamic linking, unless the --disable-dynamic-link option
-# was specified.
+# Check libraries for dynamic linking.
 #
 
+# XXX this is poorly named.
 AC_ARG_ENABLE(dynamic-link,
     AC_HELP_STRING([--disable-dynamic-link],
                    [disable the use of dynamic linking]),
-mercury_cv_enable_dynamic_link="$enableval",mercury_cv_enable_dynamic_link=yes)
+    [mercury_cv_enable_dynamic_link="$enableval"],
+    [mercury_cv_enable_dynamic_link=yes])
 
 if test "$mercury_cv_enable_dynamic_link" = "yes"; then
     MERCURY_CHECK_FOR_HEADERS(dlfcn.h)
@@ -5250,6 +5347,60 @@ else
     USE_MSVCRT=no
 fi
 AC_SUBST(USE_MSVCRT)
+
+#-----------------------------------------------------------------------------#
+
+AC_ARG_ENABLE(lto,
+    AC_HELP_STRING([--enable-lto],
+                   [Enable link-time optimization for C grades (experimental)]),
+    mercury_cv_lto=yes,mercury_cv_lto=no)
+
+USE_LINK_TIME_OPT=$mercury_cv_lto
+AC_SUBST(USE_LINK_TIME_OPT)
+
+if test "$mercury_cv_lto" = "yes"; then
+    case "$C_COMPILER_TYPE" in
+        msvc*)
+            CFLAGS_FOR_LTO="-GL"
+            LDFLAGS_FOR_LTO="-LTCG"
+            ;;
+        gcc*)
+            CFLAGS_FOR_LTO="-flto"
+            LDFLAGS_FOR_LTO="-flto"
+            LINK_SHARED_OBJ="$LINK_SHARED_OBJ -flto"
+            LINK_SHARED_OBJ_SH="$LINK_SHARED_OBJ_SH -flto"
+            AC_CHECK_TOOL([GCC_AR], [gcc-ar], [])
+            AC_CHECK_TOOL([GCC_RANLIB], [gcc-ranlib], [])
+            AC_CHECK_TOOL([GCC_NM], [gcc-nm], [])
+            AR=${GCC_AR:-$AR}
+            RANLIB=${GCC_RANLIB:-$RANLIB}
+            NM=${GCC_NM:-$NM}
+            ;;
+        clang*)
+            # Also consider using flto=thin
+            CFLAGS_FOR_LTO="-flto"
+            LDFLAGS_FOR_LTO="-flto"
+            LINK_SHARED_OBJ="$LINK_SHARED_OBJ -flto"
+            LINK_SHARED_OBJ_SH="$LINK_SHARED_OBJ_SH -flto"
+            AC_CHECK_TOOL([LLVM_AR], [llvm-ar], [])
+            AC_CHECK_TOOL([LLVM_RANLIB], [llvm-ranlib], [])
+            AC_CHECK_TOOL([LLVM_NM], [llvm-nm], [])
+            AR=${LLVM_AR:-$AR}
+            RANLIB=${LLVM_RANLIB:-$RANLIB}
+            NM=${LLVM_NM:-$NM}
+            ;;
+        *)
+            CFLAGS_FOR_LTO=""
+            LDFLAGS_FOR_LTO=""
+            ;;
+    esac
+else
+    CFLAGS_FOR_LTO=""
+    LDFLAGS_FOR_LTO=""
+fi
+
+AC_SUBST(CFLAGS_FOR_LTO)
+AC_SUBST(LDFLAGS_FOR_LTO)
 
 #-----------------------------------------------------------------------------#
 #
@@ -5453,7 +5604,8 @@ some_kept=false
 to_delete=""
 if test "$BOOTSTRAP_MC" != "" ; then
     MERCURY_MSG("checking whether any C files need to be rebuilt...")
-    for directory in library compiler profiler deep_profiler mdbcomp browser slice ssdb mfilterjavac
+    for directory in library compiler profiler deep_profiler mdbcomp browser \
+        slice ssdb mfilterjavac grade_lib
     do
         mercury_check_c_files $directory $directory
         mercury_check_c_files $directory/Mercury/cs $directory/Mercury/c_dates

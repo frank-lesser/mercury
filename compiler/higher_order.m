@@ -274,6 +274,11 @@ recursively_process_ho_spec_requests(!GlobalInfo, !IO) :-
 
                 % Should the interface of the specialized procedure
                 % use typeinfo liveness?
+                % XXX Unfortunately, this field is not doing its job.
+                % First, it is only ever set to "yes", so it is redundant.
+                % Second, its value is only ever used for one thing, which
+                % is to set the value of the np_typeinfo_liveness field
+                % in the new_pred type, which is itself never used.
                 rq_typeinfo_liveness    :: bool,
 
                 % Is this a user-requested specialization?
@@ -416,6 +421,8 @@ recursively_process_ho_spec_requests(!GlobalInfo, !IO) :-
 
                 % Does the interface of the specialized version use type-info
                 % liveness?
+                % XXX Unfortunately, this field is not doing its job;
+                % its value is never used for anything.
                 np_typeinfo_liveness    :: bool,
 
                 % Is this a user-specified type specialization?
@@ -1779,7 +1786,7 @@ arg_contains_type_info_for_tvar(RttiVarMaps, Var, !TVars) :-
         Constraint = constraint(_ClassName, ClassArgTypes),
         % Find out what tvars the typeclass-info contains the type-infos for.
         list.filter_map(
-            (pred(ClassArgType::in, ClassTVar::out) is semidet :-
+            ( pred(ClassArgType::in, ClassTVar::out) is semidet :-
                 ClassArgType = type_variable(ClassTVar, _)
             ), ClassArgTypes, ClassTVars),
         !:TVars = ClassTVars ++ !.TVars
@@ -3017,7 +3024,7 @@ create_new_proc(NewPred, !.NewProcInfo, !NewPredInfo, !GlobalInfo) :-
 
     apply_rec_subst_to_tvar_list(KindMap, TypeSubn, ExistQVars1, ExistQTypes),
     ExistQVars = list.filter_map(
-        (func(ExistQType) = ExistQVar is semidet :-
+        ( func(ExistQType) = ExistQVar is semidet :-
             ExistQType = type_variable(ExistQVar, _)
         ), ExistQTypes),
 
@@ -3079,12 +3086,13 @@ create_new_proc(NewPred, !.NewProcInfo, !NewPredInfo, !GlobalInfo) :-
     list.foldl_corresponding(rtti_det_insert_type_info_type,
         ExtraTypeInfoVars, ExtraTypeInfoTVarTypes,
         RttiVarMaps1, RttiVarMaps2),
-    Pred = (pred(TVar::in, Var::in, !.R::in, !:R::out) is det :-
+    SetTypeInfoVarLocn =
+        ( pred(TVar::in, Var::in, !.R::in, !:R::out) is det :-
             Locn = type_info(Var),
             rtti_set_type_info_locn(TVar, Locn, !R)
         ),
-    list.foldl_corresponding(Pred, ExtraTypeInfoTVars, ExtraTypeInfoVars,
-        RttiVarMaps2, RttiVarMaps),
+    list.foldl_corresponding(SetTypeInfoVarLocn,
+        ExtraTypeInfoTVars, ExtraTypeInfoVars, RttiVarMaps2, RttiVarMaps),
 
     proc_info_set_rtti_varmaps(RttiVarMaps, !NewProcInfo),
 
@@ -3286,7 +3294,7 @@ construct_higher_order_terms(ModuleInfo, HeadVars0, NewHeadVars, ArgModes0,
     assoc_list.from_corresponding_lists(CurriedArgs, CurriedHeadVars1,
         CurriedRenaming),
     list.foldl(
-        (pred(VarPair::in, !.Map::in, !:Map::out) is det :-
+        ( pred(VarPair::in, !.Map::in, !:Map::out) is det :-
             VarPair = Var1 - Var2,
             map.set(Var1, Var2, !Map)
         ), CurriedRenaming, !Renaming),

@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2006-2012 The University of Melbourne.
-% Copyright (C) 2015 The Mercury team.
+% Copyright (C) 2015-2020 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %---------------------------------------------------------------------------%
@@ -486,12 +486,11 @@ check_format_call_site(ModuleInfo, ImplicitStreamWarnings, OptFormatCalls,
         ;
             WarnUnknownFormatCallsA = yes,
             UnknownFormatPieces = [words("Unknown format string in call to"),
-                qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+                qual_sym_name_arity(sym_name_arity(SymName, Arity)),
                 suffix("."), nl],
-            UnknownFormatMsg = simple_msg(Context,
-                [always(UnknownFormatPieces)]),
-            UnknownFormatSpec = error_spec(severity_warning,
-                phase_simplify(report_in_any_mode), [UnknownFormatMsg]),
+            UnknownFormatSpec = simplest_spec($pred, severity_warning,
+                phase_simplify(report_in_any_mode),
+                Context, UnknownFormatPieces),
             !:Specs = [UnknownFormatSpec | !.Specs]
         )
     ),
@@ -516,12 +515,11 @@ check_format_call_site(ModuleInfo, ImplicitStreamWarnings, OptFormatCalls,
             WarnUnknownFormatCallsB = yes,
             UnknownFormatValuesPieces =
                 [words("Unknown format values in call to"),
-                qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+                qual_sym_name_arity(sym_name_arity(SymName, Arity)),
                 suffix("."), nl],
-            UnknownFormatValuesMsg = simple_msg(Context,
-                [always(UnknownFormatValuesPieces)]),
-            UnknownFormatValuesSpec = error_spec(severity_warning,
-                phase_simplify(report_in_any_mode), [UnknownFormatValuesMsg]),
+            UnknownFormatValuesSpec = simplest_spec($pred, severity_warning,
+                phase_simplify(report_in_any_mode),
+                Context, UnknownFormatValuesPieces),
             !:Specs = [UnknownFormatValuesSpec | !.Specs]
         )
     ),
@@ -544,7 +542,7 @@ check_format_call_site(ModuleInfo, ImplicitStreamWarnings, OptFormatCalls,
                 WarnKnownBadFormatCalls = yes,
                 PrefixPieces = [words("Mismatched format and values"),
                     words("in call to"),
-                    qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+                    qual_sym_name_arity(sym_name_arity(SymName, Arity)),
                     suffix(":"), nl],
                 globals.lookup_bool_option(Globals,
                     warn_only_one_format_string_error,
@@ -558,10 +556,9 @@ check_format_call_site(ModuleInfo, ImplicitStreamWarnings, OptFormatCalls,
                         list.map(string_format_error_to_words, TailErrors)]
                 ),
 
-                BadFormatMsg = simple_msg(Context,
-                    [always(PrefixPieces), always(ErrorPieces)]),
-                BadFormatSpec = error_spec(severity_warning,
-                    phase_simplify(report_in_any_mode), [BadFormatMsg]),
+                BadFormatSpec = simplest_spec($pred, severity_warning,
+                    phase_simplify(report_in_any_mode),
+                    Context, PrefixPieces ++ ErrorPieces),
                 !:Specs = [BadFormatSpec | !.Specs]
             )
         ;
@@ -988,6 +985,9 @@ format_call_traverse_unify(Unification, GoalInfo, CurId, !ConjMaps, !PredMap,
                         ;
                             Functor = "i",
                             VarPolyTypePrime = apt_i(ArgVar, Context)
+                        ;
+                            Functor = "u",
+                            VarPolyTypePrime = apt_u(ArgVar, Context)
                         ;
                             Functor = "s",
                             VarPolyTypePrime = apt_s(ArgVar, Context)
@@ -1864,6 +1864,28 @@ represent_spec(ModuleInfo, Spec, MaybeResultVar, ResultVar, Goals, Context,
         build_int_base_arg(Base, BaseVar, BaseGoal, !VarSet, !VarTypes),
         generate_simple_call(ModuleInfo, mercury_string_format_module,
             "format_unsigned_int_component" ++ WidthSuffix ++ PrecSuffix,
+            pf_predicate, only_mode, detism_det, purity_pure,
+            [FlagsVar] ++ WidthVars ++ PrecVars ++
+                [BaseVar, ValueVar, ResultVar], [],
+            instmap_delta_from_assoc_list(
+                [ResultVar - ground(unique, none_or_default_func)]),
+            Context, CallGoal),
+        Goals = FlagsGoals ++ WidthGoals ++ PrecGoals ++ [BaseGoal, CallGoal]
+    ;
+        Spec = compiler_spec_uint(Context, Flags,
+            MaybeWidth, MaybePrec, Base, ValueVar),
+        set_of_var.insert(ValueVar, !ValueVars),
+        make_result_var_if_needed(MaybeResultVar, ResultVar,
+            !VarSet, !VarTypes),
+        build_flags_arg(Context, Flags, FlagsVar, FlagsGoals,
+            !VarSet, !VarTypes),
+        maybe_build_width_arg(MaybeWidth, WidthSuffix, WidthVars, WidthGoals,
+            !VarSet, !VarTypes),
+        maybe_build_prec_arg(MaybePrec, PrecSuffix, PrecVars, PrecGoals,
+            !VarSet, !VarTypes),
+        build_int_base_arg(Base, BaseVar, BaseGoal, !VarSet, !VarTypes),
+        generate_simple_call(ModuleInfo, mercury_string_format_module,
+            "format_uint_component" ++ WidthSuffix ++ PrecSuffix,
             pf_predicate, only_mode, detism_det, purity_pure,
             [FlagsVar] ++ WidthVars ++ PrecVars ++
                 [BaseVar, ValueVar, ResultVar], [],

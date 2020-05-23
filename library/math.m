@@ -30,12 +30,6 @@
 :- module math.
 :- interface.
 
-    % A domain error exception, indicates that the inputs to a function
-    % were outside the domain of the function. The string indicates
-    % where the error occurred.
-    %
-:- type domain_error ---> domain_error(string).
-
 %---------------------------------------------------------------------------%
 %
 % Mathematical constants
@@ -233,6 +227,8 @@
 :- import_module exception.
 :- import_module float.
 
+:- pragma foreign_import_module("C", float).    % For ML_FLOAT_{CEIL,FLOOR}.
+
 % These operations are mostly implemented using the C interface.
 
 :- pragma foreign_decl("C", "
@@ -249,6 +245,48 @@
     #define ML_FLOAT_E      2.7182818284590452354
     #define ML_FLOAT_PI     3.1415926535897932384
     #define ML_FLOAT_LN2    0.69314718055994530941
+
+    // Choose between float or double cmath functions depending on the type of
+    // MR_Float
+    #if defined(MR_USE_SINGLE_PREC_FLOAT)
+        #define ML_EXP(X)       expf(X)
+        #define ML_LOG(X)       logf(X)
+        #define ML_LOG10(X)     log10f(X)
+        #define ML_POW(X, Y)    powf(X, Y)
+        #define ML_SQRT(X)      sqrtf(X)
+        #define ML_SIN(X)       sinf(X)
+        #define ML_COS(X)       cosf(X)
+        #define ML_TAN(X)       tanf(X)
+        #define ML_ASIN(X)      asinf(X)
+        #define ML_ACOS(X)      acosf(X)
+        #define ML_ATAN(X)      atanf(X)
+        #define ML_ATAN2(X, Y)  atan2f(X, Y)
+        #define ML_SINH(X)      sinhf(X)
+        #define ML_COSH(X)      coshf(X)
+        #define ML_TANH(X)      tanhf(X)
+        #if defined(MR_HAVE_FMA)
+            #define ML_FMA(X, Y, Z) fmaf(X, Y, Z)
+        #endif
+    #else
+        #define ML_EXP(X)       exp(X)
+        #define ML_LOG(X)       log(X)
+        #define ML_LOG10(X)     log10(X)
+        #define ML_POW(X, Y)    pow(X, Y)
+        #define ML_SQRT(X)      sqrt(X)
+        #define ML_SIN(X)       sin(X)
+        #define ML_COS(X)       cos(X)
+        #define ML_TAN(X)       tan(X)
+        #define ML_ASIN(X)      asin(X)
+        #define ML_ACOS(X)      acos(X)
+        #define ML_ATAN(X)      atan(X)
+        #define ML_ATAN2(X, Y)  atan2(X, Y)
+        #define ML_SINH(X)      sinh(X)
+        #define ML_COSH(X)      cosh(X)
+        #define ML_TANH(X)      tanh(X)
+        #if defined(MR_HAVE_FMA)
+            #define ML_FMA(X, Y, Z) fma(X, Y, Z)
+        #endif
+    #endif
 
 "). % end pragma foreign_decl
 
@@ -377,7 +415,7 @@ e = 2.7182818284590452353602874713526625.
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Ceil = ceil(Num);
+    Ceil = ML_FLOAT_CEIL(Num);
 ").
 :- pragma foreign_proc("C#",
     ceiling(Num::in) = (Ceil::out),
@@ -409,7 +447,7 @@ e = 2.7182818284590452353602874713526625.
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Floor = floor(Num);
+    Floor = ML_FLOAT_FLOOR(Num);
 ").
 :- pragma foreign_proc("C#",
     floor(Num::in) = (Floor::out),
@@ -441,7 +479,7 @@ e = 2.7182818284590452353602874713526625.
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Rounded = floor(Num+0.5);
+    Rounded = ML_FLOAT_FLOOR(Num + (MR_Float) 0.5);
 ").
 :- pragma foreign_proc("C#",
     round(Num::in) = (Rounded::out),
@@ -486,7 +524,7 @@ sqrt(X) = SquareRoot :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    SquareRoot = sqrt(X);
+    SquareRoot = ML_SQRT(X);
 ").
 :- pragma foreign_proc("C#",
     unchecked_sqrt(X::in) = (SquareRoot::out),
@@ -562,7 +600,7 @@ pow(X, Y) = Res :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Res = pow(X, Y);
+    Res = ML_POW(X, Y);
 ").
 
 :- pragma foreign_proc("C#",
@@ -591,7 +629,7 @@ pow(X, Y) = Res :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Exp = exp(X);
+    Exp = ML_EXP(X);
 ").
 :- pragma foreign_proc("C#",
     exp(X::in) = (Exp::out),
@@ -624,7 +662,7 @@ ln(X) = Log :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Log = log(X);
+    Log = ML_LOG(X);
 ").
 :- pragma foreign_proc("C#",
     unchecked_ln(X::in) = (Log::out),
@@ -657,7 +695,7 @@ log10(X) = Log :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Log10 = log10(X);
+    Log10 = ML_LOG10(X);
 ").
 :- pragma foreign_proc("C#",
     unchecked_log10(X::in) = (Log10::out),
@@ -690,7 +728,7 @@ log2(X) = Log :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Log2 = log(X) / ML_FLOAT_LN2;
+    Log2 = ML_LOG(X) / ML_FLOAT_LN2;
 ").
 :- pragma foreign_proc("C#",
     unchecked_log2(X::in) = (Log2::out),
@@ -724,7 +762,7 @@ log(B, X) = Log :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Log = log(X) / log(B);
+    Log = ML_LOG(X) / ML_LOG(B);
 ").
 :- pragma foreign_proc("C#",
     unchecked_log(B::in, X::in) = (Log::out),
@@ -741,7 +779,7 @@ unchecked_log(B, X) = math.unchecked_ln(X) / math.unchecked_ln(B).
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Sin = sin(X);
+    Sin = ML_SIN(X);
 ").
 :- pragma foreign_proc("C#",
     sin(X::in) = (Sin::out),
@@ -767,7 +805,7 @@ unchecked_log(B, X) = math.unchecked_ln(X) / math.unchecked_ln(B).
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Cos = cos(X);
+    Cos = ML_COS(X);
 ").
 :- pragma foreign_proc("C#",
     cos(X::in) = (Cos::out),
@@ -793,7 +831,7 @@ unchecked_log(B, X) = math.unchecked_ln(X) / math.unchecked_ln(B).
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Tan = tan(X);
+    Tan = ML_TAN(X);
 ").
 :- pragma foreign_proc("C#",
     math.tan(X::in) = (Tan::out),
@@ -831,7 +869,7 @@ asin(X) = ASin :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    ASin = asin(X);
+    ASin = ML_ASIN(X);
 ").
 :- pragma foreign_proc("C#",
     unchecked_asin(X::in) = (ASin::out),
@@ -869,7 +907,7 @@ acos(X) = ACos :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    ACos = acos(X);
+    ACos = ML_ACOS(X);
 ").
 :- pragma foreign_proc("C#",
     unchecked_acos(X::in) = (ACos::out),
@@ -895,7 +933,7 @@ acos(X) = ACos :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    ATan = atan(X);
+    ATan = ML_ATAN(X);
 ").
 :- pragma foreign_proc("C#",
     atan(X::in) = (ATan::out),
@@ -921,7 +959,7 @@ acos(X) = ACos :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    ATan2 = atan2(Y, X);
+    ATan2 = ML_ATAN2(Y, X);
 ").
 :- pragma foreign_proc("C#",
     atan2(Y::in, X::in) = (ATan2::out),
@@ -947,7 +985,7 @@ acos(X) = ACos :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Sinh = sinh(X);
+    Sinh = ML_SINH(X);
 ").
 :- pragma foreign_proc("Java",
     sinh(X::in) = (Sinh::out),
@@ -976,7 +1014,7 @@ sinh(X) = Sinh :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Cosh = cosh(X);
+    Cosh = ML_COSH(X);
 ").
 :- pragma foreign_proc("Java",
     cosh(X::in) = (Cosh::out),
@@ -1005,7 +1043,7 @@ cosh(X) = Cosh :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Tanh = tanh(X);
+    Tanh = ML_TANH(X);
 ").
 :- pragma foreign_proc("Java",
     tanh(X::in) = (Tanh::out),
@@ -1054,7 +1092,7 @@ have_fma :-
         does_not_affect_liveness],
 "
 #if defined(MR_HAVE_FMA)
-    FMA = fma(X, Y, Z);
+    FMA = ML_FMA(X, Y, Z);
 #else
     MR_fatal_error(""math.fma not supported"");
 #endif

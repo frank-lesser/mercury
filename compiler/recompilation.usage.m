@@ -112,8 +112,11 @@
 :- import_module bool.
 :- import_module int.
 :- import_module list.
+:- import_module one_or_more.
 :- import_module queue.
 :- import_module require.
+
+%-----------------------------------------------------------------------------%
 
 write_usage_file(ModuleInfo, NestedSubModules, MaybeTimestampMap, !IO) :-
     module_info_get_maybe_recompilation_info(ModuleInfo, MaybeRecompInfo),
@@ -247,17 +250,35 @@ write_module_name_and_used_items(RecompInfo, TimestampMap, ModuleInstances,
     mercury_output_bracketed_sym_name(ModuleName, !IO),
     io.write_string(", """, !IO),
     map.lookup(TimestampMap, ModuleName,
-        module_timestamp(FileKind, ModuleTimestamp, NeedQualifier)),
+        module_timestamp(FileKind, ModuleTimestamp, RecompNeedQual)),
     io.write_string(file_kind_to_extension(FileKind), !IO),
     io.write_string(""", ", !IO),
     write_version_number(ModuleTimestamp, !IO),
+    % This must be kept in sync with parse_module_timestamp in
+    % recompilation.check.m.
     (
-        NeedQualifier = must_be_qualified,
-        io.write_string(", used)", !IO)
+        RecompNeedQual = recomp_avail_src,
+        io.write_string(", src", !IO)
     ;
-        NeedQualifier = may_be_unqualified,
-        io.write_string(")", !IO)
+        RecompNeedQual = recomp_avail_int_use,
+        % We used to output just ", used".
+        io.write_string(", int_used", !IO)
+    ;
+        RecompNeedQual = recomp_avail_imp_use,
+        io.write_string(", imp_used", !IO)
+    ;
+        RecompNeedQual = recomp_avail_int_import,
+        % We used to output nothing.
+        io.write_string(", int_imported", !IO)
+    ;
+        RecompNeedQual = recomp_avail_imp_import,
+        % We used to output nothing.
+        io.write_string(", imp_imported", !IO)
+    ;
+        RecompNeedQual = recomp_avail_int_use_imp_import,
+        io.write_string(", int_used_imp_imported", !IO)
     ),
+    io.write_string(")", !IO),
     ( if
         % XXX We don't yet record all uses of items from these modules
         % in polymorphism.m, etc.
@@ -941,19 +962,19 @@ find_items_used_by_item(type_body_item, TypeCtorItem, !Info) :-
     lookup_type_ctor_defn(TypeTable, TypeCtor, TypeDefn),
     hlds_data.get_type_defn_body(TypeDefn, TypeBody),
     find_items_used_by_type_body(TypeBody, !Info).
-find_items_used_by_item(mode_item, ModeIdItem, !Info):-
+find_items_used_by_item(mode_item, ModeCtorItem, !Info):-
     ModuleInfo = !.Info ^ module_info,
     module_info_get_mode_table(ModuleInfo, Modes),
     mode_table_get_mode_defns(Modes, ModeDefns),
-    ModeId = item_name_to_mode_id(ModeIdItem),
-    map.lookup(ModeDefns, ModeId, ModeDefn),
+    ModeCtor = item_name_to_mode_ctor(ModeCtorItem),
+    map.lookup(ModeDefns, ModeCtor, ModeDefn),
     find_items_used_by_mode_defn(ModeDefn, !Info).
-find_items_used_by_item(inst_item, InstIdItem, !Info):-
+find_items_used_by_item(inst_item, InstCtorItem, !Info):-
     ModuleInfo = !.Info ^ module_info,
     module_info_get_inst_table(ModuleInfo, Insts),
     inst_table_get_user_insts(Insts, UserInstTable),
-    InstId = item_name_to_inst_id(InstIdItem),
-    map.lookup(UserInstTable, InstId, InstDefn),
+    InstCtor = item_name_to_inst_ctor(InstCtorItem),
+    map.lookup(UserInstTable, InstCtor, InstDefn),
     find_items_used_by_inst_defn(InstDefn, !Info).
 find_items_used_by_item(typeclass_item, ClassItemId, !Info) :-
     ClassItemId = item_name(ClassName, ClassArity),

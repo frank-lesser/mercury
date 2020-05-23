@@ -835,11 +835,14 @@ output_record_rval_decls_format(Info, Rval, FirstIndent, LaterIndent,
             FirstIndent, LaterIndent, !N, !DeclSet, !IO),
 
         % If floats are boxed, and the static ground terms option is enabled,
-        % then for each float constant which we might want to box we declare
+        % then for each float constant which we might want to box, we declare
         % a static const variable holding that constant.
-
-        c_util.binop_category_string(Op, Category, OpStr),
-        ( if Category = float_arith_binop then
+        (
+            ( Op = float_add, OpStr = "+"
+            ; Op = float_sub, OpStr = "-"
+            ; Op = float_mul, OpStr = "*"
+            ; Op = float_div, OpStr = "/"
+            ),
             UnboxFloat = Info ^ lout_unboxed_float,
             StaticGroundFloats = Info ^ lout_static_ground_floats,
             ( if
@@ -874,8 +877,51 @@ output_record_rval_decls_format(Info, Rval, FirstIndent, LaterIndent,
             else
                 true
             )
-        else
-            true
+        ;
+            ( Op = array_index(_)
+            ; Op = string_unsafe_index_code_unit
+            ; Op = pointer_equal_conservative
+            ; Op = compound_lt
+            ; Op = compound_eq
+            ; Op = str_eq
+            ; Op = str_ne
+            ; Op = str_le
+            ; Op = str_ge
+            ; Op = str_lt
+            ; Op = str_gt
+            ; Op = unsigned_lt
+            ; Op = unsigned_le
+            ; Op = float_eq
+            ; Op = float_ne
+            ; Op = float_le
+            ; Op = float_ge
+            ; Op = float_lt
+            ; Op = float_gt
+            ; Op = int_add(_)
+            ; Op = int_sub(_)
+            ; Op = int_mul(_)
+            ; Op = int_div(_)
+            ; Op = unchecked_left_shift(_, _)
+            ; Op = unchecked_right_shift(_, _)
+            ; Op = bitwise_and(_)
+            ; Op = bitwise_or(_)
+            ; Op = bitwise_xor(_)
+            ; Op = int_mod(_)
+            ; Op = eq(_)
+            ; Op = ne(_)
+            ; Op = logical_and
+            ; Op = logical_or
+            ; Op = int_lt(_)
+            ; Op = int_gt(_)
+            ; Op = int_le(_)
+            ; Op = int_ge(_)
+            ; Op = str_cmp
+            ; Op = offset_str_eq(_)
+            ; Op = body
+            ; Op = float_from_dword
+            ; Op = int64_from_dword
+            ; Op = uint64_from_dword
+            )
         )
     ;
         Rval = mem_addr(MemRef),
@@ -1030,10 +1076,10 @@ output_rval(Info, Rval, !IO) :-
             ; Op = float_ge, OpStr = ">="
             ; Op = float_lt, OpStr = "<"
             ; Op = float_gt, OpStr = ">"
-            ; Op = float_plus, OpStr = "+"
-            ; Op = float_minus, OpStr = "-"
-            ; Op = float_times, OpStr = "*"
-            ; Op = float_divide, OpStr = "/"
+            ; Op = float_add, OpStr = "+"
+            ; Op = float_sub, OpStr = "-"
+            ; Op = float_mul, OpStr = "*"
+            ; Op = float_div, OpStr = "/"
             ),
             io.write_string("(", !IO),
             output_rval_as_type(Info, SubRvalA, lt_float, !IO),
@@ -1041,6 +1087,13 @@ output_rval(Info, Rval, !IO) :-
             io.write_string(OpStr, !IO),
             io.write_string(" ", !IO),
             output_rval_as_type(Info, SubRvalB, lt_float, !IO),
+            io.write_string(")", !IO)
+        ;
+            Op = unsigned_lt,
+            io.write_string("(", !IO),
+            output_rval_as_type(Info, SubRvalA, lt_int(int_type_uint), !IO),
+            io.write_string(" < ", !IO),
+            output_rval_as_type(Info, SubRvalB, lt_int(int_type_uint), !IO),
             io.write_string(")", !IO)
         ;
             Op = unsigned_le,
@@ -1178,16 +1231,22 @@ output_rval(Info, Rval, !IO) :-
             output_rval_as_type(Info, SubRvalB, lt_int(int_type_int), !IO),
             io.write_string(")", !IO)
         ;
-            % The second operand of the shift operatators always has type
-            % `int'.
-            ( Op = unchecked_left_shift(IntType), OpStr = "<<"
-            ; Op = unchecked_right_shift(IntType), OpStr = ">>"
+            % The second operand of the shift operators always has type
+            % `int' in C, but Mercury also allows it to be uint.
+            ( Op = unchecked_left_shift(IntType, ShiftType), OpStr = "<<"
+            ; Op = unchecked_right_shift(IntType, ShiftType), OpStr = ">>"
             ),
             io.write_string("(", !IO),
             output_rval_as_type(Info, SubRvalA, lt_int(IntType), !IO),
             io.write_string(" ", !IO),
             io.write_string(OpStr, !IO),
             io.write_string(" ", !IO),
+            (
+                ShiftType = shift_by_int
+            ;
+                ShiftType = shift_by_uint,
+                io.write_string("(int) ", !IO)
+            ),
             output_rval_as_type(Info, SubRvalB, lt_int(int_type_int), !IO),
             io.write_string(")", !IO)
         ;
@@ -2071,10 +2130,10 @@ float_literal_name(Float, FloatName) :-
     %
 :- pred float_op_name(binary_op::in, string::out) is semidet.
 
-float_op_name(float_plus, "plus").
-float_op_name(float_minus, "minus").
-float_op_name(float_times, "times").
-float_op_name(float_divide, "divide").
+float_op_name(float_add, "fadd").
+float_op_name(float_sub, "fsub").
+float_op_name(float_mul, "fmul").
+float_op_name(float_div, "fdiv").
 
 %----------------------------------------------------------------------------%
 

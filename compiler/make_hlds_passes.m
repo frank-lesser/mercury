@@ -20,7 +20,6 @@
 :- import_module parse_tree.equiv_type.
 :- import_module parse_tree.error_util.
 :- import_module parse_tree.module_qual.
-:- import_module parse_tree.prog_data.
 
 :- import_module list.
 
@@ -64,7 +63,6 @@
 :- import_module hlds.make_hlds.add_type.
 :- import_module hlds.make_hlds.make_hlds_passes.make_hlds_separate_items.
 :- import_module hlds.make_hlds.make_hlds_warn.
-:- import_module hlds.make_hlds_error.
 :- import_module hlds.pred_table.
 :- import_module hlds.special_pred.
 :- import_module libs.
@@ -73,6 +71,7 @@
 :- import_module mdbcomp.builtin_modules.
 :- import_module mdbcomp.sym_name.
 :- import_module parse_tree.maybe_error.
+:- import_module parse_tree.prog_data.
 :- import_module parse_tree.prog_item_stats.
 :- import_module parse_tree.prog_mode.
 :- import_module parse_tree.prog_out.
@@ -124,9 +123,7 @@ do_parse_tree_to_hlds(AugCompUnit, Globals, DumpBaseFileName, MQInfo0,
     ),
 
     AugCompUnit = aug_compilation_unit(ModuleName, _ModuleNameContext,
-        ModuleVersionNumbers, _SrcItemBlocks,
-        _DirectIntItemBlocks, _IndirectIntItemBlocks,
-        _OptItemBlocks, _IntForOptItemBlocks),
+        ModuleVersionNumbers, _, _, _, _, _, _, _),
 
     % We used to add items to the HLDS in three passes.
     % Roughly,
@@ -137,7 +134,7 @@ do_parse_tree_to_hlds(AugCompUnit, Globals, DumpBaseFileName, MQInfo0,
     %   clauses but also clause-like pragmas such as foreign_procs
     %   to the module, while
     % - pass 2 did the tasks that had to be done before pass 3 started
-    %   but which needed access to all the declarations added by pass 1,
+    %   but which needed access to *all* the declarations added by pass 1,
     %   not just the ones processed so far.
     %
     % We now add items to the HLDS by item kind: first one kind of item,
@@ -156,7 +153,8 @@ do_parse_tree_to_hlds(AugCompUnit, Globals, DumpBaseFileName, MQInfo0,
         ItemInitialises, ItemFinalises, ItemMutables,
         ItemTypeRepns,
         ItemForeignEnums, ItemForeignExportEnums,
-        ItemPragmas2, ItemPragmas3, ItemClauses),
+        ItemPragmasDecl, ItemPragmasImpl, PragmasGen, ItemClauses,
+        IntBadClauses),
 
     map.init(DirectArgMap),
     TypeRepnDec = type_repn_decision_data(ItemTypeRepns, DirectArgMap,
@@ -244,8 +242,8 @@ do_parse_tree_to_hlds(AugCompUnit, Globals, DumpBaseFileName, MQInfo0,
     % We need to process the mode declaration of a predicate
     % after we have seen the (type) declaration of the predicate.
     % In the past, this required the predicate declaration to precede
-    % the mode declaration in the source code, but now, the order does not
-    % matter.
+    % the mode declaration in the source code, but now, the order
+    % in the source code does not matter.
     %
     % Note that mode declarations embedded in predmode declarations
     % have already been added to the HLDS by add_pred_decl.
@@ -291,33 +289,10 @@ do_parse_tree_to_hlds(AugCompUnit, Globals, DumpBaseFileName, MQInfo0,
 
     % Implement several kinds of pragmas, the ones in the subtype
     % defined by the pragma_pass_2 inst.
-    %
-    % We have to implement the pragmas that affect type representations
-    % BEFORE we process the type table below, because if we don't, that
-    % processing may operate on incomplete data.
-    %
-    % We have to to implement pragmas that record some information
-    % for declared predicates (e.g. assertions that they terminate, or
-    % promises about their purity) after we have processed their declarations.
-    % (Users may have valid stylistic reasons for putting pragmas affecting
-    % a predicate before the declaration of the predicate itself.)
-    % With most of them, we don't *have to* process them yet, but we can,
-    % and we do. An exception is pragma_external_proc, which we *do* have
-    % to process before adding clauses, so that we can guarantee that we catch
-    % attempts to add clauses for external predicates, and generate an
-    % error message for each such attempt.
-    % XXX PASS STRUCTURE Do we actually catch such attempts?
-    %
-    % We also add some kinds of pragmas that don't have to be added
-    % at any specific time, such as pragma_foreign_decl, pragma_foreign_code
-    % and pragma_require_feature_set.
-    %
-    % NOTE We loop over ItemPragmas2 with a bespoke predicate, not list.foldl2,
-    % because list.foldl2 doesn't (yet) know how to preserve the subtype inst
-    % of ItemPragmas2.
-    add_pass_2_pragmas(ItemPragmas2,
-        !ModuleInfo, !Specs),
-    list.foldl(module_add_foreign_import_module, ItemFIMs,
+
+    % Record imports of foreign-language modules for use by the target code
+    % we may generate.
+    list.foldl(module_add_item_fim, ItemFIMs,
         !ModuleInfo),
 
     % Since all declared predicates are in now the HLDS, we could check
@@ -369,6 +344,9 @@ do_parse_tree_to_hlds(AugCompUnit, Globals, DumpBaseFileName, MQInfo0,
     list.foldl3(add_clause, ItemClauses,
         !ModuleInfo, !QualInfo, !Specs),
 
+    % Remember attempts to define predicates in the interface.
+    module_info_set_int_bad_clauses(IntBadClauses, !ModuleInfo),
+
     % Add Mercury-defined clauses to the auxiliary predicates
     % that implement solver types, mutables, and promises.
     list.foldl3(add_solver_type_aux_pred_defns_if_local,
@@ -393,14 +371,54 @@ do_parse_tree_to_hlds(AugCompUnit, Globals, DumpBaseFileName, MQInfo0,
     list.foldl2(add_finalise, ItemFinalises,
         !ModuleInfo, !Specs),
 
-    % Implement all the pragmas we haven't processed earlier.
-    % These will be the ones in the subtype defined by the pragma_pass_3 inst.
+    % Implement all pragmas.
     %
-    % NOTE We loop over ItemPragmas3 with a bespoke predicate, not list.foldl3,
-    % because list.foldl2 doesn't (yet) know how to preserve the subtype inst
-    % of ItemPragmas3.
-    add_pass_3_pragmas(ItemPragmas3,
+    % Once upon a time, we processed many pragmas in pass 2.
+    % We had three different reasons for doing this for three different
+    % kinds of pragmas.
+    %
+    % 1: We had to do this for foreign_enum pragmas, since these may affect
+    %    type representations, and *that* may affect many other things.
+    %    However, but these now have their own item kind, which are processed
+    %    at the very top above.
+    %
+    % 2: We once also had to do this for foreign_decl pragmas, but the
+    %    separation of user and aux foreign decls has removed that requirement
+    %    (see the comments on the module_info fields containing foreign_decls
+    %    in hlds_module.m).
+    %
+    % 3: We wanted to do this also for pragmas that mark predicates and/or
+    %    functions as external, so that we could catch and report attempts
+    %    to add clauses for any predicates and/or functions so marked, However,
+    %    we have no code to actually do this. If we ever *do* want to implement
+    %    this check, it can easily be done in this pass: just emit the error
+    %    message if a predicate or function being marked has some clauses.
+    %
+    % We can now add all the remaining pragmas to the HLDS at the same time.
+    % This times does have to be after we have processed all predicate
+    % and mode declarations, since several pragmas do refer to predicates
+    % or to modes of predicates.
+    %
+    % XXX This means we don't need to make any distinction between pass 2 and
+    % pass 3 pragmas anymore. This distinction will be deleted soon.
+    % NOTE Until then, we loop over the pragmas with a bespoke predicate,
+    % not list.foldl2, because list.foldl2 doesn't (yet) know how to preserve
+    % the subtype inst of ItemPragmas[23].
+    list.foldl3(add_decl_pragma, ItemPragmasDecl,
         !ModuleInfo, !QualInfo, !Specs),
+
+    % We want to process tabled pragmas *after* any inline pragmas
+    % (which are also impl pragmas), so that we can detect and report
+    % the problem if a predicate or function has both an inline pragma
+    % and a tabled pragma.
+    list.foldl4(add_impl_pragma, ItemPragmasImpl, [], RevItemPragmasTabled,
+        !ModuleInfo, !QualInfo, !Specs),
+    list.reverse(RevItemPragmasTabled, ItemPragmasTabled),
+    list.foldl3(add_impl_pragma_tabled, ItemPragmasTabled,
+        !ModuleInfo, !QualInfo, !Specs),
+
+    list.foldl2(add_gen_pragma, PragmasGen,
+        !ModuleInfo, !Specs),
 
     % Check that the declarations for field extraction and update functions
     % are sensible, and generate error messages for the ones that aren't.
@@ -640,7 +658,7 @@ add_pred_decl(SectionItem, !ModuleInfo, !Specs) :-
         Pieces = [words("Error: you cannot declare a"),
             words(pred_or_func_to_full_str(PredOrFunc)),
             words("whose name is a variable."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     else
@@ -665,7 +683,7 @@ add_mode_decl(StatusItem, !ModuleInfo, !Specs) :-
     ( if PredName = "" then
         Pieces = [words("Error: you cannot declare a mode"),
             words("for a predicate whose name is a variable."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     else
@@ -732,41 +750,13 @@ maybe_add_default_mode(SectionItem, !ModuleInfo) :-
 
 add_clause(StatusItem, !ModuleInfo, !QualInfo, !Specs) :-
     StatusItem = ims_item(ItemMercuryStatus, ItemClauseInfo),
-    ItemClauseInfo = item_clause_info(PredSymName, PredOrFunc, Args, Origin,
+    ItemClauseInfo = item_clause_info(PredSymName, PredOrFunc, Args, _Origin,
         VarSet, MaybeBodyGoal, Context, SeqNum),
-
-    (
-        ItemMercuryStatus = item_defined_in_this_module(ItemExport),
-        (
-            ItemExport = item_export_anywhere,
-            (
-                Origin = item_origin_user,
-                list.length(Args, Arity),
-
-                % There is no point printing out the qualified name
-                % since that information is already in the context.
-                UnqualPredSymName = unqualified(unqualify_name(PredSymName)),
-                ClauseId = simple_call_id_to_string(PredOrFunc,
-                    sym_name_arity(UnqualPredSymName, Arity)),
-                error_is_exported(Context, [words("clause for " ++ ClauseId)],
-                    !Specs)
-            ;
-                Origin = item_origin_compiler(_CompilerAttrs)
-            )
-        ;
-            ( ItemExport = item_export_nowhere
-            ; ItemExport = item_export_only_submodules
-            )
-        )
-    ;
-        ItemMercuryStatus = item_defined_in_other_module(_)
-        % Clauses defined in other modules are NOT an error; they can be
-        % imported from optimization files.
-    ),
     % At this stage we only need know that it is not a promise declaration.
+    GoalType = goal_type_none,
     item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
     module_add_clause(VarSet, PredOrFunc, PredSymName, Args, MaybeBodyGoal,
-        PredStatus, Context, yes(SeqNum), goal_type_none,
+        PredStatus, Context, yes(SeqNum), GoalType,
         !ModuleInfo, !QualInfo, !Specs).
 
 %---------------------------------------------------------------------------%
@@ -829,7 +819,7 @@ add_promise_clause(PromiseType, HeadVars, VarSet, Goal, Context, Status,
 
     module_info_get_name(!.ModuleInfo, ModuleName),
     module_add_clause(VarSet, pf_predicate, qualified(ModuleName, Name),
-        HeadVars, ok1(Goal), Status, Context, no,
+        HeadVars, ok2(Goal, []), Status, Context, no,
         goal_type_promise(PromiseType), !ModuleInfo, !QualInfo, !Specs).
 
 %---------------------------------------------------------------------------%
@@ -843,16 +833,7 @@ add_initialise(StatusItem, !ModuleInfo, !Specs) :-
     ItemInitialise = item_initialise_info(SymName, Arity, Origin, Context,
         _SeqNum),
     (
-        ItemMercuryStatus = item_defined_in_this_module(ItemExport),
-        (
-            ItemExport = item_export_anywhere,
-            error_is_exported(Context,
-                [decl("initialise"), words("declaration")], !Specs)
-        ;
-            ( ItemExport = item_export_nowhere
-            ; ItemExport = item_export_only_submodules
-            )
-        ),
+        ItemMercuryStatus = item_defined_in_this_module(_),
         (
             Origin = item_origin_user,
             implement_initialise(SymName, Arity, Context, !ModuleInfo, !Specs)
@@ -876,16 +857,7 @@ add_finalise(StatusItem, !ModuleInfo, !Specs) :-
     ItemFinaliseInfo = item_finalise_info(SymName, Arity, Origin, Context,
         _SeqNum),
     (
-        ItemMercuryStatus = item_defined_in_this_module(ItemExport),
-        (
-            ItemExport = item_export_anywhere,
-            error_is_exported(Context,
-                [decl("finalise"), words("declaration")], !Specs)
-        ;
-            ( ItemExport = item_export_nowhere
-            ; ItemExport = item_export_only_submodules
-            )
-        ),
+        ItemMercuryStatus = item_defined_in_this_module(_),
         (
             Origin = item_origin_user,
             implement_finalise(SymName, Arity, Context, !ModuleInfo, !Specs)
@@ -925,11 +897,11 @@ implement_initialise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
     (
         PredIds = [],
         Pieces = [words("Error:"),
-            qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+            qual_sym_name_arity(sym_name_arity(SymName, Arity)),
             words("used in"), decl("initialise"), words("declaration"),
             words("does not have a corresponding"),
             decl("pred"), words("declaration."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ;
@@ -942,21 +914,21 @@ implement_initialise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
                 !ModuleInfo, !Specs)
         else
             Pieces = [words("Error:"),
-                qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+                qual_sym_name_arity(sym_name_arity(SymName, Arity)),
                 words("used in initialise declaration"),
                 words("has invalid signature."), nl],
             % TODO: provide verbose error information here.
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         )
     ;
         PredIds = [_, _ | _],
         Pieces = [words("Error:"),
-            qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+            qual_sym_name_arity(sym_name_arity(SymName, Arity)),
             words("used in initialise declaration"),
             words("matches multiple pred declarations."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ).
@@ -985,11 +957,11 @@ implement_finalise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
     (
         PredIds = [],
         Pieces = [words("Error:"),
-            qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+            qual_sym_name_arity(sym_name_arity(SymName, Arity)),
             words("used in"), decl("finalise"), words("declaration"),
             words("does not have a corresponding"),
             decl("pred"), words("declaration."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ;
@@ -1002,20 +974,20 @@ implement_finalise(SymName, Arity, Context, !ModuleInfo, !Specs) :-
                 CName, compiler_origin_finalise, Context, !ModuleInfo, !Specs)
         else
             Pieces = [words("Error:"),
-                qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+                qual_sym_name_arity(sym_name_arity(SymName, Arity)),
                 words("used in"), decl("finalise"),
                 words("declaration has invalid signature."), nl],
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         )
     ;
         PredIds = [_, _ | _],
         Pieces = [words("Error:"),
-            qual_sym_name_and_arity(sym_name_arity(SymName, Arity)),
+            qual_sym_name_arity(sym_name_arity(SymName, Arity)),
             words("used in"), decl("finalise"), words("declaration"),
             words("has multiple"), decl("pred"), words("declarations."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ).

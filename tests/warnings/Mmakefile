@@ -3,8 +3,6 @@
 #-----------------------------------------------------------------------------#
 
 THIS_DIR = warnings
-SUBDIRS =
-TESTS_DIR = ..
 MAYBE_J1 =
 
 #-----------------------------------------------------------------------------#
@@ -27,6 +25,7 @@ ERRORCHECK_PROGS = \
 	double_underscore \
 	duplicate_call \
 	duplicate_const \
+	gh85 \
 	inconsistent_pred_order \
 	inf_recursion_lambda \
 	inference_test \
@@ -49,6 +48,7 @@ ERRORCHECK_PROGS = \
 	table_with_inline \
 	unify_f_g \
 	unify_x_f_x \
+	unknown_warning \
 	unsigned_zero_cmp \
 	unused_args_test \
 	unused_import \
@@ -80,7 +80,7 @@ endif
 PROGS = $(COMPILE_PROGS) $(ERRORCHECK_PROGS) up_to_date
 
 TESTS = $(sort $(PROGS))
-include $(TESTS_DIR)/Mmake.common
+include ../Mmake.common
 
 # Module-specific options should go in Mercury.options so they
 # can be found by `mmc --make'.

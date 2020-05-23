@@ -529,7 +529,6 @@
 :- import_module hlds.make_hlds.add_clause.
 :- import_module hlds.make_hlds.add_foreign_proc.
 :- import_module hlds.make_hlds.add_pragma.
-:- import_module hlds.make_hlds_error.
 :- import_module libs.
 :- import_module libs.globals.
 :- import_module libs.options.
@@ -559,8 +558,8 @@ add_aux_pred_decls_for_mutable_if_local(SectionItem, !ModuleInfo, !Specs) :-
     SectionItem = sec_item(SectionInfo, ItemMutable),
     SectionInfo = sec_info(ItemMercuryStatus, NeedQual),
     (
-        ItemMercuryStatus = item_defined_in_this_module(ItemExport),
-        check_mutable(ItemMutable, ItemExport, !.ModuleInfo, !Specs),
+        ItemMercuryStatus = item_defined_in_this_module(_),
+        check_mutable(ItemMutable, !.ModuleInfo, !Specs),
         item_mercury_status_to_pred_status(ItemMercuryStatus, PredStatus),
         add_aux_pred_decls_for_mutable(PredStatus, NeedQual,
             ItemMutable, !ModuleInfo, !Specs)
@@ -572,22 +571,13 @@ add_aux_pred_decls_for_mutable_if_local(SectionItem, !ModuleInfo, !Specs) :-
         % in any submodules of the module that actually defined the mutable.
     ).
 
-:- pred check_mutable(item_mutable_info::in, item_export::in, module_info::in,
+:- pred check_mutable(item_mutable_info::in, module_info::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-check_mutable(ItemMutable, ItemExport, ModuleInfo, !Specs) :-
+check_mutable(ItemMutable, ModuleInfo, !Specs) :-
     ItemMutable = item_mutable_info(MutableName,
         _OrigType, _Type, OrigInst, Inst,
         _InitTerm, _VarSetMutable, MutAttrs, Context, _SeqNum),
-    (
-        ( ItemExport = item_export_nowhere
-        ; ItemExport = item_export_only_submodules
-        )
-    ;
-        ItemExport = item_export_anywhere,
-        error_is_exported(Context,
-            [decl("mutable"), words("declaration")], !Specs)
-    ),
 
     % XXX We don't currently support the foreign_name attribute
     % for all languages.
@@ -622,8 +612,8 @@ check_mutable(ItemMutable, ItemExport, ModuleInfo, !Specs) :-
     then
         TrailPieces = [words("Error: trailed"), decl("mutable"),
             words("declaration in non-trailing grade."), nl],
-        TrailSpec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-            Context, TrailPieces),
+        TrailSpec = simplest_spec($pred, severity_error,
+            phase_parse_tree_to_hlds, Context, TrailPieces),
         !:Specs = [TrailSpec | !.Specs]
     else
         true
@@ -672,7 +662,7 @@ check_mutable(ItemMutable, ItemExport, ModuleInfo, !Specs) :-
     % inside a mutable declaration.
     %
 :- pred check_mutable_inst(module_info::in, prog_context::in,
-    inst_varset::in, list(inst_id)::in, mer_inst::in,
+    inst_varset::in, list(inst_ctor)::in, mer_inst::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
 check_mutable_inst(ModuleInfo, Context, InstVarSet, ParentInsts, Inst,
@@ -694,9 +684,9 @@ check_mutable_inst(ModuleInfo, Context, InstVarSet, ParentInsts, Inst,
         (
             InstName = user_inst(UserInstSymName, UserInstArgs),
             list.length(UserInstArgs, UserInstArity),
-            UserInstId = inst_id(UserInstSymName, UserInstArity),
+            UserInstCtor = inst_ctor(UserInstSymName, UserInstArity),
             ( if
-                list.member(UserInstId, ParentInsts)
+                list.member(UserInstCtor, ParentInsts)
             then
                 true
             else if
@@ -721,11 +711,11 @@ check_mutable_inst(ModuleInfo, Context, InstVarSet, ParentInsts, Inst,
 
                 module_info_get_inst_table(ModuleInfo, InstTable),
                 inst_table_get_user_insts(InstTable, UserInstTable),
-                ( if map.search(UserInstTable, UserInstId, InstDefn) then
+                ( if map.search(UserInstTable, UserInstCtor, InstDefn) then
                     InstDefn = hlds_inst_defn(DefnInstVarSet, _Params,
                         InstBody, _MMTC, _Context, _Status),
                     InstBody = eqv_inst(EqvInst),
-                    DefnParentInsts = [UserInstId | ParentInsts],
+                    DefnParentInsts = [UserInstCtor | ParentInsts],
                     check_mutable_inst(ModuleInfo, Context, DefnInstVarSet,
                         DefnParentInsts, EqvInst, !Specs)
                 else
@@ -780,7 +770,7 @@ check_mutable_inst(ModuleInfo, Context, InstVarSet, ParentInsts, Inst,
     ).
 
 :- pred check_mutable_bound_insts(module_info::in, prog_context::in,
-    inst_varset::in, list(inst_id)::in, list(bound_inst)::in,
+    inst_varset::in, list(inst_ctor)::in, list(bound_inst)::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
 check_mutable_bound_insts(_ModuleInfo, _Context, _InstVarSet, _ParentInsts,
@@ -794,7 +784,7 @@ check_mutable_bound_insts(ModuleInfo, Context, InstVarSet, ParentInsts,
         BoundInsts, !Specs).
 
 :- pred check_mutable_insts(module_info::in, prog_context::in,
-    inst_varset::in, list(inst_id)::in, list(mer_inst)::in,
+    inst_varset::in, list(inst_ctor)::in, list(mer_inst)::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
 check_mutable_insts(_ModuleInfo, _Context, _InstVarSet, _ParentInsts,
@@ -809,7 +799,7 @@ check_mutable_insts(ModuleInfo, Context, InstVarSet, ParentInsts,
 %---------------------%
 
 :- pred check_mutable_inst_uniqueness(module_info::in, prog_context::in,
-    inst_varset::in, list(inst_id)::in, mer_inst::in, uniqueness::in,
+    inst_varset::in, list(inst_ctor)::in, mer_inst::in, uniqueness::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
 check_mutable_inst_uniqueness(ModuleInfo, Context, InstVarSet, ParentInsts,
@@ -843,7 +833,7 @@ check_mutable_inst_uniqueness(ModuleInfo, Context, InstVarSet, ParentInsts,
     ).
 
 :- pred invalid_inst_in_mutable(module_info::in, prog_context::in,
-    inst_varset::in, list(inst_id)::in, mer_inst::in,
+    inst_varset::in, list(inst_ctor)::in, mer_inst::in,
     list(format_component)::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
@@ -855,26 +845,26 @@ invalid_inst_in_mutable(ModuleInfo, Context, InstVarSet, ParentInsts, Inst,
         [], [nl_indent_delta(1)], [nl_indent_delta(-1)], Inst),
     Pieces = [words("Error:") | ParentPieces] ++
         [words("the inst") | InstPieces] ++ ProblemPieces ++ [nl],
-    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
         Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
-:- pred named_parents_to_pieces(list(inst_id)::in,
+:- pred named_parents_to_pieces(list(inst_ctor)::in,
     list(format_component)::out) is det.
 
 named_parents_to_pieces([], []).
-named_parents_to_pieces([InstId | InstIds], Pieces) :-
-    named_parent_to_pieces(InstId, HeadPieces),
-    named_parents_to_pieces(InstIds, TailPieces),
+named_parents_to_pieces([InstCtor | InstCtors], Pieces) :-
+    named_parent_to_pieces(InstCtor, HeadPieces),
+    named_parents_to_pieces(InstCtors, TailPieces),
     Pieces = HeadPieces ++ TailPieces.
 
-:- pred named_parent_to_pieces(inst_id::in,
+:- pred named_parent_to_pieces(inst_ctor::in,
     list(format_component)::out) is det.
 
-named_parent_to_pieces(InstId, Pieces) :-
-    InstId = inst_id(InstName, InstArity),
+named_parent_to_pieces(InstCtor, Pieces) :-
+    InstCtor = inst_ctor(InstName, InstArity),
     Pieces = [words("in the expansion of the named inst"),
-        qual_sym_name_and_arity(sym_name_arity(InstName, InstArity)),
+        qual_sym_name_arity(sym_name_arity(InstName, InstArity)),
         suffix(":"), nl].
 
 %---------------------------------------------------------------------------%
@@ -1044,7 +1034,7 @@ define_mutable_global_var_c(TargetMutableName, Type, IsConstant, IsThreadLocal,
         "#endif\n" | LockDeclStrs]),
     ForeignDeclCode = foreign_decl_code(lang_c, foreign_decl_is_exported,
         floi_literal(DeclBody), Context),
-    module_add_foreign_decl_code(ForeignDeclCode, !ModuleInfo),
+    module_add_foreign_decl_code_aux(ForeignDeclCode, !ModuleInfo),
 
     DefnBody = string.append_list([
         TypeName, " ", TargetMutableName, ";\n" | LockDefnStrs]),
@@ -1625,10 +1615,10 @@ define_main_get_set_preds(TargetParams, ItemMutable, TargetMutableName, Attrs,
                 ImpureGetExpr),
             StdSetPredExpr = ImpureSetExpr,
             module_add_clause(VarSetOnlyX, pf_predicate, StdGetPredName,
-                StdPredArgs, ok1(StdGetPredExpr), PredStatus, Context, no,
+                StdPredArgs, ok2(StdGetPredExpr, []), PredStatus, Context, no,
                 goal_type_none, !ModuleInfo, !QualInfo, !Specs),
             module_add_clause(VarSetOnlyX, pf_predicate, StdSetPredName,
-                StdPredArgs, ok1(StdSetPredExpr), PredStatus, Context, no,
+                StdPredArgs, ok2(StdSetPredExpr, []), PredStatus, Context, no,
                 goal_type_none, !ModuleInfo, !QualInfo, !Specs),
             set.det_remove(mutable_pred_std_get, !PredKinds),
             set.det_remove(mutable_pred_std_set, !PredKinds)
@@ -1727,11 +1717,11 @@ define_main_get_set_preds(TargetParams, ItemMutable, TargetMutableName, Attrs,
                 promise_purity_expr(Context, purity_pure, IOSetPredExpr),
 
             module_add_clause(VarSetXandIOs, pf_predicate, IOGetPredName,
-                IOPredArgs, ok1(PureIOGetPredExpr), PredStatus, Context, no,
-                goal_type_none, !ModuleInfo, !QualInfo, !Specs),
+                IOPredArgs, ok2(PureIOGetPredExpr, []), PredStatus, Context,
+                no, goal_type_none, !ModuleInfo, !QualInfo, !Specs),
             module_add_clause(VarSetXandIOs, pf_predicate, IOSetPredName,
-                IOPredArgs, ok1(PureIOSetPredExpr), PredStatus, Context, no,
-                goal_type_none, !ModuleInfo, !QualInfo, !Specs),
+                IOPredArgs, ok2(PureIOSetPredExpr, []), PredStatus, Context,
+                no, goal_type_none, !ModuleInfo, !QualInfo, !Specs),
             set.det_remove(mutable_pred_io_get, !PredKinds),
             set.det_remove(mutable_pred_io_set, !PredKinds)
         )
@@ -1768,7 +1758,7 @@ define_init_pred(ItemMutable, PredStatus, Lang, InitSetPredName,
     % See the comments for parse_mutable_decl_info for the reason
     % why we _must_ pass VarSetMutableX here.
     module_add_clause(VarSetMutableX, pf_predicate, InitPredName, [],
-        ok1(InitPredExpr), PredStatus, Context, no, goal_type_none,
+        ok2(InitPredExpr, []), PredStatus, Context, no, goal_type_none,
         !ModuleInfo, !QualInfo, !Specs),
 
     InitPredArity = 0,
@@ -1854,7 +1844,7 @@ get_global_name_from_foreign_names(ModuleInfo, Context,
             words("specified for the"),
             fixed(compilation_target_string(CompilationTarget)),
             words("backend."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs],
 

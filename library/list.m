@@ -945,8 +945,8 @@
     %
     % An exception is raised if the list arguments differ in length.
     %
-:- func map_corresponding(func(A, B) = C, list(A), list(B)) = list(C).
-:- pred map_corresponding(pred(A, B, C), list(A), list(B), list(C)).
+:- func map_corresponding(func(A, B) = R, list(A), list(B)) = list(R).
+:- pred map_corresponding(pred(A, B, R), list(A), list(B), list(R)).
 :- mode map_corresponding(in(pred(in, in, out) is det), in, in, out)
     is det.
 :- mode map_corresponding(in(pred(in, in, out) is semidet), in, in, out)
@@ -957,8 +957,14 @@
     %
     % An exception is raised if the list arguments differ in length.
     %
-:- func map_corresponding3(func(A, B, C) = D, list(A), list(B), list(C))
-    = list(D).
+:- func map_corresponding3(func(A, B, C) = R, list(A), list(B), list(C))
+    = list(R).
+:- pred map_corresponding3(pred(A, B, C, R), list(A), list(B), list(C),
+    list(R)).
+:- mode map_corresponding3(in(pred(in, in, in, out) is det),
+    in, in, in, out) is det.
+:- mode map_corresponding3(in(pred(in, in, in, out) is semidet),
+    in, in, in, out) is semidet.
 
 %---------------------%
 
@@ -1915,16 +1921,6 @@
 :- pragma type_spec(list.sort(in, out), T = var(_)).
 :- pragma type_spec(list.sort/1, T = var(_)).
 
-:- type one_or_more(T)
-    --->    one_or_more(T, list(T)).
-
-:- func one_or_more_cons(T, one_or_more(T)) = one_or_more(T).
-
-:- func one_or_more_to_list(one_or_more(T)) = list(T).
-
-:- pred list_to_one_or_more(list(T)::in, one_or_more(T)::out) is semidet.
-:- pred list_to_one_or_more_det(list(T)::in, one_or_more(T)::out) is det.
-
 %---------------------------------------------------------------------------%
 
 :- implementation.
@@ -2210,6 +2206,19 @@ replace_nth(Xs, N, To, RXs) :-
     N > 0,
     list.replace_nth_loop(Xs, N, To, RXs).
 
+:- pred replace_nth_loop(list(T)::in, int::in, T::in, list(T)::out)
+    is semidet.
+
+replace_nth_loop([X | Xs], N, To, RXs) :-
+    ( if N > 1 then
+        list.replace_nth_loop(Xs, N - 1, To, RXs0),
+        RXs = [X | RXs0]
+    else if N = 1 then
+        RXs = [To | Xs]
+    else
+        fail
+    ).
+
 det_replace_nth(Xs, N, To) = RXs :-
     list.det_replace_nth(Xs, N, To, RXs).
 
@@ -2224,21 +2233,7 @@ det_replace_nth(Xs, N, To, RXs) :-
         )
     else
         unexpected($pred,
-            "Cannot replace element whose index position " ++
-            "is less than 1.")
-    ).
-
-:- pred replace_nth_loop(list(T)::in, int::in, T::in, list(T)::out)
-    is semidet.
-
-replace_nth_loop([X | Xs], N, To, RXs) :-
-    ( if N > 1 then
-        list.replace_nth_loop(Xs, N - 1, To, RXs0),
-        RXs = [X | RXs0]
-    else if N = 1 then
-        RXs = [To | Xs]
-    else
-        fail
+            "Cannot replace element whose index position is less than 1.")
     ).
 
 %---------------------------------------------------------------------------%
@@ -2633,8 +2628,7 @@ det_split_last([H | T], AllButLast, Last) :-
         AllButLast = [H | AllButLastTail]
     ).
 
-:- pred list.det_split_last_loop(T::in, list(T)::in, list(T)::out, T::out)
-    is det.
+:- pred det_split_last_loop(T::in, list(T)::in, list(T)::out, T::out) is det.
 
 det_split_last_loop(H, T, AllButLast, Last) :-
     (
@@ -3059,19 +3053,38 @@ map_corresponding(P, [HA | TAs], [HB | TBs], [HR | TRs]) :-
     P(HA, HB, HR),
     list.map_corresponding(P, TAs, TBs, TRs).
 
-map_corresponding3(F, As, Bs, Cs) =
+map_corresponding3(F, A, B, C) =
     ( if
-        As = [HA | TAs],
-        Bs = [HB | TBs],
-        Cs = [HC | TCs]
+        A = [AH | AT],
+        B = [BH | BT],
+        C = [CH | CT]
     then
-        [F(HA, HB, HC) | list.map_corresponding3(F, TAs, TBs, TCs)]
+        [F(AH, BH, CH) | list.map_corresponding3(F, AT, BT, CT)]
     else if
-        As = [],
-        Bs = [],
-        Cs = []
+        A = [],
+        B = [],
+        C = []
     then
         []
+    else
+        unexpected($pred, "mismatched list lengths")
+    ).
+
+map_corresponding3(P, A, B, C, R) :-
+    ( if
+        A = [AH | AT],
+        B = [BH | BT],
+        C = [CH | CT]
+    then
+        P(AH, BH, CH, RH),
+        list.map_corresponding3(P, AT, BT, CT, RT),
+        R = [RH | RT]
+    else if
+        A = [],
+        B = [],
+        C = []
+    then
+        R = []
     else
         unexpected($pred, "mismatched list lengths")
     ).
@@ -3459,19 +3472,6 @@ inst_preserving_reverse(Xs) = Ys :-
 inst_preserving_reverse_prepend([], L, L).
 inst_preserving_reverse_prepend([X | Xs], L0, L) :-
     inst_preserving_reverse_prepend(Xs, [X | L0], L).
-
-%---------------------------------------------------------------------------%
-
-one_or_more_cons(Head, one_or_more(HeadTail, TailTail)) =
-    one_or_more(Head, [HeadTail | TailTail]).
-
-one_or_more_to_list(one_or_more(Head, Tail)) = [Head | Tail].
-
-list_to_one_or_more([Head | Tail], one_or_more(Head, Tail)).
-
-list_to_one_or_more_det([], _) :-
-    unexpected($pred, "empty list").
-list_to_one_or_more_det([Head | Tail], one_or_more(Head, Tail)).
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%

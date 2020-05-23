@@ -364,8 +364,8 @@ transform_parse_tree_goal_to_hlds_call(LocKind, Goal, Renaming, HLDSGoal,
             MaybeUnifyContext = no,
             GoalExpr = plain_call(PredId, ModeId, HeadVars, not_builtin,
                 MaybeUnifyContext, Name),
-            SimpleCallId = simple_call_id(pf_predicate, Name, Arity),
-            CallId = plain_call_id(SimpleCallId)
+            PFSymNameArity = pf_sym_name_arity(pf_predicate, Name, Arity),
+            CallId = plain_call_id(PFSymNameArity)
         ),
         goal_info_init_context_purity(Context, Purity, GoalInfo),
         HLDSGoal0 = hlds_goal(GoalExpr, GoalInfo),
@@ -425,8 +425,8 @@ transform_dcg_record_syntax(LocKind, AccessType, ArgTerms0, Context, HLDSGoal,
             words_quote("Field =^ field1 ^ ... ^ fieldN"),
             words("or"), words_quote("^ field1 ^ ... ^ fieldN := Field"),
             words("in DCG field access goal."), nl],
-        Msg = simple_msg(Context, [always(Pieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ).
 
@@ -472,11 +472,11 @@ transform_dcg_record_syntax_2(AccessType, FieldNames, ArgTerms, Context,
         else
             unexpected($pred, "not cons")
         ),
-        SimpleCallId = simple_call_id(pf_function, FuncName, FuncArity),
+        PFSymNameArity = pf_sym_name_arity(pf_function, FuncName, FuncArity),
         % DCG arguments should always be distinct variables,
         % so this context should never be used.
         OutputTermArgNumber = 3,
-        OutputTermArgContext = ac_call(plain_call_id(SimpleCallId))
+        OutputTermArgContext = ac_call(plain_call_id(PFSymNameArity))
     ;
         AccessType = get,
         expand_dcg_field_extraction_goal(Context, umc_explicit, [],
@@ -489,9 +489,9 @@ transform_dcg_record_syntax_2(AccessType, FieldNames, ArgTerms, Context,
         else
             unexpected($pred, "not cons")
         ),
-        SimpleCallId = simple_call_id(pf_function, FuncName, FuncArity),
+        PFSymNameArity = pf_sym_name_arity(pf_function, FuncName, FuncArity),
         FieldArgNumber = 2,
-        FieldArgContext = ac_call(plain_call_id(SimpleCallId)),
+        FieldArgContext = ac_call(plain_call_id(PFSymNameArity)),
         % DCG arguments should always be distinct variables,
         % so this context should never be used.
         OutputTermArgNumber = 3,
@@ -888,9 +888,8 @@ transform_parse_tree_goal_to_hlds_try(LocKind, Goal, Renaming, HLDSGoal,
                 words("goal with an"), quote("io"),
                 words("parameter cannot have an"), quote("else"),
                 words("part."), nl],
-            Msg = simple_msg(Context, [always(Pieces)]),
-            Spec = error_spec(severity_error,
-                phase_parse_tree_to_hlds, [Msg]),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs],
             HLDSGoal = true_goal_with_context(Context)
         )
@@ -1164,7 +1163,7 @@ make_catch_ite_chain(ResultVarTerm, ExcpVarTerm, Catches, MaybeCatchAny,
             % With a catch_any part, end the if-then-else chain with:
             %   CatchAnyVar = exc_univ_value(Excp),
             %   CatchAnyGoal
-            Context = goal_get_context(CatchAnyGoal),
+            Context = get_goal_context(CatchAnyGoal),
             GetUnivValue = unify_expr(Context,
                 variable(CatchAnyVar, Context),
                 exception_functor("exc_univ_value", ExcpVarTerm, Context),

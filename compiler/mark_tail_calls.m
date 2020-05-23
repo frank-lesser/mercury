@@ -174,14 +174,14 @@
 % at the top of this module for the reason.
 %
 
-    % add_message_for_nontail_self_recursive_call(SimpleCallId, ProcId,
+    % add_message_for_nontail_self_recursive_call(PFSymNameArity, ProcId,
     %    Context, WarnOrError, !Specs):
     %
     % Add an error_spec to !Specs reporting that the recursive call inside
-    % the procedure described by SimpleCallId and ProcId at Context
+    % the procedure described by PFSymNameArity and ProcId at Context
     % is not *tail* recursive. Set its severity based on WarnOrError.
     %
-:- pred add_message_for_nontail_self_recursive_call(simple_call_id::in,
+:- pred add_message_for_nontail_self_recursive_call(pf_sym_name_arity::in,
     proc_id::in, prog_context::in, nontail_rec_call_reason::in,
     warning_or_error::in, list(error_spec)::in, list(error_spec)::out) is det.
 
@@ -189,11 +189,11 @@
     %    CalleeCallId, WarnOrError, Context, !Specs):
     %
     % Add an error_spec to !Specs reporting that the mutually recursive call
-    % inside the procedure described by SimpleCallId and ProcId at Context
+    % inside the procedure described by PFSymNameArity and ProcId at Context
     % is not *tail* recursive. Set its severity based on WarnOrError.
     %
-:- pred add_message_for_nontail_mutual_recursive_call(simple_call_id::in,
-    proc_id::in, simple_call_id::in, prog_context::in,
+:- pred add_message_for_nontail_mutual_recursive_call(pf_sym_name_arity::in,
+    proc_id::in, pf_sym_name_arity::in, prog_context::in,
     nontail_rec_call_reason::in, warning_or_error::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
@@ -214,7 +214,7 @@
     % If FoundAnyRecCalls = not_found_any_rec_calls but ProcInfo says
     % that the procedure has a pragma about tail recursive calls on it,
     % then add a message to !Specs reporting that the procedure described by
-    % SimpleCallId contains no recursive calls at all, tail-recursive or
+    % PFSymNameArity contains no recursive calls at all, tail-recursive or
     % otherwise.
     %
 :- pred maybe_report_no_tail_or_nontail_recursive_calls(pred_info::in,
@@ -574,49 +574,40 @@ do_mark_tail_rec_calls_in_proc(Params, ModuleInfo, SCC, PredId, ProcId,
      list(mer_type)::in, list(mer_mode)::in, list(prog_var)::in,
      list(prog_var)::out) is det.
 
-find_output_args(ModuleInfo, Types, Modes, Vars, Outputs) :-
-    ( if find_output_args_2(ModuleInfo, Types, Modes, Vars, OutputsPrime) then
-        Outputs = OutputsPrime
+find_output_args(ModuleInfo, Types, Modes, Vars, OutputVars) :-
+    ( if
+        Types = [HeadType | TailTypes],
+        Modes = [HeadMode | TailModes],
+        Vars = [HeadVar | TailVars]
+    then
+        find_output_args(ModuleInfo, TailTypes, TailModes, TailVars,
+            TailOutputVars),
+        mode_to_top_functor_mode(ModuleInfo, HeadMode, HeadType,
+            TopFunctorMode),
+        (
+            ( TopFunctorMode = top_in
+            ; TopFunctorMode = top_unused
+            ),
+            OutputVars = TailOutputVars
+        ;
+            TopFunctorMode = top_out,
+            IsDummy = is_type_a_dummy(ModuleInfo, HeadType),
+            (
+                IsDummy = is_not_dummy_type,
+                OutputVars = [HeadVar | TailOutputVars]
+            ;
+                IsDummy = is_dummy_type,
+                OutputVars = TailOutputVars
+            )
+        )
+    else if
+        Types = [],
+        Modes = [],
+        Vars = []
+    then
+        OutputVars = []
     else
         unexpected($pred, "list length mismatch")
-    ).
-
-:- pred find_output_args_2(module_info::in,
-    list(mer_type)::in, list(mer_mode)::in, list(prog_var)::in,
-    list(prog_var)::out) is semidet.
-
-find_output_args_2(_, [], [], [], []).
-find_output_args_2(ModuleInfo, [Type | Types], [Mode | Modes], [Var | Vars],
-        OutputVars) :-
-    find_output_args_2(ModuleInfo, Types, Modes, Vars, TailOutputVars),
-    require_det (
-        ( if is_output(ModuleInfo, Mode, Type) then
-            OutputVars = [Var | TailOutputVars]
-        else
-            OutputVars = TailOutputVars
-        )
-    ).
-
-:- pred is_output(module_info::in, mer_mode::in, mer_type::in) is semidet.
-
-is_output(ModuleInfo, Mode, Type) :-
-    mode_to_top_functor_mode(ModuleInfo, Mode, Type, TopFunctorMode),
-    require_complete_switch [TopFunctorMode]
-    (
-        ( TopFunctorMode = top_in
-        ; TopFunctorMode = top_unused
-        ),
-        false
-    ;
-        TopFunctorMode = top_out,
-        IsDummy = is_type_a_dummy(ModuleInfo, Type),
-        require_complete_switch [IsDummy]
-        (
-            IsDummy = is_not_dummy_type
-        ;
-            IsDummy = is_dummy_type,
-            false
-        )
     ).
 
 %---------------------------------------------------------------------------%
@@ -1111,7 +1102,7 @@ report_nontail_recursive_call(ModuleInfo, CallerPredProcId, CalleePredProcId,
     CallerPredOrFunc = pred_info_is_pred_or_func(CallerPredInfo),
     CallerName = pred_info_name(CallerPredInfo),
     CallerArity = pred_info_orig_arity(CallerPredInfo),
-    CallerId = simple_call_id(CallerPredOrFunc, unqualified(CallerName),
+    CallerId = pf_sym_name_arity(CallerPredOrFunc, unqualified(CallerName),
         CallerArity),
     ( if CallerPredProcId = CalleePredProcId then
         add_message_for_nontail_self_recursive_call(CallerId, CallerProcId,
@@ -1123,14 +1114,15 @@ report_nontail_recursive_call(ModuleInfo, CallerPredProcId, CalleePredProcId,
         CalleeName = qualified(pred_info_module(CalleePredInfo),
             pred_info_name(CalleePredInfo)),
         CalleeArity = pred_info_orig_arity(CalleePredInfo),
-        CalleeId = simple_call_id(CalleePredOrFunc, CalleeName, CalleeArity),
+        CalleeId =
+            pf_sym_name_arity(CalleePredOrFunc, CalleeName, CalleeArity),
         add_message_for_nontail_mutual_recursive_call(CallerId,
             CallerProcId, CalleeId, Context, Reason, WarnOrError, !Specs)
     ).
 
 %---------------------------------------------------------------------------%
 
-add_message_for_nontail_self_recursive_call(SimpleCallId, ProcId, Context,
+add_message_for_nontail_self_recursive_call(PFSymNameArity, ProcId, Context,
         Reason, WarnOrError, !Specs) :-
     nontail_rec_call_reason_to_pieces(Reason, Context,
         ReasonPieces, VerboseMsgs),
@@ -1138,10 +1130,12 @@ add_message_for_nontail_self_recursive_call(SimpleCallId, ProcId, Context,
     proc_id_to_int(ProcId, ProcNumber0),
     ProcNumber = ProcNumber0 + 1,
     MainPieces = [words("In mode number"), int_fixed(ProcNumber),
-        words("of"), simple_call(SimpleCallId), suffix(":"), nl,
+        words("of"), unqual_pf_sym_name_orig_arity(PFSymNameArity),
+        suffix(":"), nl,
         WarnOrErrorWord, words("self-recursive call")] ++ ReasonPieces,
     MainMsg = simplest_msg(Context, MainPieces),
-    Spec = error_spec(Severity, phase_code_gen, [MainMsg | VerboseMsgs]),
+    Spec = error_spec($pred, Severity, phase_code_gen,
+        [MainMsg | VerboseMsgs]),
     !:Specs = [Spec | !.Specs].
 
 add_message_for_nontail_mutual_recursive_call(CallerId, CallerProcId,
@@ -1151,12 +1145,13 @@ add_message_for_nontail_mutual_recursive_call(CallerId, CallerProcId,
     woe_to_severity_and_string(WarnOrError, Severity, WarnOrErrorWord),
     proc_id_to_int(CallerProcId, ProcNumber0),
     ProcNumber = ProcNumber0 + 1,
-    MainPieces = [words("In mode number"), int_fixed(ProcNumber),
-        words("of"), simple_call(CallerId), suffix(":"), nl,
+    MainPieces = [words("In mode number"), int_fixed(ProcNumber), words("of"),
+        unqual_pf_sym_name_orig_arity(CallerId), suffix(":"), nl,
         WarnOrErrorWord, words("mutually recursive call to"),
-        simple_call(CalleeId)] ++ ReasonPieces,
+        unqual_pf_sym_name_orig_arity(CalleeId)] ++ ReasonPieces,
     MainMsg = simplest_msg(Context, MainPieces),
-    Spec = error_spec(Severity, phase_code_gen, [MainMsg | VerboseMsgs]),
+    Spec = error_spec($pred, Severity, phase_code_gen,
+        [MainMsg | VerboseMsgs]),
     !:Specs = [Spec | !.Specs].
 
 :- pred woe_to_severity_and_string(warning_or_error::in,
@@ -1222,24 +1217,25 @@ maybe_report_no_tail_or_nontail_recursive_calls(PredInfo, ProcInfo,
             pred_info_get_is_pred_or_func(PredInfo, PredOrFunc),
             pred_info_get_name(PredInfo, PredName),
             pred_info_get_orig_arity(PredInfo, PredArity),
-            SimpleCallId = simple_call_id(PredOrFunc, unqualified(PredName),
-                PredArity),
-            report_no_tail_or_nontail_recursive_calls(SimpleCallId, Context,
+            PFSymNameArity = pf_sym_name_arity(PredOrFunc,
+                unqualified(PredName), PredArity),
+            report_no_tail_or_nontail_recursive_calls(PFSymNameArity, Context,
                 !Specs)
         )
     ).
 
-:- pred report_no_tail_or_nontail_recursive_calls(simple_call_id::in,
+:- pred report_no_tail_or_nontail_recursive_calls(pf_sym_name_arity::in,
     prog_context::in, list(error_spec)::in, list(error_spec)::out) is det.
 
-report_no_tail_or_nontail_recursive_calls(SimpleCallId, Context, !Specs) :-
-    SimpleCallId = simple_call_id(PredOrFunc, _, _),
-    Pieces = [words("In"), pragma_decl("require_tail_recursion"),
-        words("for"), simple_call(SimpleCallId), suffix(":"), nl,
+report_no_tail_or_nontail_recursive_calls(PFSymNameArity, Context, !Specs) :-
+    PFSymNameArity = pf_sym_name_arity(PredOrFunc, _, _),
+    Pieces = [words("In"), pragma_decl("require_tail_recursion"), words("for"),
+        unqual_pf_sym_name_orig_arity(PFSymNameArity), suffix(":"), nl,
         words("warning: the code defining this"), p_or_f(PredOrFunc),
         words("contains no recursive calls at all,"),
         words("tail-recursive or otherwise."), nl],
-    Spec = simplest_spec(severity_warning, phase_code_gen, Context, Pieces),
+    Spec = simplest_spec($pred, severity_warning, phase_code_gen,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
 %---------------------------------------------------------------------------%

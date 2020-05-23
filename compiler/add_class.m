@@ -328,7 +328,11 @@ add_class_pred_or_func_decl(ClassName, ClassParamVars, ItemNumber,
     Constraints0 = constraints(UnivConstraints0, ExistConstraints),
     UnivConstraints = [ImplicitConstraint | UnivConstraints0],
     Constraints = constraints(UnivConstraints, ExistConstraints),
-    Attrs = item_compiler_attributes(compiler_origin_class_method),
+    ClassId = class_id(ClassName, list.length(ClassParamTypes)),
+    MethodId = pf_sym_name_arity(PredOrFunc, PredName,
+        list.length(ArgTypesAndModes)),
+    Origin = compiler_origin_class_method(ClassId, MethodId),
+    Attrs = item_compiler_attributes(Origin),
     MaybeAttrs = item_origin_compiler(Attrs),
     PredDecl = item_pred_decl_info(PredName, PredOrFunc,
         ArgTypesAndModes, WithType, WithInst, MaybeDetism, MaybeAttrs,
@@ -533,13 +537,13 @@ report_any_overlapping_instance_declarations(ClassId,
         % XXX STATUS Multiply defined if type_list_subsumes in BOTH directions.
         NewPieces = [words("Error: multiply defined (or overlapping)"),
             words("instance declarations for class"),
-            qual_sym_name_and_arity(sym_name_arity(ClassName, ClassArity)),
+            qual_sym_name_arity(sym_name_arity(ClassName, ClassArity)),
             suffix("."), nl],
-        NewMsg = simple_msg(NewContext, [always(NewPieces)]),
+        NewMsg = simplest_msg(NewContext, NewPieces),
         OtherPieces = [words("Previous instance declaration was here.")],
         OtherMsg = error_msg(yes(OtherContext), treat_as_first, 0,
             [always(OtherPieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
             [NewMsg, OtherMsg]),
         !:Specs = [Spec | !.Specs]
     else
@@ -612,15 +616,15 @@ check_instance_constraints(InstanceDefnA, ClassId, InstanceDefnB, !Specs) :-
         % of a problem appears at the second declaration. This is why
         % we start the report of the problem with *its* context.
         SecondDeclPieces = [words("In instance declaration for class"),
-            qual_sym_name_and_arity(ClassSNA), suffix(":"), nl,
+            qual_sym_name_arity(ClassSNA), suffix(":"), nl,
             words("the instance constraints here"),
             words("are incompatible with ..."), nl],
-        SecondDeclMsg = simple_msg(SecondContext, [always(SecondDeclPieces)]),
+        SecondDeclMsg = simplest_msg(SecondContext, SecondDeclPieces),
 
         FirstDeclPieces = [words("... the instance constraints here."), nl],
-        FirstDeclMsg = simple_msg(FirstContext, [always(FirstDeclPieces)]),
+        FirstDeclMsg = simplest_msg(FirstContext, FirstDeclPieces),
 
-        Spec = error_spec(severity_error,
+        Spec = error_spec($pred, severity_error,
             phase_parse_tree_to_hlds, [SecondDeclMsg, FirstDeclMsg]),
         !:Specs = [Spec | !.Specs]
     ).
@@ -726,14 +730,15 @@ produce_instance_method_clause(PredOrFunc, Context, InstanceStatus,
         TVarSet = TVarSet0,
         report_illegal_func_svar_result(StateVarContext, CVarSet, StateVar,
             !Specs),
-        !:Specs = get_any_errors1(MaybeBodyGoal) ++ !.Specs
+        !:Specs = get_any_errors_warnings2(MaybeBodyGoal) ++ !.Specs
     else
         (
-            MaybeBodyGoal = error1(BodyGoalSpecs),
+            MaybeBodyGoal = error2(BodyGoalSpecs),
             TVarSet = TVarSet0,
             !:Specs = BodyGoalSpecs ++ !.Specs
         ;
-            MaybeBodyGoal = ok1(BodyGoal),
+            MaybeBodyGoal = ok2(BodyGoal, BodyGoalWarningSpecs),
+            !:Specs = BodyGoalWarningSpecs ++ !.Specs,
             expand_bang_state_pairs_in_terms(HeadTerms0, HeadTerms),
             PredArity = list.length(HeadTerms),
             adjust_func_arity(PredOrFunc, Arity, PredArity),
@@ -751,13 +756,14 @@ produce_instance_method_clause(PredOrFunc, Context, InstanceStatus,
                 Arity, GoalType, Goal, VarSet, TVarSet, Warnings,
                 !ClausesInfo, !ModuleInfo, !QualInfo, !Specs),
 
-            SimpleCallId = simple_call_id(PredOrFunc, PredName, Arity),
+            PFSymNameArity = pf_sym_name_arity(PredOrFunc, PredName, Arity),
 
             % Warn about singleton variables.
-            warn_singletons(!.ModuleInfo, SimpleCallId, VarSet, Goal, !Specs),
+            warn_singletons(!.ModuleInfo, PFSymNameArity, VarSet, Goal,
+                !Specs),
 
             % Warn about variables with overlapping scopes.
-            add_quant_warnings(SimpleCallId, VarSet, Warnings, !Specs)
+            add_quant_warnings(PFSymNameArity, VarSet, Warnings, !Specs)
         )
     ).
 
@@ -772,11 +778,11 @@ pred_method_with_no_modes_error(PredInfo, !Specs) :-
 
     Pieces = [words("Error: no mode declaration"),
         words("for type class method predicate"),
-        qual_sym_name_and_arity(
+        qual_sym_name_arity(
             sym_name_arity(qualified(ModuleName, PredName), Arity)),
         suffix("."), nl],
-    Msg = simple_msg(Context, [always(Pieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
 :- pred undefined_type_class_error(sym_name::in, arity::in, prog_context::in,
@@ -785,11 +791,11 @@ pred_method_with_no_modes_error(PredInfo, !Specs) :-
 undefined_type_class_error(ClassName, ClassArity, Context, Description,
         !Specs) :-
     Pieces = [words("Error:"), words(Description), words("for"),
-        qual_sym_name_and_arity(sym_name_arity(ClassName, ClassArity)),
+        qual_sym_name_arity(sym_name_arity(ClassName, ClassArity)),
         words("without corresponding"), decl("typeclass"),
         words("declaration."), nl],
-    Msg = simple_msg(Context, [always(Pieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
 :- pred missing_pred_or_func_method_error(sym_name::in, arity::in,
@@ -799,11 +805,11 @@ undefined_type_class_error(ClassName, ClassArity, Context, Description,
 missing_pred_or_func_method_error(MethodName, MethodArity, PredOrFunc,
         Context, !Specs) :-
     Pieces = [words("Error: mode declaration for type class method"),
-        qual_sym_name_and_arity(sym_name_arity(MethodName, MethodArity)),
+        qual_sym_name_arity(sym_name_arity(MethodName, MethodArity)),
         words("without corresponding"), p_or_f(PredOrFunc),
         words("method declaration."), nl],
-    Msg = simple_msg(Context, [always(Pieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
 %-----------------------------------------------------------------------------%

@@ -79,29 +79,6 @@ mlds_output_function_decl_opts(Opts, Indent, ModuleName, FunctionDefn, !IO) :-
     FunctionDefn = mlds_function_defn(FuncName, Context, Flags,
         MaybePredProcId, Params, MaybeBody,
         _EnvVarNames, _MaybeRequireTailrecInfo),
-
-    % If we are using --high-level-data, then for function declarations,
-    % we need to ensure that we forward-declare any types used in the
-    % function parameters. This is because otherwise, for any struct names
-    % whose first occurrence is in the function parameters, the scope of
-    % such struct names is just that function declaration, which is never
-    % right.
-    %
-    % We generate such forward declarations here, rather than generating
-    % type declarations in a header file and #including that header file,
-    % because doing the latter would significantly complicate the dependencies
-    % (to avoid cyclic #includes, you would need to declare the types
-    % in a *different* header file than the functions).
-    HighLevelData = Opts ^ m2co_highlevel_data,
-    (
-        HighLevelData = yes,
-        Params = mlds_func_params(Arguments, _RetTypes),
-        ParamTypes = mlds_get_arg_types(Arguments),
-        mlds_output_type_forward_decls(Opts, Indent, ParamTypes, !IO)
-    ;
-        HighLevelData = no
-    ),
-
     c_output_context(Opts ^ m2co_line_numbers, Context, !IO),
     output_n_indents(Indent, !IO),
     mlds_output_function_decl_flags(Opts, Flags, MaybeBody, !IO),
@@ -290,12 +267,12 @@ mlds_output_function_defns(Opts, Indent, ModuleName,
     mlds_output_function_defns(Opts, Indent, ModuleName, FuncDefns, !IO).
 
 mlds_output_function_defn(Opts, Indent, ModuleName, FunctionDefn, !IO) :-
-    FunctionDefn = mlds_function_defn(FuncName, Context, Flags,
-        MaybePredProcId, Params, MaybeBody,
-        _EnvVarNames, _MaybeRequireTailrecInfo),
     io.nl(!IO),
     c_output_context(Opts ^ m2co_line_numbers, Context, !IO),
     output_n_indents(Indent, !IO),
+    FunctionDefn = mlds_function_defn(FuncName, Context, Flags,
+        MaybePredProcId, Params, MaybeBody,
+        _EnvVarNames, _MaybeRequireTailrecInfo),
     mlds_output_function_decl_flags(Opts, Flags, MaybeBody, !IO),
     (
         MaybePredProcId = no
@@ -408,7 +385,6 @@ mlds_output_access_comment(func_private, !IO) :-
 mlds_output_per_instance_comment(per_instance, !IO).
 mlds_output_per_instance_comment(one_copy, !IO) :-
     io.write_string("/* one_copy */ ", !IO).
-
 
 %---------------------------------------------------------------------------%
 :- end_module ml_backend.mlds_to_c_func.

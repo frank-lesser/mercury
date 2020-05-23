@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1994-2012 The University of Melbourne.
-% Copyright (C) 2013-2019 The Mercury Team.
+% Copyright (C) 2013-2020 The Mercury Team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %---------------------------------------------------------------------------%
@@ -178,18 +178,18 @@ convert_option_table_result_to_globals(MaybeOptionTable0, !:Specs, Globals,
         OptionTablePieces = [words(ErrorMessage)],
         OptionTableMsg = error_msg(no, do_not_treat_as_first, 0,
             [always(OptionTablePieces)]),
-        OptionTableSpec = error_spec(severity_error, phase_options,
+        OptionTableSpec = error_spec($pred, severity_error, phase_options,
             [OptionTableMsg]),
         !:Specs = [OptionTableSpec],
         generate_default_globals(Globals, !IO)
     ;
         MaybeOptionTable0 = ok(OptionTable0),
         check_option_values(OptionTable0, OptionTable, Target, GC_Method,
-            TagsMethod, TermNorm, Term2Norm, TraceLevel, TraceSuppress,
-            SSTraceLevel, MaybeThreadSafe, C_CompilerType, CSharp_CompilerType,
-            ReuseStrategy,
-            MaybeFeedbackInfo, HostEnvType, SystemEnvType, TargetEnvType,
-            LimitErrorContextsMap, !:Specs, !IO),
+            TermNorm, Term2Norm, TraceLevel, TraceSuppress, SSTraceLevel,
+            MaybeThreadSafe, C_CompilerType, CSharp_CompilerType,
+            ReuseStrategy, MaybeFeedbackInfo,
+            HostEnvType, SystemEnvType, TargetEnvType, LimitErrorContextsMap,
+            !:Specs, !IO),
         decide_op_mode(OptionTable, OpMode, OtherOpModes),
         (
             OtherOpModes = []
@@ -205,9 +205,9 @@ convert_option_table_result_to_globals(MaybeOptionTable0, !:Specs, Globals,
         (
             !.Specs = [],
             convert_options_to_globals(OptionTable, OpMode, Target,
-                GC_Method, TagsMethod, TermNorm, Term2Norm,
-                TraceLevel, TraceSuppress, SSTraceLevel,
-                MaybeThreadSafe, C_CompilerType, CSharp_CompilerType,
+                GC_Method, TermNorm, Term2Norm, TraceLevel, TraceSuppress,
+                SSTraceLevel, MaybeThreadSafe,
+                C_CompilerType, CSharp_CompilerType,
                 ReuseStrategy, MaybeFeedbackInfo,
                 HostEnvType, SystemEnvType, TargetEnvType,
                 LimitErrorContextsMap, !Specs, Globals, !IO)
@@ -218,7 +218,7 @@ convert_option_table_result_to_globals(MaybeOptionTable0, !:Specs, Globals,
     ).
 
 :- pred check_option_values(option_table::in, option_table::out,
-    compilation_target::out, gc_method::out, tags_method::out,
+    compilation_target::out, gc_method::out,
     termination_norm::out, termination_norm::out, trace_level::out,
     trace_suppress_items::out, ssdb_trace_level::out, may_be_thread_safe::out,
     c_compiler_type::out, csharp_compiler_type::out,
@@ -227,10 +227,9 @@ convert_option_table_result_to_globals(MaybeOptionTable0, !:Specs, Globals,
     limit_error_contexts_map::out,
     list(error_spec)::out, io::di, io::uo) is det.
 
-check_option_values(!OptionTable, Target, GC_Method, TagsMethod,
-        TermNorm, Term2Norm, TraceLevel, TraceSuppress, SSTraceLevel,
-        MaybeThreadSafe, C_CompilerType, CSharp_CompilerType,
-        ReuseStrategy, MaybeFeedbackInfo,
+check_option_values(!OptionTable, Target, GC_Method, TermNorm, Term2Norm,
+        TraceLevel, TraceSuppress, SSTraceLevel, MaybeThreadSafe,
+        C_CompilerType, CSharp_CompilerType, ReuseStrategy, MaybeFeedbackInfo,
         HostEnvType, SystemEnvType, TargetEnvType, LimitErrorContextsMap,
         !:Specs, !IO) :-
     !:Specs = [],
@@ -258,19 +257,6 @@ check_option_values(!OptionTable, Target, GC_Method, TagsMethod,
             list_to_quoted_pieces_or(["none", "conservative", "boehm", "hgc",
                 "accurate", "automatic"]) ++ [suffix("."), nl],
         add_error(phase_options, GCMethodSpec, !Specs)
-    ),
-
-    raw_lookup_string_option(!.OptionTable, tags, TagsMethodStr),
-    ( if convert_tags_method(TagsMethodStr, TagsMethodPrime) then
-        TagsMethod = TagsMethodPrime
-    else
-        TagsMethod = tags_none,  % dummy
-        TagsMethodSpec =
-            [words("Invalid argument"), quote(TagsMethodStr), words("to the"),
-            quote("--tags"), words("option; must be")] ++
-            list_to_quoted_pieces_or(["none", "low", "high"]) ++
-            [suffix("."), nl],
-        add_error(phase_options, TagsMethodSpec, !Specs)
     ),
 
     raw_lookup_int_option(!.OptionTable, fact_table_hash_percent_full,
@@ -644,7 +630,7 @@ check_option_values(!OptionTable, Target, GC_Method, TagsMethod,
     % NOTE: each termination analyser has its own norm setting.
     %
 :- pred convert_options_to_globals(option_table::in, op_mode::in,
-    compilation_target::in, gc_method::in, tags_method::in,
+    compilation_target::in, gc_method::in,
     termination_norm::in, termination_norm::in, trace_level::in,
     trace_suppress_items::in, ssdb_trace_level::in, may_be_thread_safe::in,
     c_compiler_type::in, csharp_compiler_type::in,
@@ -653,9 +639,8 @@ check_option_values(!OptionTable, Target, GC_Method, TagsMethod,
     list(error_spec)::in, list(error_spec)::out,
     globals::out, io::di, io::uo) is det.
 
-convert_options_to_globals(OptionTable0, OpMode, Target,
-        GC_Method, TagsMethod0, TermNorm, Term2Norm,
-        TraceLevel, TraceSuppress, SSTraceLevel,
+convert_options_to_globals(OptionTable0, OpMode, Target, GC_Method,
+        TermNorm, Term2Norm, TraceLevel, TraceSuppress, SSTraceLevel,
         MaybeThreadSafe, C_CompilerType, CSharp_CompilerType,
         ReuseStrategy, MaybeFeedbackInfo,
         HostEnvType, SystemEnvType, TargetEnvType, LimitErrorContextsMap,
@@ -670,7 +655,7 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         FileInstallCmd = install_cmd_user(InstallCmd, InstallCmdDirOption)
     ),
 
-    globals_init(OptionTable0, OpMode, Target, GC_Method, TagsMethod0,
+    globals_init(OptionTable0, OpMode, Target, GC_Method,
         TermNorm, Term2Norm, TraceLevel, TraceSuppress, SSTraceLevel,
         MaybeThreadSafe, C_CompilerType, CSharp_CompilerType,
         ReuseStrategy, MaybeFeedbackInfo,
@@ -725,48 +710,39 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         PregeneratedDist = no
     ),
 
-    % --tags none implies --num-tag-bits 0.
     (
-        TagsMethod0 = tags_none,
-        NumPtagBits0 = 0
+        Target = target_c,
+        globals.lookup_int_option(!.Globals, num_ptag_bits, NumPtagBits0),
+        ( if NumPtagBits0 = -1 then
+            % The default value of NumPtagBits0 is -1. We replace it with the
+            % autoconf-determined value for the number of low ptag bits,
+            % which is passed to us from the `mmc' script using the
+            % deliberately undocumented --conf-low-tag-bits option.
+            globals.lookup_int_option(!.Globals, conf_low_ptag_bits,
+                NumPtagBits)
+        else
+            % This non-default value may have been set above for
+            % PregeneratedDist = yes, or it could have been set by the user.
+            % The only legitimate reason for the latter is cross-compilation.
+            NumPtagBits = NumPtagBits0
+        ),
+        globals.set_option(num_ptag_bits, int(NumPtagBits), !Globals),
+        ( if (NumPtagBits = 2 ; NumPtagBits = 3) then
+            true
+        else
+            NumPtagBitsSpec =
+                [words("Error: the value of the"), quote("--num-ptag-bits"),
+                words("option is"), int_fixed(NumPtagBits), suffix(","),
+                words("but the only valid values are 2 and 3."), nl],
+            add_error(phase_options, NumPtagBitsSpec, !Specs)
+        )
     ;
-        TagsMethod0 = tags_low,
-        globals.lookup_int_option(!.Globals, num_ptag_bits, NumPtagBits0)
-    ),
-
-    % If --tags low but --num-tag-bits is not specified,
-    % use the autoconf-determined value for --num-tag-bits.
-    % (The autoconf-determined value is passed from the `mmc' script
-    % using the deliberately undocumented --conf-low-tag-bits option.)
-    ( if
-        TagsMethod0 = tags_low,
-        NumPtagBits0 = -1
-    then
-        globals.lookup_int_option(!.Globals, conf_low_ptag_bits, NumPtagBits1)
-    else
-        NumPtagBits1 = NumPtagBits0
-    ),
-
-    % If --num-tag-bits is negative (which may or may not be its default
-    % value of -1), issue a warning and assume --num-tag-bits 0.
-    ( if NumPtagBits1 < 0 then
+        ( Target = target_java
+        ; Target = target_csharp
+        ; Target = target_erlang
+        ),
         NumPtagBits = 0,
-        NumPtagBitsSpec =
-            [words("Warning: the value of the"), quote("--num-tag-bits"),
-            words("option is either unspecified or invalid."), nl,
-            words("Using"), quote("--num-tag-bits 0"), suffix(","),
-            words("which disables tags."), nl],
-        add_warning(phase_options, NumPtagBitsSpec, !Specs)
-    else
-        NumPtagBits = NumPtagBits1
-    ),
-
-    globals.set_option(num_ptag_bits, int(NumPtagBits), !Globals),
-    ( if NumPtagBits = 0 then
-        TagsMethod = tags_none,
-        globals.set_tags_method(TagsMethod, !Globals)
-    else
-        TagsMethod = TagsMethod0
+        globals.set_option(num_ptag_bits, int(0), !Globals)
     ),
 
     current_grade_supports_par_conj(!.Globals, GradeSupportsParConj),
@@ -879,12 +855,10 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         globals.set_option(reclaim_heap_on_semidet_failure, bool(no),
             !Globals),
         globals.set_option(highlevel_code, bool(yes), !Globals),
-        globals.set_option(highlevel_data, bool(yes), !Globals),
         globals.set_option(unboxed_float, bool(yes), !Globals),
         globals.set_option(unboxed_int64s, bool(yes), !Globals),
         globals.set_option(nondet_copy_out, bool(yes), !Globals),
         globals.set_option(det_copy_out, bool(yes), !Globals),
-        globals.set_option(num_ptag_bits, int(0), !Globals),
         globals.set_option(unboxed_no_tag_types, bool(no), !Globals),
         globals.set_option(put_nondet_env_on_heap, bool(yes), !Globals),
         globals.set_option(pretest_equality_cast_pointers, bool(yes),
@@ -921,14 +895,10 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
             !Globals),
         globals.set_option(reclaim_heap_on_semidet_failure, bool(no),
             !Globals),
-        globals.set_option(delay_partial_instantiations, bool(yes),
-            !Globals),
-        globals.set_option(can_compare_constants_as_ints, bool(no),
-            !Globals),
-        globals.set_option(can_compare_compound_values, bool(yes),
-            !Globals),
-        globals.set_option(order_constructors_for_erlang, bool(yes),
-            !Globals),
+        globals.set_option(delay_partial_instantiations, bool(yes), !Globals),
+        globals.set_option(can_compare_constants_as_ints, bool(no), !Globals),
+        globals.set_option(can_compare_compound_values, bool(yes), !Globals),
+        globals.set_option(order_constructors_for_erlang, bool(yes), !Globals),
         globals.set_option(optimize_tailcalls, bool(no), !Globals),
 
         % The following options do not directly affect the Erlang backend,
@@ -937,8 +907,7 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         globals.set_option(gcc_non_local_gotos, bool(no), !Globals),
         globals.set_option(gcc_global_registers, bool(no), !Globals),
         globals.set_option(asm_labels, bool(no), !Globals),
-        globals.set_option(highlevel_code, bool(no), !Globals),
-        globals.set_option(highlevel_data, bool(no), !Globals)
+        globals.set_option(highlevel_code, bool(no), !Globals)
     ;
         Target = target_c,
 
@@ -1337,18 +1306,14 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         true
     ),
 
-    % Argument packing only works on C back-ends with low-level data.
-    % In the future, we may want to use bit-field syntax on C backends
-    % with high-level data. For the other target languages, implementing
-    % argument packing will require not just a lot of work on RTTI, but also
-    % generalizing field addressing, to allow both single fields and
-    % a group of adjacent fields packed into a single word to be
-    % addressed via a mechanism other than an argument's name.
-    globals.lookup_bool_option(!.Globals, highlevel_data, HighLevelData),
-    ( if
+    % Argument packing only works on C back-ends, which use low-level data.
+    % For the other target languages, implementing argument packing
+    % will require not just a lot of work on RTTI, but also generalizing
+    % field addressing, to allow both single fields and a group of adjacent
+    % fields packed into a single word to be addressed via a mechanism
+    % other than an argument's name.
+    (
         Target = target_c,
-        HighLevelData = no
-    then
         globals.lookup_int_option(!.Globals, arg_pack_bits, ArgPackBits0),
         globals.lookup_int_option(!.Globals, bits_per_word, BitsPerWord),
         % If --arg-pack-bits is negative then it means use all word bits.
@@ -1370,15 +1335,15 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
             ArgPackBits = ArgPackBits0
         ),
         globals.set_option(arg_pack_bits, int(ArgPackBits), !Globals)
-        % Leave the value of num_ptag_bits as set above.
         % Leave the value of allow_double_word_fields as set by the user.
         % Leave the value of allow_packing_dummies as set by the user.
         % Leave the value of allow_packing_ints as set by the user.
-    else
+    ;
+        ( Target = target_java
+        ; Target = target_csharp
+        ; Target = target_erlang
+        ),
         globals.set_option(arg_pack_bits, int(0), !Globals),
-        % Leave the value of num_ptag_bits alone. We have set it to zero above
-        % for the C# and Java backends, and the C backend with high level data
-        % depends on it *not* being set to zero.
         globals.set_option(allow_double_word_fields, bool(no), !Globals),
         globals.set_option(allow_packing_dummies, bool(no), !Globals),
         globals.set_option(allow_packing_ints, bool(no), !Globals)
@@ -1670,8 +1635,32 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         add_error(phase_options, TraceHLSpec, !Specs)
     ),
 
+    % Source-to-source debugging requires disabling many HLDS->HLDS
+    % optimizations. This is so that the trace being generated relates to the
+    % source code and also because the SSDB transformation cannot (yet) handle
+    % the specialised predicates introduced by many optimizations.
+    (
+        ( SSTraceLevel = shallow
+        ; SSTraceLevel = deep
+        ),
+        globals.set_option(allow_inlining, bool(no), !Globals),
+        globals.set_option(optimize_unused_args, bool(no), !Globals),
+        globals.set_option(optimize_higher_order, bool(no), !Globals),
+        globals.set_option(type_specialization, bool(no), !Globals),
+        globals.set_option(user_guided_type_specialization, bool(no),
+            !Globals),
+        globals.set_option(deforestation, bool(no), !Globals),
+        globals.set_option(constraint_propagation, bool(no), !Globals),
+        globals.set_option(local_constraint_propagation, bool(no), !Globals),
+        globals.set_option(optimize_duplicate_calls, bool(no), !Globals),
+        globals.set_option(optimize_constructor_last_call, bool(no), !Globals)
+    ;
+        SSTraceLevel = none
+    ),
+
     % The pthreads headers on some architectures (Solaris, Linux)
     % don't work with -ansi.
+    % XXX we don't pass -ansi to the C compiler anymore.
     option_implies(parallel, ansi_c, bool(no), !Globals),
 
     option_neg_implies(inline_builtins, constant_propagation, bool(no),
@@ -2280,10 +2269,6 @@ convert_options_to_globals(OptionTable0, OpMode, Target,
         % of a non-enum du type to an integer.
         Target = target_c,
 
-        % We cannot represent constants in general du types in one word
-        % unless we are using primary tags in the low-order bits of a word.
-        TagsMethod = tags_low,
-
         % Since we have never targeted 16-bit platforms, the minimum number
         % of low ptag bits we ever configure is two.
         NumPtagBits >= 2
@@ -2473,7 +2458,7 @@ display_compiler_version(!IO) :-
     io.write_strings([
         "Mercury Compiler, version ", Version, ", on ", Fullarch, "\n",
         "Copyright (C) 1993-2012 The University of Melbourne\n",
-        "Copyright (C) 2013-2019 The Mercury team\n"
+        "Copyright (C) 2013-2020 The Mercury team\n"
     ], !IO).
 
 :- mutable(already_printed_usage, bool, no, ground,
@@ -2504,7 +2489,7 @@ long_usage(!IO) :-
         Version, ", on ", Fullarch, "\n"], !IO),
     io.write_string("Copyright: Copyright (C) 1993-2012 " ++
         "The University of Melbourne\n", !IO),
-    io.write_string("           Copyright (C) 2013-2019 " ++
+    io.write_string("           Copyright (C) 2013-2020 " ++
         "The Mercury team\n", !IO),
     io.write_string("Usage: mmc [<options>] <arguments>\n", !IO),
     io.write_string("Arguments:\n", !IO),

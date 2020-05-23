@@ -79,10 +79,13 @@
 
 :- import_module bag.
 :- import_module maybe.
+:- import_module one_or_more.
 :- import_module require.
 :- import_module set.
 :- import_module uint32.
 :- import_module unit.
+
+%---------------------------------------------------------------------------%
 
 parse_solver_type_defn_item(ModuleName, VarSet, ArgTerms, Context, SeqNum,
         MaybeIOM) :-
@@ -95,8 +98,8 @@ parse_solver_type_defn_item(ModuleName, VarSet, ArgTerms, Context, SeqNum,
     else
         Pieces = [words("Error: the"), decl("solver"), words("keyword"),
             words("should be followed by a type definition."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(Context, [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            Context, Pieces),
         MaybeIOM = error1([Spec])
     ).
 
@@ -133,8 +136,8 @@ parse_type_defn_item(ModuleName, VarSet, ArgTerms, Context, SeqNum,
         Pieces = [words("Error: a"), decl("type"), words("declaration"),
             words("should have just one argument,"),
             words("which should be the definition of a type."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(Context, [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            Context, Pieces),
         MaybeIOM = error1([Spec])
     ).
 
@@ -155,8 +158,9 @@ parse_du_type_defn(ModuleName, VarSet, HeadTerm, BodyTerm, Context, SeqNum,
         IsSolverType = solver_type,
         SolverPieces = [words("Error: a solver type"),
             words("cannot have data constructors."), nl],
-        SolverSpec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(HeadTerm), [always(SolverPieces)])]),
+        SolverSpec = simplest_spec($pred, severity_error,
+            phase_term_to_parse_tree,
+            get_term_context(HeadTerm), SolverPieces),
         SolverSpecs = [SolverSpec]
     ;
         IsSolverType = non_solver_type,
@@ -279,7 +283,7 @@ parse_maybe_exist_quant_constructors_loop(ModuleName, VarSet, CurOrdinal,
             MaybeTailConstructors = ok1(TailConstructors)
         then
             MaybeConstructors =
-                ok1(one_or_more_cons(HeadConstructor, TailConstructors))
+                ok1(one_or_more.cons(HeadConstructor, TailConstructors))
         else
             Specs = get_any_errors1(MaybeHeadConstructor) ++
                 get_any_errors1(MaybeTailConstructors),
@@ -334,16 +338,16 @@ parse_constructor(ModuleName, VarSet, Ordinal, ExistQVars, Term,
                 MCPieces = [words("Error: since there are no"),
                     words("existentially quantified arguments,"),
                     words("there should be no constraints on them."), nl],
-                MCSpec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(get_term_context(Term), [always(MCPieces)])]),
+                MCSpec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree,
+                    get_term_context(Term), MCPieces),
                 MaybeMaybeExistConstraints = error1([MCSpec])
             )
         ;
             ExistQVars = [_ | _],
-            list.map(
-                ( pred(C::in, Ts::out) is det :-
-                    C = constraint(_, Ts)
-                ), Constraints, ConstrainedTypeLists),
+            GetConstraintArgTypes = (func(constraint(_, Ts)) = Ts),
+            ConstrainedTypeLists =
+                list.map(GetConstraintArgTypes, Constraints),
             list.condense(ConstrainedTypeLists, ConstrainedTypes),
             % We compute ConstrainedQVars in this roundabout way to give it
             % the same ordering as ExistQVars. Also, the list returned
@@ -375,46 +379,41 @@ parse_constructor(ModuleName, VarSet, Ordinal, ExistQVars, Term,
         parse_implicitly_qualified_sym_name_and_args(ModuleName, MainTerm,
             VarSet, ContextPieces, MaybeFunctorAndArgTerms),
         (
-            MaybeFunctorAndArgTerms = error2(Specs),
-            MECSpecs = get_any_errors1(MaybeMaybeExistConstraints),
-            MaybeConstructor = error1(MECSpecs ++ Specs)
+            MaybeFunctorAndArgTerms = error2(FAASpecs),
+            Functor = unqualified(""),  % won't be used due to the other errors
+            MaybeConstructorArgs = error1(FAASpecs)
         ;
             MaybeFunctorAndArgTerms = ok2(Functor, ArgTerms),
             MaybeConstructorArgs = convert_constructor_arg_list(ModuleName,
-                VarSet, ArgTerms),
-            (
-                MaybeConstructorArgs = error1(Specs),
-                MECSpecs = get_any_errors1(MaybeMaybeExistConstraints),
-                MaybeConstructor = error1(MECSpecs ++ Specs)
-            ;
-                MaybeConstructorArgs = ok1(ConstructorArgs),
-                (
-                    MaybeMaybeExistConstraints = error1(Specs),
-                    MaybeConstructor = error1(Specs)
-                ;
-                    MaybeMaybeExistConstraints = ok1(MaybeExistConstraints),
-                    MainTermContext = get_term_context(MainTerm),
-                    ( if
-                        ConstructorArgs = [],
-                        MaybeExistConstraints = exist_constraints(_)
-                    then
-                        ECPieces = [words("Error: since there are no"),
-                            words("arguments, (existentially quantified"),
-                            words("or otherwise), there should be"),
-                            words("no constraints on them."), nl],
-                        ECSpec = error_spec(severity_error,
-                            phase_term_to_parse_tree,
-                            [simple_msg(MainTermContext,
-                                [always(ECPieces)])]),
-                        MaybeConstructor = error1([ECSpec])
-                    else
-                        list.length(ConstructorArgs, Arity),
-                        Ctor = ctor(Ordinal, MaybeExistConstraints,
-                            Functor, ConstructorArgs, Arity, MainTermContext),
-                        MaybeConstructor = ok1(Ctor)
-                    )
-                )
-            )
+                VarSet, ArgTerms)
+        ),
+        MainTermContext = get_term_context(MainTerm),
+        ( if
+            MaybeMaybeExistConstraints = ok1(exist_constraints(_)),
+            MaybeConstructorArgs = ok1([])
+        then
+            NoArgsPieces = [words("Error: since there are no arguments,"),
+                words("(existentially quantified or otherwise),"),
+                words("there should be no constraints on them."), nl],
+            NoArgsSpecs = [simplest_spec($pred, severity_error,
+                phase_term_to_parse_tree, get_term_context(MainTerm),
+                NoArgsPieces)]
+        else
+            NoArgsSpecs = []
+        ),
+        ( if
+            MaybeMaybeExistConstraints = ok1(MaybeExistConstraints),
+            MaybeConstructorArgs = ok1(ConstructorArgs),
+            NoArgsSpecs = []
+        then
+            list.length(ConstructorArgs, Arity),
+            Ctor = ctor(Ordinal, MaybeExistConstraints,
+                Functor, ConstructorArgs, Arity, MainTermContext),
+            MaybeConstructor = ok1(Ctor)
+        else
+            Specs = get_any_errors1(MaybeMaybeExistConstraints) ++
+                get_any_errors1(MaybeConstructorArgs) ++ NoArgsSpecs,
+            MaybeConstructor = error1(Specs)
         )
     ).
 
@@ -453,8 +452,8 @@ convert_constructor_arg_list(ModuleName, VarSet, [Term | Terms])
                 % XXX Should we add "... at function symbol ..."?
                 Pieces = [words("Error: syntax error in constructor name."),
                     nl],
-                Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(get_term_context(Term), [always(Pieces)])]),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree, get_term_context(Term), Pieces),
                 MaybeConstructorArgs = error1([Spec])
             ;
                 SymNameArgs = [],
@@ -515,7 +514,7 @@ process_du_ctors(Params, VarSet, BodyTerm, [Ctor | Ctors], !Specs) :-
     ),
     ( if
         % Check that all type variables in the ctor are either explicitly
-        % existentially quantified or occur in the head of the type.
+        % existentially quantified, or occur in the head of the type.
 
         CtorArgTypes = list.map(func(C) = C ^ arg_type, CtorArgs),
         type_vars_list(CtorArgTypes, VarsInCtorArgTypes0),
@@ -534,14 +533,13 @@ process_du_ctors(Params, VarSet, BodyTerm, [Ctor | Ctors], !Specs) :-
                 "parameter", "parameters")),
             words(NotExistQOrParamVarsStr),
             words("in right hand side of type definition."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(BodyTerm), [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            get_term_context(BodyTerm), Pieces),
         !:Specs = [Spec | !.Specs]
     else if
-        % Check that all type variables in existential quantifiers do not
-        % occur in the head (maybe this should just be a warning,
-        % not an error? If we were to allow it, we would need
-        % to rename them apart.)
+        % Check that no type variables in existential quantifiers occur
+        % in the head. (Maybe this should just be a warning, not an error?
+        % If we were to allow it, we would need to rename them apart.)
 
         set.list_to_set(ExistQVars, ExistQVarsSet),
         set.list_to_set(Params, ParamsSet),
@@ -559,13 +557,23 @@ process_du_ctors(Params, VarSet, BodyTerm, [Ctor | Ctors], !Specs) :-
             list_to_quoted_pieces(ExistQParamVarsStrs) ++
             [words(choose_number(ExistQParams, "has", "have")),
             words("overlapping scopes"),
-            words("(explicit type quantifier shadows argument type)."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(BodyTerm), [always(Pieces)])]),
+            words("(the explicit existential type quantifier shadows"),
+            words("the universal quantification implicit in"),
+            words(choose_number(ExistQParams,
+                "it being a type parameter", "them being type parameters")),
+                suffix(")."), nl],
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            get_term_context(BodyTerm), Pieces),
         !:Specs = [Spec | !.Specs]
     else if
         % Check that all type variables in existential quantifiers occur
         % somewhere in the constructor argument types or constraints.
+        % XXX The actual check we would *want* to do is that they occur
+        % somewhere in the constructor argument types or *in the range of
+        % a functional dependency* in a constraint, since both of those
+        % would bind a concrete type to the existential type variable,
+        % but obviously this predicate has no access to the definitions
+        % of the typeclasses mentioned in the constraints.
 
         CtorArgTypes = list.map(func(C) = C ^ arg_type, CtorArgs),
         type_vars_list(CtorArgTypes, VarsInCtorArgTypes0),
@@ -580,16 +588,16 @@ process_du_ctors(Params, VarSet, BodyTerm, [Ctor | Ctors], !Specs) :-
         NotOccursExistQVarStrs =
             list.map(mercury_var_to_name_only(GenericVarSet),
             NotOccursExistQVars),
-        Pieces = [words("Error:"),
+        Pieces = [words("Error: the existentially quantified"),
             words(choose_number(NotOccursExistQVars,
                 "type variable", "type variables"))] ++
             list_to_quoted_pieces(NotOccursExistQVarStrs) ++
-            [words("in existential quantifier"),
-            words(choose_number(NotOccursExistQVars,
+            [words(choose_number(NotOccursExistQVars,
                 "does not occur", "do not occur")),
-            words("in arguments or constraints of constructor."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(BodyTerm), [always(Pieces)])]),
+            words("either in the arguments or in the constraints"),
+            words("of the constructor."), nl],
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            get_term_context(BodyTerm), Pieces),
         !:Specs = [Spec | !.Specs]
     else if
         % Check that all type variables in existential constraints occur in
@@ -607,18 +615,16 @@ process_du_ctors(Params, VarSet, BodyTerm, [Ctor | Ctors], !Specs) :-
         varset.coerce(VarSet, GenericVarSet),
         NotExistQArgTypeStrs = list.map(
             mercury_var_to_name_only(GenericVarSet), NotExistQArgTypes),
-        Pieces = [words("Error:"),
+        Pieces = [words("Error: the"),
             words(choose_number(NotExistQArgTypes,
                 "type variable", "type variables"))]
             ++ list_to_quoted_pieces(NotExistQArgTypeStrs) ++
-            [words("in class constraints,"),
-            words(choose_number(NotExistQArgTypes,
-                "which was", "which were")),
-            words("introduced with"), quote("=>"),
-            words("must be explicitly existentially quantified"),
+            [words(choose_number(NotExistQArgTypeStrs, "occurs", "occur")),
+            words("in a class constraint"),
+            words("without being explicitly existentially quantified"),
             words("using"), quote("some"), suffix("."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(BodyTerm), [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            get_term_context(BodyTerm), Pieces),
         !:Specs = [Spec | !.Specs]
     else
         true
@@ -626,7 +632,7 @@ process_du_ctors(Params, VarSet, BodyTerm, [Ctor | Ctors], !Specs) :-
     process_du_ctors(Params, VarSet, BodyTerm, Ctors, !Specs).
 
 :- pred check_direct_arg_ctors(list(constructor)::in,
-    list(sym_name_and_arity)::in, term::in,
+    list(sym_name_arity)::in, term::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
 check_direct_arg_ctors(_Ctors, [], _ErrorTerm, !Specs).
@@ -640,8 +646,8 @@ check_direct_arg_ctors(Ctors, [DirectArgCtor | DirectArgCtors], ErrorTerm,
             Pieces = [words("Error: the"), quote("direct_arg"),
                 words("attribute contains a function symbol whose arity"),
                 words("is not 1."), nl],
-            Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                [simple_msg(get_term_context(ErrorTerm), [always(Pieces)])]),
+            Spec = simplest_spec($pred, severity_error,
+                phase_term_to_parse_tree, get_term_context(ErrorTerm), Pieces),
             !:Specs = [Spec | !.Specs]
         else
             (
@@ -650,22 +656,22 @@ check_direct_arg_ctors(Ctors, [DirectArgCtor | DirectArgCtors], ErrorTerm,
                 MaybeExistConstraints = exist_constraints(_),
                 Pieces = [words("Error: the"), quote("direct_arg"),
                     words("attribute contains a function symbol"),
-                    unqual_sym_name_and_arity(DirectArgCtor),
+                    unqual_sym_name_arity(DirectArgCtor),
                     words("with existentially quantified type variables."),
                     nl],
-                Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(get_term_context(ErrorTerm),
-                        [always(Pieces)])]),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree,
+                    get_term_context(ErrorTerm), Pieces),
                 !:Specs = [Spec | !.Specs]
             )
         )
     else
         Pieces = [words("Error: the"), quote("direct_arg"),
             words("attribute lists the function symbol"),
-            unqual_sym_name_and_arity(DirectArgCtor),
+            unqual_sym_name_arity(DirectArgCtor),
             words("which is not in the type definition."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(ErrorTerm), [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            get_term_context(ErrorTerm), Pieces),
         !:Specs = [Spec | !.Specs]
     ),
     check_direct_arg_ctors(Ctors, DirectArgCtors, ErrorTerm, !Specs).
@@ -697,8 +703,9 @@ parse_eqv_type_defn(ModuleName, VarSet, HeadTerm, BodyTerm, Context, SeqNum,
         IsSolverType = solver_type,
         SolverPieces = [words("Error: a solver type cannot be defined"),
             words("to be equivalent to another type."), nl],
-        SolverSpec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(HeadTerm), [always(SolverPieces)])]),
+        SolverSpec = simplest_spec($pred, severity_error,
+            phase_term_to_parse_tree,
+            get_term_context(HeadTerm), SolverPieces),
         SolverSpecs = [SolverSpec]
     ),
     HeadContextPieces =
@@ -771,9 +778,9 @@ parse_where_block_type_defn(ModuleName, VarSet, HeadTerm, BodyTerm,
                 Pieces = [words("Error: solver type definitions"),
                     words("cannot have a"), quote("direct_arg"),
                     words("attribute."), nl],
-                Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(get_term_context(HeadTerm),
-                        [always(Pieces)])]),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree,
+                    get_term_context(HeadTerm), Pieces),
                 MaybeIOM = error1([Spec])
             ;
                 MaybeDirectArgCtors = no,
@@ -809,22 +816,22 @@ parse_where_type_is_abstract(ModuleName, VarSet, HeadTerm, BodyTerm,
             else
                 Pieces = [words("Error: the argument of"), quote(AttrName),
                     words("is not a positive integer."), nl],
-                Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(Context, [always(Pieces)])]),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree, Context, Pieces),
                 MaybeTypeDefn = error1([Spec])
             )
         else
             Pieces = [words("Error:"), quote(AttrName),
                 words("should have exactly one argument."), nl],
-            Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                [simple_msg(Context, [always(Pieces)])]),
+            Spec = simplest_spec($pred, severity_error,
+                phase_term_to_parse_tree, Context, Pieces),
             MaybeTypeDefn = error1([Spec])
         )
     else
         Pieces = [words("Error: invalid"), quote("where ..."),
             words("attribute for abstract non-solver type."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(Context, [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            Context, Pieces),
         MaybeTypeDefn = error1([Spec])
     ),
     ( if
@@ -858,8 +865,8 @@ parse_solver_type_base(ModuleName, VarSet, HeadTerm,
     ;
         MaybeSolverTypeDetails = no,
         Pieces = [words("Solver type with no solver_type_details."), nl],
-        SolverSpec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(HeadTerm), [always(Pieces)])]),
+        SolverSpec = simplest_spec($pred, severity_error,
+            phase_term_to_parse_tree, get_term_context(HeadTerm), Pieces),
         SolverSpecs = [SolverSpec]
     ),
     ( if
@@ -937,7 +944,7 @@ parse_abstract_type_defn(ModuleName, VarSet, HeadTerm, Context, SeqNum,
 :- pred parse_type_decl_where_term(is_solver_type::in, module_name::in,
     varset::in, term::in,
     maybe3(maybe(solver_type_details), maybe_canonical,
-        maybe(list(sym_name_and_arity)))::out) is det.
+        maybe(list(sym_name_arity)))::out) is det.
 
 parse_type_decl_where_term(IsSolverType, ModuleName, VarSet, Term0,
         MaybeWhereDetails) :-
@@ -980,8 +987,8 @@ parse_type_decl_where_term(IsSolverType, ModuleName, VarSet, Term0,
             !.MaybeTerm = yes(EndTerm),
             Pieces = [words("Error: attributes are either badly ordered"),
                 words("or contain an unrecognised attribute."), nl],
-            EndSpec = error_spec(severity_error, phase_term_to_parse_tree,
-                [simple_msg(get_term_context(EndTerm), [always(Pieces)])]),
+            EndSpec = simplest_spec($pred, severity_error,
+                phase_term_to_parse_tree, get_term_context(EndTerm), Pieces),
             MaybeEndSpec = error1([EndSpec])
         )
     ),
@@ -1030,10 +1037,11 @@ parse_where_unify_compare(ModuleName, VarSet, Term0, MaybeMaybeCanonical) :-
                 quote("equality is <<equality pred name>>"), words("and"),
                 quote("comparison is <<comparison pred name>>"), suffix(".")
             ],
-            EndSpec = error_spec(severity_error, phase_term_to_parse_tree,
+            EndSpec = error_spec($pred, severity_error,
+                phase_term_to_parse_tree,
                 [simple_msg(get_term_context(EndTerm),
-                [always(Pieces),
-                 verbose_only(verbose_always, VerbosePieces)])]),
+                    [always(Pieces),
+                    verbose_only(verbose_always, VerbosePieces)])]),
             MaybeWhereEnd = error1([EndSpec])
         )
     ),
@@ -1129,8 +1137,8 @@ parse_where_is(Name, Parser, Term) = Result :-
         )
     else
         Pieces = [words("Error: expected"), quote("is"), suffix("."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(Term), [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            get_term_context(Term), Pieces),
         Result = error1([Spec])
     ).
 
@@ -1167,8 +1175,8 @@ parse_where_inst_is(_ModuleName, VarSet, ContextPieces, Term) = MaybeInst :-
             Pieces = cord.list(ContextPieces) ++ [lower_case_next_if_not_first,
                 words("Error:"), quote(TermStr),
                 words("is not a ground, unconstrained inst."), nl],
-            Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                [simple_msg(get_term_context(Term), [always(Pieces)])]),
+            Spec = simplest_spec($pred, severity_error,
+                phase_term_to_parse_tree, get_term_context(Term), Pieces),
             MaybeInst = error1([Spec])
         else
             MaybeInst = ok1(Inst)
@@ -1204,8 +1212,8 @@ parse_where_mutable_is(ModuleName, VarSet, Term) = MaybeItems :-
         Pieces = [words("Error: expected a mutable declaration"),
             words("or a list of mutable declarations, got"),
             quote(TermStr), suffix("."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(Term), [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            get_term_context(Term), Pieces),
         MaybeItems = error1([Spec])
     ).
 
@@ -1223,13 +1231,13 @@ parse_mutable_decl_term(ModuleName, VarSet, Term, MaybeItemMutableInfo) :-
         TermStr = describe_error_term(VarSet, Term),
         Pieces = [words("Error: expected a mutable declaration, got"),
             quote(TermStr), suffix("."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(Term), [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            get_term_context(Term), Pieces),
         MaybeItemMutableInfo = error1([Spec])
     ).
 
 :- func parse_where_direct_arg_is(module_name, varset, term) =
-    maybe1(list(sym_name_and_arity)).
+    maybe1(list(sym_name_arity)).
 
 parse_where_direct_arg_is(ModuleName, VarSet, Term) = MaybeDirectArgCtors :-
     ( if list_term_to_term_list(Term, FunctorsTerms) then
@@ -1238,14 +1246,13 @@ parse_where_direct_arg_is(ModuleName, VarSet, Term) = MaybeDirectArgCtors :-
     else
         Pieces = [words("Error: malformed functors list in"),
             quote("direct_arg"), words("attribute."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(Term),
-            [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            get_term_context(Term), Pieces),
         MaybeDirectArgCtors = error1([Spec])
     ).
 
 :- pred parse_direct_arg_functor(module_name::in, varset::in, term::in,
-    maybe1(sym_name_and_arity)::out) is det.
+    maybe1(sym_name_arity)::out) is det.
 
 parse_direct_arg_functor(ModuleName, VarSet, Term, MaybeFunctor) :-
     ( if
@@ -1258,8 +1265,8 @@ parse_direct_arg_functor(ModuleName, VarSet, Term, MaybeFunctor) :-
         Pieces = [words("Error: expected functor name/arity for"),
             quote("direct_arg"), words("attribute, not"),
             quote(TermStr), suffix("."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(get_term_context(Term), [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            get_term_context(Term), Pieces),
         MaybeFunctor = error1([Spec])
     ).
 
@@ -1267,10 +1274,10 @@ parse_direct_arg_functor(ModuleName, VarSet, Term, MaybeFunctor) :-
     maybe1(maybe(mer_type)), maybe1(maybe(mer_inst)), maybe1(maybe(mer_inst)),
     maybe1(maybe(list(item_mutable_info))),
     maybe1(maybe(equality_pred)), maybe1(maybe(comparison_pred)),
-    maybe1(maybe(list(sym_name_and_arity))),
+    maybe1(maybe(list(sym_name_arity))),
     maybe1(unit), term)
     = maybe3(maybe(solver_type_details), maybe_canonical,
-        maybe(list(sym_name_and_arity))).
+        maybe(list(sym_name_arity))).
 
 make_maybe_where_details(IsSolverType, MaybeTypeIsAbstractNoncanonical,
         MaybeRepresentationIs, MaybeGroundIs, MaybeAnyIs, MaybeCStoreIs,
@@ -1309,9 +1316,9 @@ make_maybe_where_details(IsSolverType, MaybeTypeIsAbstractNoncanonical,
     maybe(mer_type), maybe(mer_inst), maybe(mer_inst),
     maybe(list(item_mutable_info)),
     maybe(equality_pred), maybe(comparison_pred),
-    maybe(list(sym_name_and_arity)), term)
+    maybe(list(sym_name_arity)), term)
     = maybe3(maybe(solver_type_details), maybe_canonical,
-        maybe(list(sym_name_and_arity))).
+        maybe(list(sym_name_arity))).
 
 make_maybe_where_details_2(IsSolverType, TypeIsAbstractNoncanonical,
         RepresentationIs, GroundIs, AnyIs, CStoreIs,
@@ -1345,9 +1352,9 @@ make_maybe_where_details_2(IsSolverType, TypeIsAbstractNoncanonical,
             then
                 Pieces = [words("Error: solver type definitions cannot have"),
                     quote("direct_arg"), words("attributes."), nl],
-                Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(get_term_context(WhereTerm),
-                        [always(Pieces)])]),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree,
+                    get_term_context(WhereTerm), Pieces),
                 MaybeWhereDetails = error3([Spec])
             else if
                 RepresentationIs = yes(RepnType),
@@ -1387,9 +1394,9 @@ make_maybe_where_details_2(IsSolverType, TypeIsAbstractNoncanonical,
             then
                 Pieces = [words("Error: solver type definitions must have a"),
                     quote("representation"), words("attribute."), nl],
-                Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(get_term_context(WhereTerm),
-                        [always(Pieces)])]),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree,
+                    get_term_context(WhereTerm), Pieces),
                 MaybeWhereDetails = error3([Spec])
             else
                unexpected($pred, "shouldn't have reached this point! (1)")
@@ -1405,9 +1412,9 @@ make_maybe_where_details_2(IsSolverType, TypeIsAbstractNoncanonical,
             then
                 Pieces = [words("Error: solver type attribute given"),
                     words("for non-solver type."), nl],
-                Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(get_term_context(WhereTerm),
-                        [always(Pieces)])]),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree,
+                    get_term_context(WhereTerm), Pieces),
                 MaybeWhereDetails = error3([Spec])
             else
                 MaybeCanonical = maybe_unify_compare(EqualityIs, ComparisonIs),
@@ -1423,8 +1430,8 @@ abstract_noncanonical_excludes_others(Term) = Spec :-
         quote("where type_is_abstract_noncanonical"),
         words("excludes other"), quote("where ..."),
         words("attributes."), nl],
-    Spec = error_spec(severity_error, phase_term_to_parse_tree,
-        [simple_msg(get_term_context(Term), [always(Pieces)])]).
+    Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+        get_term_context(Term), Pieces).
 
 :- func maybe_unify_compare(maybe(equality_pred), maybe(comparison_pred))
     = maybe_canonical.
@@ -1463,8 +1470,8 @@ parse_type_defn_head(ContextPieces, ModuleName, VarSet, Term,
             words("Error: expected a type constructor"),
             words("and zero or more type variables as arguments,"),
             words("got"), quote(TermStr), suffix("."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(Context, [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            Context, Pieces),
         MaybeTypeCtorAndArgs = error2([Spec])
     ;
         Term = term.functor(_Functor, _ArgTerms, Context),
@@ -1507,8 +1514,8 @@ parse_type_defn_head(ContextPieces, ModuleName, VarSet, Term,
                         words("Error: type parameters must be unique, but"),
                         words(Params)] ++ list_to_pieces(DupParamVarNames) ++
                         [words(IsOrAre), words("duplicated."), nl],
-                    Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                        [simple_msg(Context, [always(Pieces)])]),
+                    Spec = simplest_spec($pred, severity_error,
+                        phase_term_to_parse_tree, Context, Pieces),
                     MaybeTypeCtorAndArgs = error2([Spec | NameSpecs])
                 )
             ;
@@ -1521,8 +1528,8 @@ parse_type_defn_head(ContextPieces, ModuleName, VarSet, Term,
                     words("Error: type parameters must be variables, but")] ++
                     list_to_quoted_pieces(NonVarArgTermStrs) ++
                     [words(IsOrAre), words("not."), nl],
-                Spec = error_spec(severity_error, phase_term_to_parse_tree,
-                    [simple_msg(Context, [always(Pieces)])]),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree, Context, Pieces),
                 MaybeTypeCtorAndArgs = error2([Spec | NameSpecs])
             )
         )
@@ -1555,8 +1562,8 @@ check_user_type_name(SymName, Context, NameSpecs) :-
     ( if is_known_type_name(Name) then
         NamePieces = [words("Error: the type name"), quote(Name),
             words("is reserved for the Mercury implementation."), nl],
-        NameSpec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(Context, [always(NamePieces)])]),
+        NameSpec = simplest_spec($pred, severity_error,
+            phase_term_to_parse_tree, Context, NamePieces),
         NameSpecs = [NameSpec]
     else
         NameSpecs = []
@@ -1590,8 +1597,8 @@ check_no_free_body_vars(TVarSet, ParamTVars, BodyType, BodyContext, Specs) :-
             list_to_pieces(OnlyBodyTVarNames) ++ [words(OccurWord),
             words("only in the right hand side of this type definition."),
             nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(BodyContext, [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            BodyContext, Pieces),
         Specs = [Spec]
     ).
 

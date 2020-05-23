@@ -80,16 +80,12 @@
 #define MR_GRADE_EXEC_TRACE_VERSION_NO  12
 #define MR_GRADE_DEEP_PROF_VERSION_NO   4
 #define MR_GRADE_LLC_PAR_VERSION_NO 1
+#define MR_GRADE_TRAIL_VERSION_NO 1
 
 #ifdef MR_HIGHLEVEL_CODE
 
-  #ifdef MR_HIGHLEVEL_DATA
-    #define MR_GRADE_PART_1             MR_PASTE2(MR_GRADE_PART_0, hl)
-    #define MR_GRADE_OPT_PART_1         "hl"
-  #else
-    #define MR_GRADE_PART_1             MR_PASTE2(MR_GRADE_PART_0, hlc)
-    #define MR_GRADE_OPT_PART_1         "hlc"
-  #endif
+  #define MR_GRADE_PART_1               MR_PASTE2(MR_GRADE_PART_0, hlc)
+  #define MR_GRADE_OPT_PART_1           "hlc"
 
   // Grade component 2 used to specify the use/nonuse of gcc nested functions.
 
@@ -237,13 +233,12 @@
 #endif
 
 #ifdef MR_USE_TRAIL
-   #ifdef MR_TRAIL_SEGMENTS
-    #define MR_GRADE_PART_7     MR_PASTE2(MR_GRADE_PART_6, _trseg)
-    #define MR_GRADE_OPT_PART_7 MR_GRADE_OPT_PART_6 ".trseg"
+  #ifdef MR_USE_FIXED_SIZE_TRAIL
+    #define MR_GRADE_PART_7     MR_PASTE3(MR_GRADE_PART_6, _trfix, MR_GRADE_TRAIL_VERSION_NO)
   #else
-    #define MR_GRADE_PART_7     MR_PASTE2(MR_GRADE_PART_6, _tr)
+    #define MR_GRADE_PART_7     MR_PASTE3(MR_GRADE_PART_6, _trseg, MR_GRADE_TRAIL_VERSION_NO)
+  #endif
     #define MR_GRADE_OPT_PART_7 MR_GRADE_OPT_PART_6 ".tr"
-   #endif // ! MR_TRAIL_SEGMENTS
 #else
   #define MR_GRADE_PART_7       MR_GRADE_PART_6
   #define MR_GRADE_OPT_PART_7   MR_GRADE_OPT_PART_6
@@ -355,7 +350,7 @@
 // and they imply unboxed floats.
 
 #if MR_TAGBITS == 0
-  #define MR_GRADE_PART_10      MR_PASTE2(MR_GRADE_PART_9, _notags)
+  #error "MR_TAGBITS must be greater than zero"
 #else
   #define MR_GRADE_PART_10      MR_PASTE2(MR_GRADE_PART_9,              \
                                         MR_PASTE2(_tags, MR_TAGBITS))

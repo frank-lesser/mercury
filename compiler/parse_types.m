@@ -23,6 +23,7 @@
 :- import_module recompilation.
 
 :- import_module list.
+:- import_module one_or_more.
 
     % This type represents the result of parsing one term.
 :- type item_or_marker
@@ -79,6 +80,8 @@
 %---------------------------------------------------------------------------%
 
 :- implementation.
+
+:- import_module parse_tree.item_util.
 
 iom_desc_pieces(IOM) = Pieces :-
     (

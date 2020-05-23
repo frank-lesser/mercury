@@ -1083,15 +1083,25 @@ determinism_debug(detism_cc_non,       "cc_nondet").
 determinism_debug(detism_erroneous,    "erroneous").
 determinism_debug(detism_failure,      "failure").
 
-:- pred binop_code(binary_op::in, int::out) is det.
+:- pred binop_code(binary_op, int).
+:- mode binop_code(in, out) is det.
+% :- mode binop_code(out, in) is semidet.
+% This mode would be a nice way to guard against accidentally assigning
+% the same bytecode value to two different operators. Unfortunately,
+% it would work only if we explicitly listed all possible integers
+% as arguments of offset_str_eq, or if we used an output inst as big as
+% this table.
 
+% If we ever complete the bytecode backend, then this representation
+% scheme should be simplified by putting related operations next
+% to each other.
 binop_code(int_add(int_type_int),    0).
 binop_code(int_sub(int_type_int),    1).
 binop_code(int_mul(int_type_int),    2).
 binop_code(int_div(int_type_int),    3).
 binop_code(int_mod(int_type_int),    4).
-binop_code(unchecked_left_shift(int_type_int),  5).
-binop_code(unchecked_right_shift(int_type_int), 6).
+binop_code(unchecked_left_shift(int_type_int, shift_by_int),  5).
+binop_code(unchecked_right_shift(int_type_int, shift_by_int), 6).
 binop_code(bitwise_and(int_type_int), 7).
 binop_code(bitwise_or(int_type_int),  8).
 binop_code(bitwise_xor(int_type_int), 9).
@@ -1110,10 +1120,10 @@ binop_code(int_lt(int_type_int),    21).
 binop_code(int_gt(int_type_int),    22).
 binop_code(int_le(int_type_int),    23).
 binop_code(int_ge(int_type_int),    24).
-binop_code(float_plus,              25).
-binop_code(float_minus,             26).
-binop_code(float_times,             27).
-binop_code(float_divide,            28).
+binop_code(float_add,               25).
+binop_code(float_sub,               26).
+binop_code(float_mul,               27).
+binop_code(float_div,               28).
 binop_code(float_eq,                29).
 binop_code(float_ne,                30).
 binop_code(float_lt,                31).
@@ -1144,8 +1154,8 @@ binop_code(int_mod(int_type_uint),                55).
 binop_code(bitwise_and(int_type_uint),  56).
 binop_code(bitwise_or(int_type_uint), 57).
 binop_code(bitwise_xor(int_type_uint), 58).
-binop_code(unchecked_left_shift(int_type_uint), 59).
-binop_code(unchecked_right_shift(int_type_uint), 60).
+binop_code(unchecked_left_shift(int_type_uint, shift_by_int), 59).
+binop_code(unchecked_right_shift(int_type_uint, shift_by_int), 60).
 binop_code(eq(int_type_int8),       61).
 binop_code(ne(int_type_int8),       62).
 binop_code(int_lt(int_type_int8),   63).
@@ -1160,8 +1170,8 @@ binop_code(int_mod(int_type_int8),  71).
 binop_code(bitwise_and(int_type_int8), 72).
 binop_code(bitwise_or(int_type_int8), 73).
 binop_code(bitwise_xor(int_type_int8), 74).
-binop_code(unchecked_left_shift(int_type_int8), 75).
-binop_code(unchecked_right_shift(int_type_int8), 76).
+binop_code(unchecked_left_shift(int_type_int8, shift_by_int), 75).
+binop_code(unchecked_right_shift(int_type_int8, shift_by_int), 76).
 binop_code(eq(int_type_uint8),       77).
 binop_code(ne(int_type_uint8),       78).
 binop_code(int_lt(int_type_uint8),   79).
@@ -1176,8 +1186,8 @@ binop_code(int_mod(int_type_uint8),  87).
 binop_code(bitwise_and(int_type_uint8), 88).
 binop_code(bitwise_or(int_type_uint8),  89).
 binop_code(bitwise_xor(int_type_uint8), 90).
-binop_code(unchecked_left_shift(int_type_uint8), 91).
-binop_code(unchecked_right_shift(int_type_uint8), 92).
+binop_code(unchecked_left_shift(int_type_uint8, shift_by_int), 91).
+binop_code(unchecked_right_shift(int_type_uint8, shift_by_int), 92).
 binop_code(eq(int_type_int16),       93).
 binop_code(ne(int_type_int16),       94).
 binop_code(int_lt(int_type_int16),   95).
@@ -1192,8 +1202,8 @@ binop_code(int_mod(int_type_int16), 103).
 binop_code(bitwise_and(int_type_int16), 104).
 binop_code(bitwise_or(int_type_int16),  105).
 binop_code(bitwise_xor(int_type_int16), 106).
-binop_code(unchecked_left_shift(int_type_int16),  107).
-binop_code(unchecked_right_shift(int_type_int16), 108).
+binop_code(unchecked_left_shift(int_type_int16, shift_by_int),  107).
+binop_code(unchecked_right_shift(int_type_int16, shift_by_int), 108).
 binop_code(eq(int_type_uint16),       109).
 binop_code(ne(int_type_uint16),       110).
 binop_code(int_lt(int_type_uint16),   111).
@@ -1208,8 +1218,8 @@ binop_code(int_mod(int_type_uint16),  119).
 binop_code(bitwise_and(int_type_uint16), 120).
 binop_code(bitwise_or(int_type_uint16),  121).
 binop_code(bitwise_xor(int_type_uint16), 122).
-binop_code(unchecked_left_shift(int_type_uint16), 123).
-binop_code(unchecked_right_shift(int_type_uint16), 124).
+binop_code(unchecked_left_shift(int_type_uint16, shift_by_int), 123).
+binop_code(unchecked_right_shift(int_type_uint16, shift_by_int), 124).
 binop_code(eq(int_type_int32),       125).
 binop_code(ne(int_type_int32),       126).
 binop_code(int_lt(int_type_int32),   127).
@@ -1224,8 +1234,8 @@ binop_code(int_mod(int_type_int32),                135).
 binop_code(bitwise_and(int_type_int32), 136).
 binop_code(bitwise_or(int_type_int32),  137).
 binop_code(bitwise_xor(int_type_int32), 138).
-binop_code(unchecked_left_shift(int_type_int32), 139).
-binop_code(unchecked_right_shift(int_type_int32), 140).
+binop_code(unchecked_left_shift(int_type_int32, shift_by_int), 139).
+binop_code(unchecked_right_shift(int_type_int32, shift_by_int), 140).
 binop_code(eq(int_type_uint32),       141).
 binop_code(ne(int_type_uint32),       142).
 binop_code(int_lt(int_type_uint32),   143).
@@ -1240,8 +1250,8 @@ binop_code(int_mod(int_type_uint32),  151).
 binop_code(bitwise_and(int_type_uint32), 152).
 binop_code(bitwise_or(int_type_uint32),  153).
 binop_code(bitwise_xor(int_type_uint32), 154).
-binop_code(unchecked_left_shift(int_type_uint32),  155).
-binop_code(unchecked_right_shift(int_type_uint32), 156).
+binop_code(unchecked_left_shift(int_type_uint32, shift_by_int),  155).
+binop_code(unchecked_right_shift(int_type_uint32, shift_by_int), 156).
 binop_code(eq(int_type_int64),       157).
 binop_code(ne(int_type_int64),       158).
 binop_code(int_lt(int_type_int64),   159).
@@ -1256,8 +1266,8 @@ binop_code(int_mod(int_type_int64),  167).
 binop_code(bitwise_and(int_type_int64), 168).
 binop_code(bitwise_or(int_type_int64),  169).
 binop_code(bitwise_xor(int_type_int64), 170).
-binop_code(unchecked_left_shift(int_type_int64), 171).
-binop_code(unchecked_right_shift(int_type_int64), 172).
+binop_code(unchecked_left_shift(int_type_int64, shift_by_int), 171).
+binop_code(unchecked_right_shift(int_type_int64, shift_by_int), 172).
 binop_code(eq(int_type_uint64),       173).
 binop_code(ne(int_type_uint64),       174).
 binop_code(int_lt(int_type_uint64),   175).
@@ -1272,20 +1282,48 @@ binop_code(int_mod(int_type_uint64),  183).
 binop_code(bitwise_and(int_type_uint64), 184).
 binop_code(bitwise_or(int_type_uint64),  185).
 binop_code(bitwise_xor(int_type_uint64), 186).
-binop_code(unchecked_left_shift(int_type_uint64),  187).
-binop_code(unchecked_right_shift(int_type_uint64), 188).
+binop_code(unchecked_left_shift(int_type_uint64, shift_by_int),  187).
+binop_code(unchecked_right_shift(int_type_uint64, shift_by_int), 188).
 binop_code(int64_from_dword,          189).
 binop_code(uint64_from_dword,         190).
+binop_code(unchecked_left_shift(int_type_int, shift_by_uint), 191).
+binop_code(unchecked_right_shift(int_type_int, shift_by_uint), 192).
+binop_code(unchecked_left_shift(int_type_uint, shift_by_uint), 193).
+binop_code(unchecked_right_shift(int_type_uint, shift_by_uint), 194).
+binop_code(unchecked_left_shift(int_type_int8, shift_by_uint), 195).
+binop_code(unchecked_right_shift(int_type_int8, shift_by_uint), 196).
+binop_code(unchecked_left_shift(int_type_uint8, shift_by_uint), 197).
+binop_code(unchecked_right_shift(int_type_uint8, shift_by_uint), 198).
+binop_code(unchecked_left_shift(int_type_int16, shift_by_uint), 199).
+binop_code(unchecked_right_shift(int_type_int16, shift_by_uint), 200).
+binop_code(unchecked_left_shift(int_type_uint16, shift_by_uint), 201).
+binop_code(unchecked_right_shift(int_type_uint16, shift_by_uint), 202).
+binop_code(unchecked_left_shift(int_type_int32, shift_by_uint), 203).
+binop_code(unchecked_right_shift(int_type_int32, shift_by_uint), 204).
+binop_code(unchecked_left_shift(int_type_uint32, shift_by_uint), 205).
+binop_code(unchecked_right_shift(int_type_uint32, shift_by_uint), 206).
+binop_code(unchecked_left_shift(int_type_int64, shift_by_uint), 207).
+binop_code(unchecked_right_shift(int_type_int64, shift_by_uint), 208).
+binop_code(unchecked_left_shift(int_type_uint64, shift_by_uint), 209).
+binop_code(unchecked_right_shift(int_type_uint64, shift_by_uint), 210).
+binop_code(unsigned_lt,               211).
 
-:- pred binop_debug(binary_op::in, string::out) is det.
+:- pred binop_debug(binary_op, string).
+:- mode binop_debug(in, out) is det.
+% :- mode binop_debug(out, in) is semidet.
+% This mode would be a nice way to guard against accidentally assigning
+% the same debug representation to two different operators. Unfortunately,
+% it would work only if we explicitly listed all possible integers
+% as arguments of offset_str_eq, or if we used an output inst as big as
+% this table.
 
 binop_debug(int_add(int_type_int),  "+").
 binop_debug(int_sub(int_type_int),  "-").
 binop_debug(int_mul(int_type_int),  "*").
 binop_debug(int_div(int_type_int),  "/").
 binop_debug(int_mod(int_type_int),  "mod").
-binop_debug(unchecked_left_shift(int_type_int),   "<<").
-binop_debug(unchecked_right_shift(int_type_int),  ">>").
+binop_debug(unchecked_left_shift(int_type_int, shift_by_int),   "<<").
+binop_debug(unchecked_right_shift(int_type_int, shift_by_int),  ">>").
 binop_debug(bitwise_and(int_type_int), "&").
 binop_debug(bitwise_or(int_type_int), "|").
 binop_debug(bitwise_xor(int_type_int), "^").
@@ -1304,10 +1342,10 @@ binop_debug(int_lt(int_type_int),   "<").
 binop_debug(int_gt(int_type_int),   ">").
 binop_debug(int_le(int_type_int),   "<=").
 binop_debug(int_ge(int_type_int),   ">=").
-binop_debug(float_plus,             "float_plus").
-binop_debug(float_minus,            "float_minus").
-binop_debug(float_times,            "float_times").
-binop_debug(float_divide,           "float_divide").
+binop_debug(float_add,              "float_add").
+binop_debug(float_sub,              "float_sub").
+binop_debug(float_mul,              "float_mul").
+binop_debug(float_div,              "float_div").
 binop_debug(float_eq,               "float_eq").
 binop_debug(float_ne,               "float_ne").
 binop_debug(float_lt,               "float_lt").
@@ -1315,6 +1353,7 @@ binop_debug(float_gt,               "float_gt").
 binop_debug(float_le,               "float_le").
 binop_debug(float_ge,               "float_ge").
 binop_debug(body,                   "body").
+binop_debug(unsigned_lt,            "unsigned_lt").
 binop_debug(unsigned_le,            "unsigned_le").
 binop_debug(compound_eq,            "compound_eq").
 binop_debug(compound_lt,            "compound_lt").
@@ -1339,8 +1378,10 @@ binop_debug(int_mod(int_type_uint), "mod(uint)").
 binop_debug(bitwise_and(int_type_uint), "&(uint)").
 binop_debug(bitwise_or(int_type_uint), "|(uint)").
 binop_debug(bitwise_xor(int_type_uint), "^(uint)").
-binop_debug(unchecked_left_shift(int_type_uint), "<<(uint)").
-binop_debug(unchecked_right_shift(int_type_uint), ">>(uint)").
+binop_debug(unchecked_left_shift(int_type_uint, shift_by_int),
+    "<<(uint)").
+binop_debug(unchecked_right_shift(int_type_uint, shift_by_int),
+    ">>(uint)").
 binop_debug(eq(int_type_int8),      "==(int8)").
 binop_debug(ne(int_type_int8),      "!=(int8)").
 binop_debug(int_lt(int_type_int8),  "<(int8)").
@@ -1355,8 +1396,10 @@ binop_debug(int_mod(int_type_int8), "mod(int8)").
 binop_debug(bitwise_and(int_type_int8), "&(int8)").
 binop_debug(bitwise_or(int_type_int8), "|(int8)").
 binop_debug(bitwise_xor(int_type_int8), "^(int8)").
-binop_debug(unchecked_left_shift(int_type_int8), "<<(int8)").
-binop_debug(unchecked_right_shift(int_type_int8), ">>(int8)").
+binop_debug(unchecked_left_shift(int_type_int8, shift_by_int),
+    "<<(int8)").
+binop_debug(unchecked_right_shift(int_type_int8, shift_by_int),
+    ">>(int8)").
 binop_debug(eq(int_type_uint8),      "==(uint8)").
 binop_debug(ne(int_type_uint8),      "!=(uint8)").
 binop_debug(int_lt(int_type_uint8),  "<(uint8)").
@@ -1371,8 +1414,10 @@ binop_debug(int_mod(int_type_uint8), "mod(uint8)").
 binop_debug(bitwise_and(int_type_uint8), "&(uint8)").
 binop_debug(bitwise_or(int_type_uint8), "|(uint8)").
 binop_debug(bitwise_xor(int_type_uint8), "^(uint8)").
-binop_debug(unchecked_left_shift(int_type_uint8), "<<(uint8)").
-binop_debug(unchecked_right_shift(int_type_uint8), ">>(uint8)").
+binop_debug(unchecked_left_shift(int_type_uint8, shift_by_int),
+    "<<(uint8)").
+binop_debug(unchecked_right_shift(int_type_uint8, shift_by_int),
+    ">>(uint8)").
 binop_debug(eq(int_type_int16),      "==(int6)").
 binop_debug(ne(int_type_int16),      "!=(int16)").
 binop_debug(int_lt(int_type_int16),  "<(int16)").
@@ -1387,8 +1432,10 @@ binop_debug(int_mod(int_type_int16), "mod(int16)").
 binop_debug(bitwise_and(int_type_int16), "&(int16)").
 binop_debug(bitwise_or(int_type_int16), "|(int16)").
 binop_debug(bitwise_xor(int_type_int16), "^(int16)").
-binop_debug(unchecked_left_shift(int_type_int16), "<<(int16)").
-binop_debug(unchecked_right_shift(int_type_int16), ">>(int16)").
+binop_debug(unchecked_left_shift(int_type_int16, shift_by_int),
+    "<<(int16)").
+binop_debug(unchecked_right_shift(int_type_int16, shift_by_int),
+    ">>(int16)").
 binop_debug(eq(int_type_uint16),      "==(uint16)").
 binop_debug(ne(int_type_uint16),      "!=(uint16)").
 binop_debug(int_lt(int_type_uint16),  "<(uint16)").
@@ -1403,8 +1450,10 @@ binop_debug(int_mod(int_type_uint16), "mod(uint16)").
 binop_debug(bitwise_and(int_type_uint16), "&(uint16)").
 binop_debug(bitwise_or(int_type_uint16), "|(uint16)").
 binop_debug(bitwise_xor(int_type_uint16), "^(uint16)").
-binop_debug(unchecked_left_shift(int_type_uint16), "<<(uint16)").
-binop_debug(unchecked_right_shift(int_type_uint16), ">>(uint16)").
+binop_debug(unchecked_left_shift(int_type_uint16, shift_by_int),
+    "<<(uint16)").
+binop_debug(unchecked_right_shift(int_type_uint16, shift_by_int),
+    ">>(uint16)").
 binop_debug(eq(int_type_int32),      "==(int32)").
 binop_debug(ne(int_type_int32),      "!=(int32)").
 binop_debug(int_lt(int_type_int32),  "<(int32)").
@@ -1419,8 +1468,10 @@ binop_debug(int_mod(int_type_int32), "mod(int32)").
 binop_debug(bitwise_and(int_type_int32), "&(int32)").
 binop_debug(bitwise_or(int_type_int32), "|(int32)").
 binop_debug(bitwise_xor(int_type_int32), "^(int32)").
-binop_debug(unchecked_left_shift(int_type_int32), "<<(int32)").
-binop_debug(unchecked_right_shift(int_type_int32), ">>(int32)").
+binop_debug(unchecked_left_shift(int_type_int32, shift_by_int),
+    "<<(int32)").
+binop_debug(unchecked_right_shift(int_type_int32, shift_by_int),
+    ">>(int32)").
 binop_debug(eq(int_type_uint32),      "==(uint32)").
 binop_debug(ne(int_type_uint32),      "!=(uint32)").
 binop_debug(int_lt(int_type_uint32),  "<(uint32)").
@@ -1435,8 +1486,10 @@ binop_debug(int_mod(int_type_uint32), "mod(uint32").
 binop_debug(bitwise_and(int_type_uint32), "&(uint32)").
 binop_debug(bitwise_or(int_type_uint32),  "|(uint32)").
 binop_debug(bitwise_xor(int_type_uint32), "^(uint32)").
-binop_debug(unchecked_left_shift(int_type_uint32), "<<(uint32)").
-binop_debug(unchecked_right_shift(int_type_uint32), ">>(uint32)").
+binop_debug(unchecked_left_shift(int_type_uint32, shift_by_int),
+    "<<(uint32)").
+binop_debug(unchecked_right_shift(int_type_uint32, shift_by_int),
+    ">>(uint32)").
 binop_debug(eq(int_type_int64),      "==(int64)").
 binop_debug(ne(int_type_int64),      "!=(int64)").
 binop_debug(int_lt(int_type_int64),  "<(int64)").
@@ -1451,8 +1504,10 @@ binop_debug(int_mod(int_type_int64), "mod(int64)").
 binop_debug(bitwise_and(int_type_int64), "&(int64)").
 binop_debug(bitwise_or(int_type_int64), "|(int64)").
 binop_debug(bitwise_xor(int_type_int64), "^(int64)").
-binop_debug(unchecked_left_shift(int_type_int64), "<<(int64)").
-binop_debug(unchecked_right_shift(int_type_int64), ">>(int64)").
+binop_debug(unchecked_left_shift(int_type_int64, shift_by_int),
+    "<<(int64)").
+binop_debug(unchecked_right_shift(int_type_int64, shift_by_int),
+    ">>(int64)").
 binop_debug(eq(int_type_uint64),      "==(uint64)").
 binop_debug(ne(int_type_uint64),      "!=(uint64)").
 binop_debug(int_lt(int_type_uint64),  "<(uint64)").
@@ -1467,8 +1522,42 @@ binop_debug(int_mod(int_type_uint64), "mod(uint64").
 binop_debug(bitwise_and(int_type_uint64), "&(uint64)").
 binop_debug(bitwise_or(int_type_uint64),  "|(uint64)").
 binop_debug(bitwise_xor(int_type_uint64), "^(uint64)").
-binop_debug(unchecked_left_shift(int_type_uint64), "<<(uint64)").
-binop_debug(unchecked_right_shift(int_type_uint64), ">>(uint64)").
+binop_debug(unchecked_left_shift(int_type_uint64, shift_by_int), "<<(uint64)").
+binop_debug(unchecked_right_shift(int_type_uint64, shift_by_int), ">>(uint64)").
+binop_debug(unchecked_left_shift(int_type_int, shift_by_uint), "<<u").
+binop_debug(unchecked_right_shift(int_type_int, shift_by_uint), ">>u").
+binop_debug(unchecked_left_shift(int_type_uint, shift_by_uint), "<<u(uint)").
+binop_debug(unchecked_right_shift(int_type_uint, shift_by_uint), ">>u(uint)").
+binop_debug(unchecked_left_shift(int_type_int8, shift_by_uint), "<<u(int8)").
+binop_debug(unchecked_right_shift(int_type_int8, shift_by_uint), ">>u(int8)").
+binop_debug(unchecked_left_shift(int_type_uint8, shift_by_uint),
+    "<<u(uint8)").
+binop_debug(unchecked_right_shift(int_type_uint8, shift_by_uint),
+    ">>u(uint8)").
+binop_debug(unchecked_left_shift(int_type_int16, shift_by_uint),
+    "<<u(int16)").
+binop_debug(unchecked_right_shift(int_type_int16, shift_by_uint),
+    ">>u(int16)").
+binop_debug(unchecked_left_shift(int_type_uint16, shift_by_uint),
+    "<<u(uint16)").
+binop_debug(unchecked_right_shift(int_type_uint16, shift_by_uint),
+    ">>u(uint16)").
+binop_debug(unchecked_left_shift(int_type_int32, shift_by_uint),
+    "<<u(int32)").
+binop_debug(unchecked_right_shift(int_type_int32, shift_by_uint),
+    ">>u(int32)").
+binop_debug(unchecked_left_shift(int_type_uint32, shift_by_uint),
+    "<<u(uint32)").
+binop_debug(unchecked_right_shift(int_type_uint32, shift_by_uint),
+    ">>u(uint32)").
+binop_debug(unchecked_left_shift(int_type_int64, shift_by_uint),
+    "<<u(int64)").
+binop_debug(unchecked_right_shift(int_type_int64, shift_by_uint),
+    ">>u(int64)").
+binop_debug(unchecked_left_shift(int_type_uint64, shift_by_uint),
+    "<<u(uint64)").
+binop_debug(unchecked_right_shift(int_type_uint64, shift_by_uint),
+    ">>u(uint64)").
 
 :- pred unop_code(unary_op::in, int::out) is det.
 

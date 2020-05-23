@@ -644,7 +644,7 @@ unify_goal_to_constraint(Environment, GoalExpr, GoalInfo, !TCInfo) :-
             (
                 Constraints = [],
                 Pieces = [words("The constructor"),
-                    qual_sym_name_and_arity(sym_name_arity(Name, Arity)),
+                    qual_sym_name_arity(sym_name_arity(Name, Arity)),
                     words("has not been defined."), nl],
                 ErrMsg = simple_msg(Context, [always(Pieces)]),
                 add_message_to_spec(ErrMsg, !TCInfo)
@@ -819,21 +819,21 @@ generic_call_goal_to_constraint(Environment, GoalExpr, GoalInfo, !TCInfo) :-
                     Pieces = [words("Incorrect number of arguments"),
                         words("provided to method"), int_fixed(MethodNum),
                         words("of typeclass"),
-                        qual_sym_name_and_arity(sym_name_arity(Name, Arity)),
+                        qual_sym_name_arity(sym_name_arity(Name, Arity)),
                         suffix("."), nl],
                     ErrMsg = simple_msg(Context, [always(Pieces)]),
                     add_message_to_spec(ErrMsg, !TCInfo)
                 )
             else
                 Pieces = [words("The typeclass"),
-                    qual_sym_name_and_arity(sym_name_arity(Name, Arity)),
+                    qual_sym_name_arity(sym_name_arity(Name, Arity)),
                     words("does not have the given method."), nl],
                 ErrMsg = simple_msg(Context, [always(Pieces)]),
                 add_message_to_spec(ErrMsg, !TCInfo)
             )
         else
             Pieces = [words("The typeclass"),
-                qual_sym_name_and_arity(sym_name_arity(Name, Arity)),
+                qual_sym_name_arity(sym_name_arity(Name, Arity)),
                 words("is undefined."), nl],
             ErrMsg = simple_msg(Context, [always(Pieces)]),
             add_message_to_spec(ErrMsg, !TCInfo)
@@ -2178,7 +2178,7 @@ next_min_unsat(Constraint, C, !D, !P, !MinUnsats) :-
     type_constraint_info::out) is det.
 
 add_message_to_spec(ErrMsg, !TCInfo) :-
-    Spec = error_spec(severity_error, phase_type_check, [ErrMsg]),
+    Spec = error_spec($pred, severity_error, phase_type_check, [ErrMsg]),
     !TCInfo ^ tconstr_error_specs := [Spec | !.TCInfo ^ tconstr_error_specs].
 
 :- pred context_to_string(prog_context::in, string::out) is det.

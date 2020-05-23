@@ -2,6 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 expandtab
 %-----------------------------------------------------------------------------%
 % Copyright (C) 2002-2009, 2011 The University of Melbourne.
+% Copyright (C) 2014-2017, 2019-2020 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %-----------------------------------------------------------------------------%
@@ -29,8 +30,7 @@
 
     % Get the dependencies for a given module.
     % Dependencies are generated on demand, not by a `mmc --make depend'
-    % command, so this predicate may need to read the source for
-    % the module.
+    % command, so this predicate may need to read the source for the module.
     %
 :- pred get_module_dependencies(globals::in, module_name::in,
     maybe(module_and_imports)::out, make_info::in, make_info::out,
@@ -49,6 +49,7 @@
 :- import_module parse_tree.
 :- import_module parse_tree.error_util.
 :- import_module parse_tree.file_names.
+:- import_module parse_tree.item_util.
 :- import_module parse_tree.mercury_to_mercury.
 :- import_module parse_tree.parse_error.
 :- import_module parse_tree.parse_sym_name.
@@ -93,12 +94,11 @@ get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
             MaybeModuleAndImports, !Info, !IO)
     ;
         ModuleName = qualified(_, _),
-        % For sub-modules, we need to generate the dependencies
-        % for the parent modules first (make_module_dependencies
-        % expects to be given the top-level module in a source file).
-        % If the module is a nested module, its dependencies will be
-        % generated as a side effect of generating the parent's
-        % dependencies.
+        % For submodules, we need to generate the dependencies for the
+        % parent modules first (make_module_dependencies expects to be given
+        % the top-level module in a source file).
+        % If the module is a nested module, its dependencies will be generated
+        % as a side effect of generating the parent's dependencies.
         AncestorsAndSelf = get_ancestors(ModuleName) ++ [ModuleName],
         Error0 = no,
         maybe_get_modules_dependencies(Globals, RebuildModuleDeps,
@@ -112,7 +112,8 @@ get_module_dependencies(Globals, ModuleName, MaybeModuleAndImports,
     list(module_name)::in, bool::in, make_info::in, make_info::out,
     io::di, io::uo) is det.
 
-maybe_get_modules_dependencies(_Globals, _RebuildModuleDeps, [], _, !Info, !IO).
+maybe_get_modules_dependencies(_Globals, _RebuildModuleDeps,
+        [], _, !Info, !IO).
 maybe_get_modules_dependencies(Globals, RebuildModuleDeps,
         [ModuleName | ModuleNames], !.Error, !Info, !IO) :-
     (
@@ -127,8 +128,8 @@ maybe_get_modules_dependencies(Globals, RebuildModuleDeps,
         )
     ;
         !.Error = yes,
-        % If we found a problem when processing an ancestor, don't even
-        % try to process the later modules.
+        % If we found a problem when processing an ancestor, don't even try
+        % to process the later modules.
         ModuleDepMap0 = !.Info ^ module_dependencies,
         MaybeModuleAndImports = no,
         % XXX Could this be map.det_update or map.det_insert?
@@ -184,9 +185,14 @@ do_get_module_dependencies(Globals, RebuildModuleDeps, ModuleName,
             ; compare((>), DepFileTimestamp, SourceFileTimestamp)
             )
         then
-            % Since the source file was found in this directory, don't
-            % use module_dep files which might be for installed copies
+            % Since the source file was found in this directory, do not use
+            % module_dep files which might be for installed copies
             % of the module.
+            %
+            % XXX SourceFileName may not actually be the correct source file
+            % for the required module. Usually the purported source file would
+            % have a later timestamp than the .module_dep file, though, so the
+            % other branch would be taken.
             read_module_dependencies_no_search(Globals, RebuildModuleDeps,
                 ModuleName, !Info, !IO)
         else
@@ -199,8 +205,8 @@ do_get_module_dependencies(Globals, RebuildModuleDeps, ModuleName,
             ModuleName, !Info, !IO),
 
         % Check for the case where the module name doesn't match the
-        % source file name (e.g. parse.m contains module mdb.parse). Get
-        % the correct source file name from the module dependency file,
+        % source file name (e.g. parse.m contains module mdb.parse).
+        % Get the correct source file name from the module dependency file,
         % then check whether the module dependency file is up to date.
 
         map.lookup(!.Info ^ module_dependencies, ModuleName,
@@ -224,15 +230,31 @@ do_get_module_dependencies(Globals, RebuildModuleDeps, ModuleName,
                 then
                     true
                 else
+                    % XXX The existence of a .module_dep file reflects a
+                    % previous state of the workspace which may not match the
+                    % current workspace.
+                    %
+                    % Here is a (contrived) case where we run into an issue:
+                    % 1. create prog.m which imports the standard library lexer
+                    %    module
+                    % 2. copy the standard library lexer.m file to the current
+                    %    directory for editing
+                    % 3. run mmc --make; it creates lexer.module_dep
+                    % 4. change lexer.m into a submodule of prog
+                    % 5. run mmc --make again, it no longer works
+                    %
+                    % The local lexer.module_dep prevents mmc --make finding
+                    % the lexer.module_dep from the standard library, even
+                    % though there is no longer any local source file for the
+                    % `lexer' module.
+
                     make_module_dependencies(Globals, ModuleName, !Info, !IO)
                 )
             ;
                 MaybeSourceFileTimestamp1 = error(Message),
-                io.write_string("** Error reading file `", !IO),
-                io.write_string(SourceFileName1, !IO),
-                io.write_string("' to generate dependencies: ", !IO),
-                io.write_string(Message, !IO),
-                io.write_string(".\n", !IO),
+                io.format("** Error reading file `%s' " ++
+                    "to generate dependencies: %s.\n",
+                    [s(SourceFileName1), s(Message)], !IO),
                 maybe_write_importing_module(ModuleName,
                     !.Info ^ importing_module, !IO)
             )
@@ -244,8 +266,8 @@ do_get_module_dependencies(Globals, RebuildModuleDeps, ModuleName,
         SearchDirsString = join_list(", ",
             map((func(Dir) = "`" ++ Dir ++ "'"), SearchDirs)),
         debug_make_msg(Globals,
-            io.format("Module dependencies file '%s' "
-                    ++ "not found in directories %s.\n",
+            io.format(
+                "Module dependencies file '%s' not found in directories %s.\n",
                 [s(DepFileName), s(SearchDirsString)]),
             !IO),
 
@@ -298,8 +320,8 @@ do_write_module_dep_file(Globals, ModuleAndImports, !IO) :-
     ;
         ProgDepResult = error(Error),
         io.error_message(Error, Msg),
-        io.write_strings(["Error opening ", ProgDepFile, " for output: ",
-            Msg, "\n"], !IO),
+        io.format("Error opening %s for output: %s\n",
+            [s(ProgDepFile), s(Msg)], !IO),
         io.set_exit_status(1, !IO)
     ).
 
@@ -332,8 +354,7 @@ do_write_module_dep_file_2(ModuleAndImports, Version, !IO) :-
         ContainsForeignCode),
     module_and_imports_get_contains_foreign_export(ModuleAndImports,
         ContainsForeignExport),
-    module_and_imports_get_foreign_import_modules(ModuleAndImports,
-        ForeignImportModules),
+    module_and_imports_get_c_j_cs_e_fims(ModuleAndImports, CJCsEFIMs),
     module_and_imports_get_foreign_include_files(ModuleAndImports,
         ForeignIncludeFiles),
     module_and_imports_get_has_main(ModuleAndImports, HasMain),
@@ -359,15 +380,23 @@ do_write_module_dep_file_2(ModuleAndImports, Version, !IO) :-
     io.write_string("},\n\t{", !IO),
     io.write_list(FactDeps, ", ", io.write, !IO),
     io.write_string("},\n\t{", !IO),
-    ( if ContainsForeignCode = contains_foreign_code(Langs) then
-        ForeignLanguages = set.to_sorted_list(Langs)
-    else
+    (
+        ContainsForeignCode = foreign_code_langs_known(ForeignLanguageSet),
+        ForeignLanguages = set.to_sorted_list(ForeignLanguageSet)
+    ;
+        ContainsForeignCode = foreign_code_langs_unknown,
+        % XXX Setting ForeignLanguages to empty when we know that
+        % we *don't* know its correct value looks wrong, but this
+        % may or may not be a bug. It is possible that execution cannot reach
+        % this predicate if this field in the module_and_imports structure
+        % has not been filled in.
+        % XXX CLEANUP We should try replacing this assignment with an abort.
         ForeignLanguages = []
     ),
     io.write_list(ForeignLanguages,
         ", ", mercury_output_foreign_language_string, !IO),
     io.write_string("},\n\t{", !IO),
-    FIMSpecs = get_all_fim_specs(ForeignImportModules),
+    FIMSpecs = get_all_fim_specs(CJCsEFIMs),
     io.write_list(set.to_sorted_list(FIMSpecs), ", ", write_fim_spec, !IO),
     io.write_string("},\n\t", !IO),
     contains_foreign_export_to_string(ContainsForeignExport,
@@ -557,7 +586,7 @@ read_module_dependencies_3(Globals, SearchDirs, ModuleName, ModuleDir,
         )
     then
         ContainsForeignCode =
-            construct_contains_foreign_code(ForeignLanguages),
+            foreign_code_langs_known(set.list_to_set(ForeignLanguages)),
         make_module_dep_module_and_imports(SourceFileName, ModuleDir,
             SourceFileModuleName, ModuleName,
             Parents, Children, NestedChildren, IntDeps, ImpDeps, FactDeps,
@@ -596,7 +625,7 @@ read_module_dependencies_3(Globals, SearchDirs, ModuleName, ModuleDir,
                     SearchDirs),
                 NestedChildren, !Info, !IO),
             ( if some_bad_module_dependency(!.Info, NestedChildren) then
-                Result = error("error in nested sub-modules")
+                Result = error("error in nested submodules")
             else
                 Result = ok
             )
@@ -670,14 +699,6 @@ foreign_include_term(Term, ForeignInclude) :-
 contains_foreign_export_term(Term, ContainsForeignExport) :-
     atom_term(Term, Atom, []),
     contains_foreign_export_to_string(ContainsForeignExport, Atom).
-
-:- func construct_contains_foreign_code(list(foreign_language))
-    = contains_foreign_code.
-
-construct_contains_foreign_code([]) = contains_no_foreign_code.
-construct_contains_foreign_code(Langs) = contains_foreign_code(LangSet) :-
-    Langs = [_ | _],
-    LangSet = set.list_to_set(Langs).
 
 :- pred has_main_term(term::in, has_main::out) is semidet.
 
@@ -772,16 +793,37 @@ make_module_dependencies(Globals, ModuleName, !Info, !IO) :-
             do_not_ignore_errors, do_not_search, ModuleName, [],
             SourceFileName, always_read_module(do_return_timestamp), _,
             ParseTreeSrc, Specs0, ReadModuleErrors, !IO),
+
         set.intersect(ReadModuleErrors, fatal_read_module_errors, FatalErrors),
         ( if set.is_non_empty(FatalErrors) then
+            FatalReadError = yes,
+            DisplayErrorReadingFile = yes
+        else if set.contains(ReadModuleErrors, rme_unexpected_module_name) then
+            % If the source file does not contain the expected module then
+            % do not make the .module_dep file; it would leave a .module_dep
+            % file for the wrong module lying around, which the user needs
+            % to delete manually.
+            FatalReadError = yes,
+            DisplayErrorReadingFile = no
+        else
+            FatalReadError = no,
+            DisplayErrorReadingFile = no
+        ),
+        (
+            FatalReadError = yes,
             io.set_output_stream(ErrorStream, _, !IO),
             write_error_specs_ignore(Specs0, Globals, !IO),
             io.set_output_stream(OldOutputStream, _, !IO),
-            io.write_string("** Error reading file `", !IO),
-            io.write_string(SourceFileName, !IO),
-            io.write_string("' to generate dependencies.\n", !IO),
-            maybe_write_importing_module(ModuleName, !.Info ^ importing_module,
-                !IO),
+            (
+                DisplayErrorReadingFile = yes,
+                io.format(
+                    "** Error reading file `%s' to generate dependencies.\n",
+                    [s(SourceFileName)], !IO),
+                maybe_write_importing_module(ModuleName,
+                    !.Info ^ importing_module, !IO)
+            ;
+                DisplayErrorReadingFile = no
+            ),
 
             % Display the contents of the `.err' file, then remove it
             % so we don't leave `.err' files lying around for nonexistent
@@ -793,11 +835,13 @@ make_module_dependencies(Globals, ModuleName, !Info, !IO) :-
             module_name_to_file_name(Globals, do_not_create_dirs, ".err",
                 ModuleName, ErrFileName, !IO),
             io.remove_file(ErrFileName, _, !IO),
+
             ModuleDepMap0 = !.Info ^ module_dependencies,
             % XXX Could this be map.det_update?
             map.set(ModuleName, no, ModuleDepMap0, ModuleDepMap),
             !Info ^ module_dependencies := ModuleDepMap
-        else
+        ;
+            FatalReadError = no,
             parse_tree_src_to_module_and_imports_list(Globals, SourceFileName,
                 ParseTreeSrc, ReadModuleErrors, Specs0, Specs,
                 RawCompUnits, ModuleAndImportsList),
@@ -805,21 +849,13 @@ make_module_dependencies(Globals, ModuleName, !Info, !IO) :-
                  RawCompUnits),
 
             io.set_output_stream(ErrorStream, _, !IO),
-            % XXX Why do want ignore all previously reported errors?
+            % XXX Why are we ignoring all previously reported errors?
             io.set_exit_status(0, !IO),
             write_error_specs_ignore(Specs, Globals, !IO),
             io.set_output_stream(OldOutputStream, _, !IO),
 
-            list.foldl(
-                ( pred(ModuleAndImports::in, Info0::in, Info::out) is det :-
-                    module_and_imports_get_module_name(ModuleAndImports,
-                        SubModuleName),
-                    ModuleDeps0 = Info0 ^ module_dependencies,
-                    % XXX Could this be map.det_insert?
-                    map.set(SubModuleName, yes(ModuleAndImports),
-                        ModuleDeps0, ModuleDeps),
-                    Info = Info0 ^ module_dependencies := ModuleDeps
-                ), ModuleAndImportsList, !Info),
+            list.foldl(make_info_add_module_and_imports_as_dep,
+                ModuleAndImportsList, !Info),
 
             % If there were no errors, write out the `.int3' file
             % while we have the contents of the module. The `int3' file
@@ -859,9 +895,19 @@ make_module_dependencies(Globals, ModuleName, !Info, !IO) :-
         MaybeErrorStream = no
     ).
 
+:- pred make_info_add_module_and_imports_as_dep(module_and_imports::in,
+    make_info::in, make_info::out) is det.
+
+make_info_add_module_and_imports_as_dep(ModuleAndImports, !Info) :-
+    module_and_imports_get_module_name(ModuleAndImports, ModuleName),
+    ModuleDeps0 = !.Info ^ module_dependencies,
+    % XXX Could this be map.det_insert?
+    map.set(ModuleName, yes(ModuleAndImports), ModuleDeps0, ModuleDeps),
+    !Info ^ module_dependencies := ModuleDeps.
+
 :- pred make_int3_files(io.output_stream::in, file_name::in,
-    list(raw_compilation_unit)::in, globals::in, list(string)::in,
-    bool::out, make_info::in, make_info::out, io::di, io::uo) is det.
+    list(raw_compilation_unit)::in, globals::in, list(string)::in, bool::out,
+    make_info::in, make_info::out, io::di, io::uo) is det.
 
 make_int3_files(ErrorStream, SourceFileName, RawCompUnits, Globals,
         _, Succeeded, !Info, !IO) :-

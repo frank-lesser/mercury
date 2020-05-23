@@ -138,7 +138,7 @@
 
 %---------------------------------------------------------------------------%
 
-:- pred mode_id_to_int(mode_id::in, int::out) is det.
+:- pred mode_ctor_to_int(mode_ctor::in, int::out) is det.
 
 %---------------------------------------------------------------------------%
 
@@ -846,8 +846,8 @@ get_arg_insts_2([BoundInst | BoundInsts], ConsId, ArgInsts) :-
 
 %---------------------------------------------------------------------------%
 
-    % In case we later decide to change the representation of mode_ids.
-mode_id_to_int(mode_id(_, X), X).
+    % In case we later decide to change the representation of mode_ctors.
+mode_ctor_to_int(mode_ctor(_, X), X).
 
 %---------------------------------------------------------------------------%
 
@@ -1179,8 +1179,8 @@ report_inconsistent_constrained_inst_vars(WhereDesc, Context, InstVarSet,
         ),
         Pieces = [words("Error: inconsistent constraints on") | VarsPieces]
             ++ [words(WhereDesc), suffix("."), nl],
-        Spec = error_spec(severity_error, phase_term_to_parse_tree,
-            [simple_msg(Context, [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
+            Context, Pieces),
         MaybeSpec = yes(Spec)
     ).
 

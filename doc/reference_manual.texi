@@ -16,7 +16,7 @@
 This file documents the Mercury programming language, version <VERSION>.
 
 Copyright @copyright{} 1995--2012 The University of Melbourne.@*
-Copyright @copyright{} 2013--2019 The Mercury team.
+Copyright @copyright{} 2013--2020 The Mercury team.
 
 Permission is granted to make and distribute verbatim copies of
 this manual provided the copyright notice and this permission notice
@@ -55,7 +55,7 @@ into another language, under the above conditions for modified versions.
 @page
 @vskip 0pt plus 1filll
 Copyright @copyright{} 1995--2012 The University of Melbourne.@*
-Copyright @copyright{} 2013--2019 The Mercury team.
+Copyright @copyright{} 2013--2020 The Mercury team.
 
 Permission is granted to make and distribute verbatim copies of
 this manual provided the copyright notice and this permission notice
@@ -82,7 +82,7 @@ into another language, under the above conditions for modified versions.
 @c                       that hold.
 @menu
 * Introduction::      A brief introduction to Mercury.
-* Syntax::            Mercury's syntax is similar to ISO Prolog.
+* Syntax::            A description of Mercury's syntax.
 * Types::             Mercury has a strong parametric polymorphic type system.
 * Modes::             Modes allow you to specify the direction of data flow.
 * Unique modes::      Unique modes allow you to specify when there is only one
@@ -112,8 +112,8 @@ into another language, under the above conditions for modified versions.
 * Pragmas::           Various compiler directives, used for example to
                       control optimization.
 * Implementation-dependent extensions::
-                      The University of Melbourne Mercury implementation
-                      supports several extensions to the Mercury language.
+                      The Melbourne Mercury implementation supports
+                      several extensions to the Mercury language.
 * Bibliography::      References for further reading.
 @end menu
 
@@ -224,12 +224,7 @@ whitespace is defined to be the following characters:
 @node Tokens
 @section Tokens
 
-Tokens in Mercury are the same as in ISO Prolog.
-The only differences are the @samp{#@var{line}} token,
-which is used as a line number directive (see below)
-and the backquote (@samp{`}) token.
-
-The different tokens are as follows.
+The different tokens in Mercury are as follows.
 Tokens may be separated by whitespace.
 
 @table @emph
@@ -416,19 +411,6 @@ The end of file.
 
 @node Terms
 @section Terms
-
-Syntactically, terms in Mercury are exactly the same as in ISO Prolog,
-except that as extensions we permit higher-order terms
-and the introduction of infix operators
-by the use of grave accents (backquotes), as described below,
-and we support an extended set of builtin operators.
-@xref{Builtin operators}.
-Also, the constructor for list terms in Mercury is @code{[|]/2},
-not @code{./2} as in Prolog.
-
-Note, however, that the meaning of some terms in Mercury
-is different to that in Prolog.
-@xref{Data-terms}.
 
 A term is either a variable or a functor.
 
@@ -1096,6 +1078,13 @@ it unifies a variable with a term that contains that same variable.
 @c that are not @emph{tail}-recursive calls.
 @item @code{suspicious_recursion}
 Disable the generation of warnings about suspicious recursive calls.
+@item @code{no_solution_disjunct}
+Disable the generation of warnings about disjuncts that can have no solution.
+This is usually done to shut up such a warning a multi-mode predicate
+where the disjunct in question is a switch arm in another mode.
+(The difference is that a disjunct that cannot succeed has no meaningful use,
+but a switch arm that cannot succeed does have one:
+a switch may need that arm to make it complete.)
 @end table
 
 The keyword starting this scope may be written
@@ -1671,10 +1660,10 @@ the line number (integer) of the goal in which the literal appears,
 or -1 if it cannot be determined.
 
 @item @samp{$module}
-a string representation of the fully-qualified module name.
+a string representation of the fully qualified module name.
 
 @item @samp{$pred}
-a string containing the fully-qualified predicate or function name and arity.
+a string containing the fully qualified predicate or function name and arity.
 
 @end table
 
@@ -2558,7 +2547,7 @@ except for those defined using the foreign language interface
 However, Mercury implementations are permitted to provide a method
 of processing Mercury programs in which such errors are not reported
 until and unless the predicate or function is actually called.
-(The University of Melbourne Mercury implementation provides this
+(The Melbourne Mercury implementation provides this
 with its @samp{--allow-stubs} option.
 This can be useful during program development,
 since it allows you to execute parts of a program
@@ -2964,7 +2953,7 @@ Mercury's mode system allows users
 to declare names for instantiatedness trees using declarations such as
 
 @example
-:- inst listskel == bound( [] ; [free | listskel] ).
+:- inst listskel == bound([] ; [free | listskel]).
 @end example
 
 This instantiatedness tree describes lists
@@ -2990,15 +2979,30 @@ for @code{bound} instantiatedness trees:
 @example
 :- inst maybeskel
     --->    no
-    ;       yes(ground).
+    ;       yes(free).
 @end example
 
 @noindent
 which is equivalent to writing
 
 @example
-:- inst maybeskel == bound(no ; yes(ground)).
+:- inst maybeskel == bound(no ; yes(free)).
 @end example
+
+You can specify what type (actually what type constructor)
+an inst is intended to be used on
+by adding @code{for}, followed by the name and arity of that type constructor,
+after the name of the inst, like this:
+@example
+:- inst maybeskel for maybe/1
+    --->    no
+    ;       yes(free).
+@end example
+
+@noindent
+This can be useful documentation,
+even though the compiler does not (yet) prevent
+the use of such insts on values of other types.
 
 As execution proceeds, variables may become more instantiated.
 A @dfn{mode mapping} is a mapping
@@ -3021,6 +3025,7 @@ corresponding to the standard notions of inputs and outputs:
 :- mode out == free >> ground.
 @end example
 
+Though we do not recommend this,
 Prolog fans who want to use the symbols @samp{+} and @samp{-}
 can do so by simply defining them using a mode declaration:
 
@@ -3050,7 +3055,7 @@ you would need declarations such as
 :- type operation
      --->   lookup(key, data)
      ;      set(key, data).
-:- inst request
+:- inst request for operation/0
     --->    lookup(ground, free)
     ;       set(ground, ground).
 :- mode create_request == free >> request.
@@ -3061,7 +3066,7 @@ you would need declarations such as
 For example, the following declaration
 
 @example
-:- inst listskel(Inst)
+:- inst listskel(Inst) for list/1
     --->    []
     ;       [Inst | listskel(Inst)].
 @end example
@@ -5105,7 +5110,7 @@ Future versions of the language may allow these forms.
 @menu
 * The module system::
 * An example module::
-* Sub-modules::
+* Submodules::
 * Module initialisation::
 * Module finalisation::
 * Module-local mutable variables::
@@ -5136,12 +5141,12 @@ or definitions of (sub-)modules.
 An @samp{:- implementation.} declaration indicates
 the start of the module's implementation section.
 Any entities declared in this section are local to the module
-(and its sub-modules, if any) and cannot be used by other modules.
+(and its submodules, if any) and cannot be used by other modules.
 The implementation section must contain definitions
 for all abstract data types, abstract instance declarations,
-functions, predicates, and sub-modules exported by the module,
+functions, predicates, and submodules exported by the module,
 as well as for all local types, type class instances, functions,
-predicates, and sub-modules.
+predicates, and submodules.
 The implementation section can be omitted if it is empty.
 
 The module may optionally end
@@ -5158,7 +5163,7 @@ using one or more @samp{:- import_module @var{Modules}}
 or @w{@samp{:- use_module @var{Modules}}} declarations,
 in order to make those declarations visible.
 In both cases, @var{Modules}
-is a comma-separated list of fully-qualified module names.
+is a comma-separated list of fully qualified module names.
 These declarations may occur
 either in the interface or the implementation section.
 If the imported entities are used in the interface section,
@@ -5262,56 +5267,56 @@ get([Elem | Queue], Elem, Queue).
 :- end_module queue.
 @end example
 
-@node Sub-modules
-@section Sub-modules
+@node Submodules
+@section Submodules
 
-As mentioned above, modules may contain sub-modules.
-There are two kinds of sub-modules,
-called nested sub-modules and separate sub-modules;
-the difference is that nested sub-modules
+As mentioned above, modules may contain submodules.
+There are two kinds of submodules,
+called nested submodules and separate submodules;
+the difference is that nested submodules
 are defined in the same source file as the containing module,
-whereas separate sub-modules are defined in separate source files.
-Implementations should support separate compilation of separate sub-modules.
+whereas separate submodules are defined in separate source files.
+Implementations should support separate compilation of separate submodules.
 
-A module may not contain more than one sub-module with the same name.
+A module may not contain more than one submodule with the same name.
 
 @menu
-* Nested sub-modules::
-* Separate sub-modules::
+* Nested submodules::
+* Separate submodules::
 * Visibility rules::
 * Implementation bugs and limitations::
 @end menu
 
-@node Nested sub-modules
-@subsection Nested sub-modules
+@node Nested submodules
+@subsection Nested submodules
 
-Nested sub-modules within a module are delimited by
+Nested submodules within a module are delimited by
 matching @samp{:- module} and @samp{:- end_module} declarations.
-(Note that @samp{:- end_module} for nested sub-modules
+(Note that @samp{:- end_module} for nested submodules
 are mandatory, not optional,
-even if the nested sub-module is the last thing in the source file.
-Also note that the module name in a @samp{:- module} or @samp{:- end_module}
-declaration need not be fully-qualified.)
-The sequence of items thus delimited is known as a sub-module item sequence.
+even if the nested submodule is the last thing in the source file.
+The module name in a @samp{:- module} or @samp{:- end_module}
+declaration for a nested submodule need not be fully qualified.)
+The sequence of items thus delimited is known as a submodule item sequence.
 
-The interface and implementation parts of a nested sub-module
-may be specified in two different sub-module declarations.
-If a sub-module item sequence includes an interface section,
-then it is a declaration of that sub-module;
+The interface and implementation parts of a nested submodule
+may be specified in two different submodule declarations.
+If a submodule item sequence includes an interface section,
+then it is a declaration of that submodule;
 if it includes an implementation section,
-then it is a definition of that sub-module;
+then it is a definition of that submodule;
 and if includes both, then it is both declaration and definition.
 
-It is an error to declare a sub-module twice, or to define it twice.
-It is an error to define a sub-module without declaring it.
+It is an error to declare a submodule twice, or to define it twice.
+It is an error to define a submodule without declaring it.
 As mentioned earlier, it is an error
-to define a sub-module in the interface section of its parent module.
+to define a submodule in the interface section of its parent module.
 
-If a sub-module is declared but not explicitly defined,
+If a submodule is declared but not explicitly defined,
 then there is an implicit definition
-with an empty implementation section for that sub-module.
+with an empty implementation section for that submodule.
 This empty implementation section will result in an error
-if the interface section of a sub-module contains any of the following:
+if the interface section of a submodule contains any of the following:
 
 @itemize @bullet
 @item
@@ -5323,58 +5328,64 @@ of that type, inst, mode or typeclass;
 @item
 an abstract declaration of a typeclass instance; or
 @item
-a (doubly, triply, etc) nested sub-module
+a (doubly, triply, etc) nested submodule
 (which perforce has only an interface section, and no implementation section)
 and which contains any of the above.
 @end itemize
 
-@node Separate sub-modules
-@subsection Separate sub-modules
+@node Separate submodules
+@subsection Separate submodules
 
-Separate sub-modules are declared using
+Separate submodules are declared using
 @samp{:- include_module @var{Modules}} declarations.
 Each @samp{:- include_module} declaration specifies
-a comma-separated list of sub-modules.
+a comma-separated list of submodules.
 
 @example
 :- include_module @var{Module1}, @var{Module2}, @dots{}, @var{ModuleN}.
 @end example
 
-Each of the named sub-modules in an @samp{:- include_module} declaration
+The module names need not be fully qualified.
+
+Each of the named submodules in an @samp{:- include_module} declaration
 must be defined in a separate source file.
 The mapping between module names and source file names
 is implementation-defined.
-(For a module named @samp{foo.bar.baz},
-The University of Melbourne Mercury implementation
-requires the source to be located in a file named
-@file{foo.bar.baz.m}, @file{bar.baz.m}, or @file{baz.m}.)
-The separate source file must contain the declaration (interface)
-and definition (implementation) of the sub-module.
+The Melbourne Mercury implementation requires that
+@itemize
+@item @emph{either} every module must be in a file
+whose name is the fully qualified module name followed by @samp{.m},
+(so a module named e.g. @samp{foo.bar.baz},
+must be in a file named @file{foo.bar.baz.m})
+@item @emph{or} that the programmer tell the implementation
+about which files contain which modules
+using a command such as @samp{mmc -f *.m}.
+(Alternatively, you could replace the @samp{*.m} in that command
+with a list of the file names of all the Mercury modules in the program.)
+@end itemize
+
+The source file of a separate submodule must contain
+the declaration (interface) and definition (implementation) of the submodule.
 It must start with a @samp{:- module} declaration
-which matches that in the @samp{:- include_module} declaration in the parent,
+containing the fully qualified module name,
 followed by the interface and (if necessary) implementation sections,
 and it may optionally end with a @samp{:- end_module} declaration.
-(Note: the module names in the @samp{:- module}, @samp{:- end_module},
-and @w{@samp{:- include_module}} declarations need not be fully-qualified.
-However, if the file name used for a particular module
-does not include all the module qualifiers,
-then the University of Melbourne Mercury implementation
-requires the module name in the @samp{:- module} declaration
-for that module to be fully qualified.)
+(The module name in the @samp{:- end_module} declaration need not be
+fully qualified.)
 
-The semantics of separate sub-modules
-are identical to those of nested sub-modules.
-The procedure to transform a separate sub-module
-into a nested sub-module is as follows:
+The semantics of separate submodules
+are identical to those of nested submodules.
+The procedure to transform a separate submodule
+into a nested submodule is as follows:
 
 @enumerate
 @item
 Replace the @samp{:- include_module @var{submodule}} declaration
-with the interface section of the sub-module
+with the interface section of the submodule
 enclosed within @samp{:- module @var{submodule}}
 and @samp{:- end_module @var{submodule}} declarations.
 @item
-Place the implementation section of the sub-module
+Place the implementation section of the submodule
 enclosed within @samp{:- module @var{submodule}}
 and @samp{:- end_module @var{submodule}} declarations
 in the implementation section of the parent module.
@@ -5410,12 +5421,12 @@ is equivalent to
 
 Any declarations in the parent module,
 including those in the parent module's implementation section,
-are visible in the parent's sub-modules,
-including indirect sub-modules (i.e.@: sub-sub-modules, etc.).
+are visible in the parent's submodules,
+including indirect submodules (i.e.@: sub-submodules, etc.).
 Similarly, declarations in the interfaces of any modules
 imported using an @samp{:- import_module} or a @samp{:- use_module}
 in the parent module
-are visible in the parent's sub-modules, including indirect sub-modules.
+are visible in the parent's submodules, including indirect submodules.
 
 Declarations in a child module are not visible in the parent module,
 or in ``sibling'' modules (other children of the same parent),
@@ -5424,31 +5435,31 @@ unless the child is explicitly imported using
 an @samp{:- import_module} or @samp{:- use_module} declaration.
 It is an error to import a module without importing all of its parent modules.
 
-Note that a sub-module for which
+Note that a submodule for which
 the @samp{:- module} or @samp{:- include_module} declaration
 occurs only in the implementation section of the parent module
 may only be imported or used by its parent module
-or by sub-modules of its parent module.
+or by submodules of its parent module.
 
-Note that as mentioned previously,
+As mentioned previously,
 all @samp{:- import_module} and @samp{:- use_module} declarations
-must use fully-qualified module names.
+must use fully qualified module names.
 
 @node Implementation bugs and limitations
 @subsection Implementation bugs and limitations
 
-The current implementation of sub-modules has a couple of minor limitations.
+The current implementation of submodules has a couple of minor limitations.
 
 @itemize @bullet
 @item
 The compiler sometimes reports spurious errors
-if you define an equivalence type in a sub-module
+if you define an equivalence type in a submodule
 and export it as an abstract type.
 @item
 Using @samp{mmake} to do parallel makes (e.g.@: @samp{mmake --jobs 2})
-doesn't always work correctly if you are using nested sub-modules.
-(The work-around is to use separate sub-modules instead of nested sub-modules,
-i.e.@: to put the sub-modules in separate source files.)
+doesn't always work correctly if you are using nested submodules.
+(The work-around is to use separate submodules instead of nested submodules,
+i.e.@: to put the submodules in separate source files.)
 @end itemize
 
 @node Module initialisation
@@ -5479,7 +5490,7 @@ is to ensure that @samp{@var{initpredname}/@var{arity}} is invoked
 before the program's @samp{main/2} predicate.
 Initialisation predicates within a module are executed
 in the order in which they are specified,
-although no order may be assumed between different modules or sub-modules.
+although no order may be assumed between different modules or submodules.
 Initialisation predicates are only invoked
 after any initialisation required by the Mercury standard library.
 
@@ -5520,7 +5531,7 @@ is to ensure that @samp{@var{finalpredname}/@var{arity}} is invoked
 after the program's @samp{main} predicate.
 Finalisation predicates within a module
 are executed in the order in which they are specified,
-although no order may be assumed between different modules or sub-modules.
+although no order may be assumed between different modules or submodules.
 Any finalisation required by the Mercury standard library
 will always occur after any finalisation predicates have been invoked.
 
@@ -5651,7 +5662,7 @@ together with either of the @samp{trailed} or @samp{constant} attributes.
 
 It is an error for a @samp{mutable} directive
 to appear in the interface section of a module.
-The usual visibility rules for sub-modules
+The usual visibility rules for submodules
 apply to the mutable variable access predicates.
 
 For the purposes of determining
@@ -6219,7 +6230,7 @@ or conjunctions of type variables separated by commas.
 
 Each type variable must appear in the parameter list of the typeclass.
 Abstract typeclass declarations must have
-exactly the same functional dependencies as in the implementation.
+exactly the same functional dependencies as their concrete forms.
 
 Mutually recursive functional dependencies are allowed,
 so the following examples are legal:
@@ -6650,18 +6661,15 @@ For example:
     --->    some [T] (s(T) => showable(T)).
 :- type list_of_showable == list(showable).
 
-% Here's an arbitrary example involving multiple
-% type variables and multiple constraints.
+% Here is an arbitrary example involving multiple type variables
+% and multiple constraints.
 :- typeclass foo(T1, T2) where [ /* @dots{} */ ].
 :- type bar(T)
     --->    f1
     ;       f2(T)
-    ;       some [T]
-            f4(T)
-    ;       some [T1, T2]
-            (f4(T1, T2, T) => showable(T1), showable(T2))
-    ;       some [T1, T2]
-            (f5(list(T1), T2) => fooable(T1, list(T2))).
+    ;       some [T1] f3(T1)
+    ;       some [T1, T2] f4(T1, T2, T) => (showable(T1), showable(T2))
+    ;       some [T1, T2] f5(list(T1), T2) => fooable(T1, T2).
 @end example
 
 Construction and deconstruction of existentially quantified data types
@@ -6719,6 +6727,54 @@ to the values in such a list.
 process_list(nil) = "".
 process_list(cons(Head, Tail)) = [show(Head) | process_list(Tail)].
 @end example
+
+@noindent
+There are some restrictions on the forms that
+existentially typed data constructors can take.
+
+One restriction is that no type variable may be quantified
+both universally, by being listed as an argument of the type constructor,
+and existentially, by being listed in the existential type quantifier
+before the data constructor.
+The type @samp{t12} violates this restriction:
+
+@example
+:- type t12(T)
+    --->    f1(T)
+    ;       some [T] f2(T).
+@end example
+
+@noindent
+The reason for the restriction is simple:
+without it, how can one decide whether
+the argument of @samp{f2} is universally or existentially quantified?
+
+The other restriction is that every existentially quantified type variable
+must occur
+@itemize
+@item either in one of the argument types of the data constructor,
+@item or in one of the type class constraints on the data constructor,
+in the range of a functional dependency.
+@end itemize
+
+@noindent
+This means that the type @samp{t3} in
+@example
+:- type t3
+    --->    some [T1, T2] f5(T1) => xable(T1, T2).
+@end example
+@noindent
+violates this restriction
+@emph{unless} the type class @samp{xable} has a functional dependency
+that determines the type bound to its second argument
+from the type bound to its first.
+
+The reason for this restriction is that
+the identity of the type bound to the existential type variable
+must somehow be decided at runtime.
+It can either be given by the type of an argument,
+or determined through a functional dependency
+from the types bound to one or more other existential type variables.
 
 @node Some idioms using existentially quantified types
 @section Some idioms using existentially quantified types
@@ -7111,7 +7167,7 @@ under the strict commutative semantics
 then you can be guaranteed that it will work correctly
 on every implementation, under every possible implementation-defined semantics.
 
-The University of Melbourne Mercury implementation offers
+The Melbourne Mercury implementation offers
 eight different semantics,
 which can be selected with different combinations
 of the @samp{--no-reorder-conj}, @samp{--no-reorder-disj},
@@ -7363,8 +7419,7 @@ then the Mercury implementation
 must not invoke the code concurrently from multiple threads.
 If the Mercury implementation does use multithreading,
 then it must take appropriate steps to prevent this.
-(The multithreaded version
-of the University of Melbourne Mercury implementation
+(The multithreaded version of the Melbourne Mercury implementation
 protects @samp{not_thread_safe} code using a mutex:
 C code that is not thread-safe has code inserted around it
 to obtain and release a mutex.
@@ -8614,7 +8669,7 @@ The set of other languages supported is implementation-defined.
 A suitable compiler or assembler for the foreign language
 must be available on the system.
 
-The University of Melbourne Mercury implementation supports
+The Melbourne Mercury implementation supports
 interfacing with the following languages:
 
 @table @asis
@@ -9077,7 +9132,7 @@ to link with object files or libraries that were produced by compiling C code.
 The exact mechanism for linking with C object files
 is implementation-dependent.
 The following text describes how it is done
-for the University of Melbourne Mercury implementation.
+for the Melbourne Mercury implementation.
 
 To link an existing object file or archive of object files
 into your Mercury code,
@@ -10774,7 +10829,7 @@ when the called type class methods are simple enough to be inlined.
 @node Implementation specific details
 @subsection Implementation specific details
 
-The University of Melbourne Mercury compiler
+The Melbourne Mercury compiler
 performs user-requested type specializations
 when invoked with @samp{--user-guided-type-specialization},
 which is enabled at optimization level @samp{-O2} or higher.
@@ -10932,8 +10987,8 @@ as in the above example.
 @node Implementation-dependent extensions
 @chapter Implementation-dependent extensions
 
-The University of Melbourne Mercury implementation
-supports the following extensions to the Mercury language:
+The Melbourne Mercury implementation supports
+the following extensions to the Mercury language:
 
 @menu
 * Fact tables::                 Support for very large tables of facts.
@@ -11510,7 +11565,7 @@ then the compiler will quit with an error message.
 @c @node Reserved tag
 @c @section Reserved tag
 @c
-@c The University of Melbourne Mercury implementation includes some fairly
+@c The Melbourne Mercury implementation includes some fairly
 @c low-level support for implementing Herbrand constraint solvers
 @c (i.e. Prolog-style logic variables).
 @c
@@ -11667,8 +11722,8 @@ then the compiler will quit with an error message.
 @node Feature sets
 @section Feature sets
 
-The University of Melbourne Mercury implementation
-supports a number of optional compilation model features,
+The Melbourne Mercury implementation supports
+a number of optional compilation model features,
 such as @ref{Trailing} or @ref{Tabled evaluation}.
 Feature sets allow the programmer to assert that a module requires
 the presence of one or more optional features in the compilation model.
@@ -11740,7 +11795,7 @@ in the implementation section of a module.
 
 A @samp{pragma require_feature_set} affects
 only the module in which it occurs;
-in particular it does not affect any sub-modules.
+in particular it does not affect any submodules.
 
 If a module contains multiple @samp{pragma require_feature_set} declarations,
 then the implementation should emit an error
@@ -11752,7 +11807,7 @@ that is not supported by the compilation model.
 
 In certain compilation grades
 (see the ``Compilation model options'' section of the Mercury User's Guide),
-the University of Melbourne Mercury implementation supports trailing.
+the Melbourne Mercury implementation supports trailing.
 Trailing is a means of having side-effects,
 such as destructive updates to data structures, undone on backtracking.
 The basic idea is that during forward execution,

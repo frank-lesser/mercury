@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1994-1998,2001-2008,2010, 2012 The University of Melbourne.
-% Copyright (C) 2013-2016, 2018 The Mercury team.
+% Copyright (C) 2013-2016, 2018-2020 The Mercury team.
 % This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
@@ -74,7 +74,7 @@
 :- func (float::in) * (float::in) = (float::uo) is det.
 
     % Division.
-    % Throws a `math.domain_error' exception if the right operand is zero.
+    % Throws a `domain_error' exception if the right operand is zero.
     % See the comments at the top of math.m to find out how to disable
     % this check.
     %
@@ -217,13 +217,14 @@
     % pow(Base, Exponent) returns Base raised to the power Exponent.
     % Fewer domain restrictions than math.pow: works for negative Base,
     % and pow(B, 0) = 1.0 for all B, even B=0.0.
-    % Only pow(0, <negative>) throws a `math.domain_error' exception.
+    % Only pow(0, <negative>) throws a `domain_error' exception.
     %
 :- func pow(float, int) = float.
 
     % Compute a non-negative integer hash value for a float.
     %
 :- func hash(float) = int.
+:- pred hash(float::in, int::out) is det.
 
 %---------------------------------------------------------------------------%
 %
@@ -345,7 +346,6 @@
 
 :- import_module exception.
 :- import_module int.
-:- import_module math.
 :- import_module string.
 
 %
@@ -369,7 +369,7 @@
 :- pragma inline('/'/2).
 X / Y = Z :-
     ( if float_domain_checks, Y = 0.0 then
-        throw(math.domain_error("float.'/': division by zero"))
+        throw(domain_error("float.'/': division by zero"))
     else
         Z = unchecked_quotient(X, Y)
     ).
@@ -715,7 +715,7 @@ X / Y = Z :-
     [will_not_call_mercury, promise_pure, thread_safe,
         does_not_affect_liveness],
 "
-    Ceil = (MR_Integer) ceil(X);
+    Ceil = (MR_Integer) ML_FLOAT_CEIL(X);
 ").
 :- pragma foreign_proc("C#",
     ceiling_to_int(X::in) = (Ceil::out),
@@ -754,7 +754,7 @@ X / Y = Z :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Floor = (MR_Integer) floor(X);
+    Floor = (MR_Integer) ML_FLOAT_FLOOR(X);
 ").
 :- pragma foreign_proc("C#",
     floor_to_int(X::in) = (Floor::out),
@@ -793,7 +793,7 @@ X / Y = Z :-
     [will_not_call_mercury, promise_pure, thread_safe, will_not_modify_trail,
         does_not_affect_liveness],
 "
-    Round = (MR_Integer) floor(X + 0.5);
+    Round = (MR_Integer) ML_FLOAT_FLOOR(X + (MR_Float)0.5);
 ").
 :- pragma foreign_proc("C#",
     round_to_int(X::in) = (Round::out),
@@ -887,7 +887,7 @@ pow(Base, Exp) = Ans :-
         Ans = multiply_by_pow(1.0, Base, Exp)
     else
         ( if float_domain_checks, Base = 0.0 then
-            throw(math.domain_error("float.pow: zero base"))
+            throw(domain_error("float.pow: zero base"))
         else
             Ans = unchecked_quotient(1.0,
                 multiply_by_pow(1.0, Base, -Exp))
@@ -972,6 +972,9 @@ multiply_by_pow(Scale0, Base, Exp) = Result :-
 "
     H = erlang:phash2(F)
 ").
+
+hash(F, H) :-
+    H = hash(F).
 
 %---------------------------------------------------------------------------%
 
@@ -1076,7 +1079,7 @@ is_zero(0.0).
 "
     #define ML_FLOAT_RADIX  FLT_RADIX   // There is no DBL_RADIX.
 
-    #if defined MR_USE_SINGLE_PREC_FLOAT
+    #if defined(MR_USE_SINGLE_PREC_FLOAT)
         #define ML_FLOAT_MAX        FLT_MAX
         #define ML_FLOAT_MIN        FLT_MIN
         #define ML_FLOAT_EPSILON    FLT_EPSILON
@@ -1090,6 +1093,14 @@ is_zero(0.0).
         #define ML_FLOAT_MANT_DIG   DBL_MANT_DIG
         #define ML_FLOAT_MIN_EXP    DBL_MIN_EXP
         #define ML_FLOAT_MAX_EXP    DBL_MAX_EXP
+    #endif
+
+    #if defined(MR_USE_SINGLE_PREC_FLOAT)
+        #define ML_FLOAT_FLOOR(X)   floorf(X)
+        #define ML_FLOAT_CEIL(X)    ceilf(X)
+    #else
+        #define ML_FLOAT_FLOOR(X)   floor(X)
+        #define ML_FLOAT_CEIL(X)    ceil(X)
     #endif
 ").
 

@@ -110,8 +110,11 @@
             )
     ;       mqec_foreign_enum(prog_context)
     ;       mqec_foreign_export_enum(prog_context)
-    ;       mqec_pragma(prog_context,
-                pragma_type
+    ;       mqec_pragma_decl(prog_context,
+                decl_pragma
+            )
+    ;       mqec_pragma_impl(prog_context,
+                impl_pragma
             )
     ;       mqec_lambda_expr(prog_context)
     ;       mqec_clause_mode_annotation(prog_context)
@@ -168,6 +171,7 @@
 
 :- implementation.
 
+:- import_module parse_tree.item_util.
 :- import_module parse_tree.prog_out.
 :- import_module parse_tree.prog_util.
 
@@ -198,7 +202,7 @@ report_undefined_mq_id(Info, ErrorContext, Id, IdType, ThisModuleName,
         ThisModuleSNA = sym_name_arity(ThisModulesSN, IdArity),
         UndefPieces = [],
         ThisIntPieces = [words("the"), fixed(IdTypeStr),
-            unqual_sym_name_and_arity(ThisModuleSNA),
+            unqual_sym_name_arity(ThisModuleSNA),
             words("is not exported,"),
             words("and thus it may not be used in the interface."), nl]
     else
@@ -211,7 +215,7 @@ report_undefined_mq_id(Info, ErrorContext, Id, IdType, ThisModuleName,
             SNA = sym_name_arity(unqualified(IdBaseName), IdArity)
         ),
         UndefPieces = [words("undefined"), fixed(IdTypeStr),
-            qual_sym_name_and_arity(SNA), suffix("."), nl],
+            qual_sym_name_arity(SNA), suffix("."), nl],
         ThisIntPieces = []
     ),
     (
@@ -296,8 +300,8 @@ report_undefined_mq_id(Info, ErrorContext, Id, IdType, ThisModuleName,
     ),
     AllPieces = InPieces ++ UndefPieces ++ ThisIntPieces ++ OtherIntPieces ++
         QualPieces ++ NonImportedPieces ++ OtherArityPieces,
-    Msg = simple_msg(Context, [always(AllPieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+        Context, AllPieces),
     !:Specs = [Spec | !.Specs].
 
 :- func module_name_matches_some(module_name, list(module_name)) = bool.
@@ -345,7 +349,7 @@ report_ambiguous_match(ErrorContext, Id, IdType,
     Msg = simple_msg(Context,
         [always(MainPieces), always(UnusablePieces),
         verbose_only(verbose_always, VerbosePieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds, [Msg]),
     !:Specs = [Spec | !.Specs].
 
 %---------------------------------------------------------------------------%
@@ -355,8 +359,8 @@ report_invalid_user_inst(_SymName, _Insts, ErrorContext, !Specs) :-
         ErrorContextPieces),
     Pieces = [words("In")] ++ ErrorContextPieces ++ [suffix(":"), nl,
         words("error: variable used as inst constructor."), nl],
-    Msg = simple_msg(Context, [always(Pieces)]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
 %---------------------------------------------------------------------------%
@@ -364,8 +368,7 @@ report_invalid_user_inst(_SymName, _Insts, ErrorContext, !Specs) :-
 warn_unused_interface_import(ParentModuleName,
         ImportedModuleName - ImportContexts, !Specs) :-
     % UNUSED_IMPORT Harmonize the operation of this predicate with
-    % the operation of maybe_generate_redundant_avail_warnings
-    % in unused_imports.m.
+    % the operation of generate_unused_warning in unused_imports.m.
     ImportContexts = one_or_more(HeadContext, TailContexts),
     HeadPieces =
         [words("In module"), qual_sym_name(ParentModuleName), suffix(":"), nl,
@@ -376,8 +379,12 @@ warn_unused_interface_import(ParentModuleName,
     % TailContexts is almost always [], we add TailMsgs just in case it isn't.
     list.map(warn_redundant_import_context(ImportedModuleName),
         TailContexts, TailMsgs),
-    Spec = error_spec(severity_warning, phase_parse_tree_to_hlds,
-        [HeadMsg | TailMsgs]),
+    % If the warn_unused_imports option is set to yes, then
+    % unused_imports.m will also generate a warning for this import,
+    % and it will be more precise than we can do here, because it will know
+    % whether the imported module is used in the *implementation* section.
+    Spec = conditional_spec($pred, warn_unused_imports, no,
+        severity_warning, phase_parse_tree_to_hlds, [HeadMsg | TailMsgs]),
     !:Specs = [Spec | !.Specs].
 
 :- pred warn_redundant_import_context(module_name::in, prog_context::in,
@@ -400,7 +407,7 @@ mq_constraint_error_context_to_pieces(ConstraintErrorContext,
         ConstraintErrorContext = mqcec_class_defn(Context, ClassName, Arity),
         Start = "in",
         Pieces = [words("definition of type class"),
-            qual_sym_name_and_arity(sym_name_arity(ClassName, Arity))]
+            qual_sym_name_arity(sym_name_arity(ClassName, Arity))]
     ;
         ConstraintErrorContext = mqcec_class_method(Context,
             PredOrFunc, MethodName),
@@ -413,7 +420,7 @@ mq_constraint_error_context_to_pieces(ConstraintErrorContext,
         Start = "on",
         list.length(ArgTypes, NumArgTypes),
         Pieces = [words("instance definition for"),
-            qual_sym_name_and_arity(sym_name_arity(ClassName, NumArgTypes))]
+            qual_sym_name_arity(sym_name_arity(ClassName, NumArgTypes))]
     ;
         ConstraintErrorContext = mqcec_type_defn_constructor(Context,
             TypeCtor, FunctionSymbol),
@@ -421,7 +428,7 @@ mq_constraint_error_context_to_pieces(ConstraintErrorContext,
         TypeCtor = type_ctor(TypeCtorSymName, TypeCtorArity),
         Pieces = [words("function symbol"), quote(FunctionSymbol),
             words("for type constructor"),
-            unqual_sym_name_and_arity(
+            unqual_sym_name_arity(
                 sym_name_arity(TypeCtorSymName, TypeCtorArity))]
     ;
         ConstraintErrorContext = mqcec_pred_decl(Context,
@@ -430,7 +437,7 @@ mq_constraint_error_context_to_pieces(ConstraintErrorContext,
         adjust_func_arity(PredOrFunc, OrigArity, Arity),
         Pieces = [words("declaration of "),
             fixed(pred_or_func_to_full_str(PredOrFunc)),
-            unqual_sym_name_and_arity(sym_name_arity(SymName, Arity))]
+            unqual_sym_name_arity(sym_name_arity(SymName, Arity))]
     ).
 
 :- pred mq_error_context_to_pieces(mq_error_context::in,
@@ -470,7 +477,7 @@ mq_error_context_to_pieces(ErrorContext, Context, ShouldUnqualId, Pieces) :-
         mq_constraint_error_context_to_pieces(ConstraintErrorContext,
             Context, Start, ConstraintErrorContextPieces),
         Pieces = [words("type class constraint for "),
-            unqual_sym_name_and_arity(sym_name_arity(ClassName, Arity)),
+            unqual_sym_name_arity(sym_name_arity(ClassName, Arity)),
             words(Start) | ConstraintErrorContextPieces]
     ;
         ErrorContext = mqec_mode(Context, Id),
@@ -487,7 +494,7 @@ mq_error_context_to_pieces(ErrorContext, Context, ShouldUnqualId, Pieces) :-
         adjust_func_arity(PredOrFunc, OrigArity, Arity),
         Pieces = [words("declaration of "),
             fixed(pred_or_func_to_full_str(PredOrFunc)),
-            unqual_sym_name_and_arity(sym_name_arity(SymName, Arity))]
+            unqual_sym_name_arity(sym_name_arity(SymName, Arity))]
     ;
         ErrorContext = mqec_pred_or_func_mode(Context, MaybePredOrFunc, Id),
         ShouldUnqualId = no,
@@ -497,11 +504,11 @@ mq_error_context_to_pieces(ErrorContext, Context, ShouldUnqualId, Pieces) :-
             adjust_func_arity(PredOrFunc, OrigArity, Arity),
             Pieces = [words("mode declaration for"),
                 fixed(pred_or_func_to_full_str(PredOrFunc)),
-                unqual_sym_name_and_arity(sym_name_arity(SymName, Arity))]
+                unqual_sym_name_arity(sym_name_arity(SymName, Arity))]
         ;
             MaybePredOrFunc = no,
             Pieces = [words("mode declaration for"),
-                unqual_sym_name_and_arity(sym_name_arity(SymName, OrigArity))]
+                unqual_sym_name_arity(sym_name_arity(SymName, OrigArity))]
         )
     ;
         ErrorContext = mqec_lambda_expr(Context),
@@ -520,9 +527,13 @@ mq_error_context_to_pieces(ErrorContext, Context, ShouldUnqualId, Pieces) :-
         ShouldUnqualId = no,
         Pieces = [pragma_decl("foreign_export_enum"), words("declaration")]
     ;
-        ErrorContext = mqec_pragma(Context, Pragma),
+        ErrorContext = mqec_pragma_decl(Context, DeclPragma),
         ShouldUnqualId = no,
-        Pieces = pragma_desc_pieces(Pragma)
+        Pieces = decl_pragma_desc_pieces(DeclPragma)
+    ;
+        ErrorContext = mqec_pragma_impl(Context, ImplPragma),
+        ShouldUnqualId = no,
+        Pieces = impl_pragma_desc_pieces(ImplPragma)
     ;
         ErrorContext = mqec_type_qual(Context),
         ShouldUnqualId = no,
@@ -567,11 +578,6 @@ id_types_to_string(class_id, "typeclasses").
 
 %---------------------------------------------------------------------------%
 
-:- func id_to_sym_name_and_arity(mq_id) = sym_name_and_arity.
-
-id_to_sym_name_and_arity(mq_id(SymName, Arity)) =
-    sym_name_arity(SymName, Arity).
-
 :- func wrap_module_name(module_name) = format_component.
 
 wrap_module_name(SymName) = qual_sym_name(SymName).
@@ -579,12 +585,12 @@ wrap_module_name(SymName) = qual_sym_name(SymName).
 :- func wrap_type_ctor(type_ctor) = format_component.
 
 wrap_type_ctor(type_ctor(SymName, Arity)) =
-    qual_sym_name_and_arity(sym_name_arity(SymName, Arity)).
+    qual_sym_name_arity(sym_name_arity(SymName, Arity)).
 
 :- func wrap_id(mq_id) = format_component.
 
 wrap_id(mq_id(SymName, Arity)) =
-    qual_sym_name_and_arity(sym_name_arity(SymName, Arity)).
+    qual_sym_name_arity(sym_name_arity(SymName, Arity)).
 
 %---------------------------------------------------------------------------%
 :- end_module parse_tree.module_qual.qual_errors.

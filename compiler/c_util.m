@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1999-2007, 2009-2012 The University of Melbourne.
-% Copyright (C) 2013-2018 The Mercury team.
+% Copyright (C) 2013-2020 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %---------------------------------------------------------------------------%
@@ -273,27 +273,6 @@
     %
 :- pred unary_prefix_op(unary_op::in, string::out) is det.
 
-    % XXX is this type really necessary?  binop_category_string/3's only caller
-    % only cares about if the operation is a 'float_arith_binop' or not.
-    %
-:- type binop_category
-    --->    array_index_binop
-    ;       string_index_binop
-    ;       pointer_compare_binop
-    ;       compound_compare_binop
-    ;       offset_string_compare_binop(int)
-    ;       general_string_compare_binop
-    ;       string_compare_binop
-    ;       unsigned_compare_binop
-    ;       float_compare_binop
-    ;       float_arith_binop
-    ;       int_or_bool_binary_infix_binop
-    ;       int_macro_binop
-    ;       float_macro_binop.
-
-:- pred binop_category_string(binary_op::in, binop_category::out, string::out)
-    is det.
-
 %---------------------------------------------------------------------------%
 
     % output_c_file_intro_and_grade(SourceFileName, Version, Fullarch, !IO):
@@ -325,12 +304,24 @@
 :- pred is_valid_c_identifier(string::in) is semidet.
 
 %---------------------------------------------------------------------------%
+%
+% Utility predicate to shorten overlong identifiers.
+%
+
+    % Return hexadecimal encoded hash of a string.
+    % The resulting string has a length of 8 characters and will be
+    % consistent across different compiler backends and word sizes.
+    %
+:- func hex_hash32(string) = string.
+
+%---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
 
 :- implementation.
 
 :- import_module bool.
 :- import_module int.
+:- import_module int32.
 :- import_module int64.
 :- import_module integer.
 :- import_module require.
@@ -885,9 +876,13 @@ output_uint16_expr_cur_stream(N, !IO) :-
     output_uint16_expr(Stream, N, !IO).
 
 output_int32_expr(Stream, N, !IO) :-
-    io.write_string(Stream, "INT32_C(", !IO),
-    io.write_int32(Stream, N, !IO),
-    io.write_string(Stream, ")", !IO).
+    ( if N = min_int32 then
+        io.write_string("INT32_MIN", !IO)
+    else
+        io.write_string(Stream, "INT32_C(", !IO),
+        io.write_int32(Stream, N, !IO),
+        io.write_string(Stream, ")", !IO)
+    ).
 
 output_int32_expr_cur_stream(N, !IO) :-
     io.output_stream(Stream, !IO),
@@ -981,72 +976,6 @@ unary_prefix_op(dword_int64_get_word1,  "MR_dword_int64_get_word1").
 unary_prefix_op(dword_uint64_get_word0, "MR_dword_uint64_get_word0").
 unary_prefix_op(dword_uint64_get_word1, "MR_dword_uint64_get_word1").
 
-% The operator strings for array_index, compound_lt and compound_eq are
-% dummies; they should never be used.
-
-binop_category_string(array_index(_), array_index_binop, "ARRAY_INDEX").
-binop_category_string(string_unsafe_index_code_unit, string_index_binop,
-    "STRING_UNSAFE_INDEX_CODE_UNIT").
-
-binop_category_string(pointer_equal_conservative, pointer_compare_binop, "==").
-
-binop_category_string(compound_lt, compound_compare_binop, "COMPOUND_LT").
-binop_category_string(compound_eq, compound_compare_binop, "COMPOUND_EQ").
-
-binop_category_string(str_eq, string_compare_binop, "==").
-binop_category_string(str_ne, string_compare_binop, "!=").
-binop_category_string(str_le, string_compare_binop, "<=").
-binop_category_string(str_ge, string_compare_binop, ">=").
-binop_category_string(str_lt, string_compare_binop, "<").
-binop_category_string(str_gt, string_compare_binop, ">").
-
-binop_category_string(unsigned_le, unsigned_compare_binop, "<=").
-
-binop_category_string(float_plus, float_arith_binop, "+").
-binop_category_string(float_minus, float_arith_binop, "-").
-binop_category_string(float_times, float_arith_binop, "*").
-binop_category_string(float_divide, float_arith_binop, "/").
-
-binop_category_string(float_eq, float_compare_binop, "==").
-binop_category_string(float_ne, float_compare_binop, "!=").
-binop_category_string(float_le, float_compare_binop, "<=").
-binop_category_string(float_ge, float_compare_binop, ">=").
-binop_category_string(float_lt, float_compare_binop, "<").
-binop_category_string(float_gt, float_compare_binop, ">").
-
-binop_category_string(int_add(_), int_or_bool_binary_infix_binop, "+").
-binop_category_string(int_sub(_), int_or_bool_binary_infix_binop, "-").
-binop_category_string(int_mul(_), int_or_bool_binary_infix_binop, "*").
-binop_category_string(int_div(_), int_or_bool_binary_infix_binop, "/").
-binop_category_string(unchecked_left_shift(_),  int_or_bool_binary_infix_binop,
-    "<<").
-binop_category_string(unchecked_right_shift(_), int_or_bool_binary_infix_binop,
-    ">>").
-binop_category_string(bitwise_and(_), int_or_bool_binary_infix_binop, "&").
-binop_category_string(bitwise_or(_), int_or_bool_binary_infix_binop, "|").
-binop_category_string(bitwise_xor(_), int_or_bool_binary_infix_binop, "^").
-binop_category_string(int_mod(_), int_or_bool_binary_infix_binop, "%").
-binop_category_string(eq(_), int_or_bool_binary_infix_binop, "==").
-binop_category_string(ne(_), int_or_bool_binary_infix_binop, "!=").
-binop_category_string(logical_and, int_or_bool_binary_infix_binop, "&&").
-binop_category_string(logical_or, int_or_bool_binary_infix_binop, "||").
-binop_category_string(int_lt(_), int_or_bool_binary_infix_binop, "<").
-binop_category_string(int_gt(_), int_or_bool_binary_infix_binop, ">").
-binop_category_string(int_le(_), int_or_bool_binary_infix_binop, "<=").
-binop_category_string(int_ge(_), int_or_bool_binary_infix_binop, ">=").
-
-binop_category_string(str_cmp, general_string_compare_binop, "MR_strcmp").
-binop_category_string(offset_str_eq(N), offset_string_compare_binop(N),
-    "MR_offset_streq").
-binop_category_string(body, int_macro_binop, "MR_body").
-
-binop_category_string(float_from_dword, float_macro_binop,
-    "MR_float_from_dword").
-binop_category_string(int64_from_dword, int_macro_binop,
-    "MR_int64_from_dword").
-binop_category_string(uint64_from_dword, int_macro_binop,
-    "MR_uint64_from_dword").
-
 %---------------------------------------------------------------------------%
 
 output_c_file_intro_and_grade(Globals, SourceFileName, Version, Fullarch,
@@ -1113,6 +1042,16 @@ is_valid_c_identifier(S) :-
     string.index(S, 0, Start),
     char.is_alpha_or_underscore(Start),
     string.is_all_alnum_or_underscore(S).
+
+%---------------------------------------------------------------------------%
+
+hex_hash32(S0) = S :-
+    Hash = string.hash(S0),
+    % Mask off the lower 32 bits without using 0xffffffff in the generated
+    % target code, to avoid warnings from the C compiler.
+    Hi = (Hash >> 16) /\ 0xffff,
+    Lo = Hash /\ 0xffff,
+    S = string.format("%04x%04x", [i(Hi), i(Lo)]).
 
 %---------------------------------------------------------------------------%
 :- end_module backend_libs.c_util.

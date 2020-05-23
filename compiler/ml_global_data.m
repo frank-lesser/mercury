@@ -546,8 +546,8 @@ ml_specialize_generic_array_binop(Op, IsFloat) :-
         ; Op = int_mul(_)
         ; Op = int_div(_)
         ; Op = int_mod(_)
-        ; Op = unchecked_left_shift(_)
-        ; Op = unchecked_right_shift(_)
+        ; Op = unchecked_left_shift(_, _)
+        ; Op = unchecked_right_shift(_, _)
         ; Op = bitwise_and(_)
         ; Op = bitwise_or(_)
         ; Op = bitwise_xor(_)
@@ -567,6 +567,7 @@ ml_specialize_generic_array_binop(Op, IsFloat) :-
         ; Op = int_gt(_)
         ; Op = int_le(_)
         ; Op = int_ge(_)
+        ; Op = unsigned_lt
         ; Op = unsigned_le
         ; Op = float_eq
         ; Op = float_ne
@@ -585,10 +586,10 @@ ml_specialize_generic_array_binop(Op, IsFloat) :-
         ),
         IsFloat = no
     ;
-        ( Op = float_plus
-        ; Op = float_minus
-        ; Op = float_times
-        ; Op = float_divide
+        ( Op = float_add
+        ; Op = float_sub
+        ; Op = float_mul
+        ; Op = float_div
         ; Op = float_from_dword
         ),
         IsFloat = yes

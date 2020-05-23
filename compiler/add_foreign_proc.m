@@ -54,6 +54,7 @@
 :- import_module map.
 :- import_module pair.
 :- import_module require.
+:- import_module string.
 
 %-----------------------------------------------------------------------------%
 
@@ -62,16 +63,16 @@ add_pragma_foreign_proc(FPInfo, PredStatus, Context, MaybeItemNumber,
     FPInfo = pragma_info_foreign_proc(Attributes0, PredName, PredOrFunc,
         PVars, ProgVarSet, _InstVarset, PragmaImpl),
     list.length(PVars, Arity),
-    SimpleCallId = simple_call_id(PredOrFunc, PredName, Arity),
+    PFSymNameArity = pf_sym_name_arity(PredOrFunc, PredName, Arity),
 
     module_info_get_globals(!.ModuleInfo, Globals),
     globals.lookup_bool_option(Globals, very_verbose, VeryVerbose),
     (
         VeryVerbose = yes,
         trace [io(!IO)] (
-            io.write_string("% Processing `:- pragma foreign_proc' for ", !IO),
-            write_simple_call_id(SimpleCallId, !IO),
-            io.write_string("...\n", !IO)
+            IdStr = pf_sym_name_orig_arity_to_string(PFSymNameArity),
+            io.format("%% Processing `:- pragma foreign_proc' for %s...\n",
+                [s(IdStr)], !IO)
         )
     ;
         VeryVerbose = no
@@ -100,10 +101,10 @@ add_pragma_foreign_proc(FPInfo, PredStatus, Context, MaybeItemNumber,
         % message generated. We continue so that we can try to find more
         % errors.
         AmbiPieces = [words("Error: ambiguous predicate name"),
-            simple_call(SimpleCallId), words("in"),
+            qual_pf_sym_name_orig_arity(PFSymNameArity), words("in"),
             quote("pragma foreign_proc"), suffix("."), nl],
-        AmbiSpec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-            Context, AmbiPieces),
+        AmbiSpec = simplest_spec($pred, severity_error,
+            phase_parse_tree_to_hlds, Context, AmbiPieces),
         !:Specs = [AmbiSpec | !.Specs]
     ),
 
@@ -169,9 +170,9 @@ add_pragma_foreign_proc(FPInfo, PredStatus, Context, MaybeItemNumber,
         then
             Pieces = [words("Error:"), pragma_decl("foreign_proc"),
                 words("declaration for imported"),
-                simple_call(SimpleCallId), suffix("."), nl],
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
+                qual_pf_sym_name_orig_arity(PFSymNameArity), suffix("."), nl],
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         else if
             % Don't add clauses for foreign languages other than the ones
@@ -218,14 +219,15 @@ add_pragma_foreign_proc(FPInfo, PredStatus, Context, MaybeItemNumber,
                     ArgInfoBox),
                 warn_singletons_in_pragma_foreign_proc(!.ModuleInfo,
                     PragmaImpl, PragmaForeignLanguage, ArgInfo, Context,
-                    SimpleCallId, PredId, ProcId, !Specs)
+                    PFSymNameArity, PredId, ProcId, !Specs)
             else
                 Pieces = [words("Error:"),
                     pragma_decl("foreign_proc"), words("declaration"),
                     words("for undeclared mode of"),
-                    simple_call(SimpleCallId), suffix("."), nl],
-                Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                    Context, Pieces),
+                    qual_pf_sym_name_orig_arity(PFSymNameArity),
+                    suffix("."), nl],
+                Spec = simplest_spec($pred, severity_error,
+                    phase_parse_tree_to_hlds, Context, Pieces),
                 !:Specs = [Spec | !.Specs]
             )
         )
@@ -278,8 +280,8 @@ clauses_info_add_pragma_foreign_proc(Purity, Attributes0,
         (
             AllowDefnOfBuiltin = no,
             Pieces = [words("Error: foreign_proc for builtin."), nl],
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         ;
             AllowDefnOfBuiltin = yes
@@ -348,10 +350,10 @@ clauses_info_do_add_pragma_foreign_proc(Purity, Attributes0,
     (
         MultiplyOccurringArgVars = [_ | _],
         adjust_func_arity(PredOrFunc, OrigArity, Arity),
-        SimpleCallId = simple_call_id(PredOrFunc, PredName, OrigArity),
+        PFSymNameArity = pf_sym_name_arity(PredOrFunc, PredName, OrigArity),
         Pieces1 = [words("In"), pragma_decl("foreign_proc"),
-            words("declaration for"), simple_call(SimpleCallId),
-            suffix(":"), nl],
+            words("declaration for"),
+            qual_pf_sym_name_orig_arity(PFSymNameArity), suffix(":"), nl],
         (
             MultiplyOccurringArgVars = [MultiplyOccurringArgVar],
             Pieces2 = [words("error: variable"),
@@ -365,7 +367,7 @@ clauses_info_do_add_pragma_foreign_proc(Purity, Attributes0,
                     MultiplyOccurringArgVars)),
                 words("occur multiple times in the argument list."), nl]
         ),
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces1 ++ Pieces2),
         !:Specs = [Spec | !.Specs]
     ;
@@ -391,13 +393,13 @@ clauses_info_do_add_pragma_foreign_proc(Purity, Attributes0,
                 purity_name(Purity, PurityStr),
                 Pieces = [words("Error: foreign clause for"),
                     p_or_f(PredOrFunc),
-                    unqual_sym_name_and_arity(sym_name_arity(PredName, Arity)),
+                    unqual_sym_name_arity(sym_name_arity(PredName, Arity)),
                     words("has purity"), words(ForeignAttributePurityStr),
                     words("but that"), p_or_f(PredOrFunc),
                     words("has been declared"), words(PurityStr),
                     suffix("."), nl],
-                Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                    Context, Pieces),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_parse_tree_to_hlds, Context, Pieces),
                 !:Specs = [Spec | !.Specs]
             )
         ),
@@ -485,10 +487,10 @@ add_foreign_proc_update_existing_clauses(PredName, Arity, PredOrFunc,
         add_foreign_proc_update_existing_clauses(PredName, Arity, PredOrFunc,
             NewContext, Globals, Target, NewLang, AllProcIds, NewClauseProcId,
             LaterClauses0, LaterClauses, LaterOverridden, !Specs),
-        FirstClause0 = clause(ApplProcIds0, Body, ClauseLang, ClauseContext,
-            StateVarWarnings),
+        FirstClause0 = clause(ApplProcIds0, Body, FirstClauseLang,
+            FirstClauseContext, StateVarWarnings),
         (
-            ClauseLang = impl_lang_mercury,
+            FirstClauseLang = impl_lang_mercury,
             (
                 ApplProcIds0 = all_modes,
                 ProcIds0 = AllProcIds
@@ -512,7 +514,7 @@ add_foreign_proc_update_existing_clauses(PredName, Arity, PredOrFunc,
                     % in some modes, so mark it as being applicable only in the
                     % remaining modes.
                     FirstClause = clause(selected_modes(ProcIds), Body,
-                        ClauseLang, ClauseContext, StateVarWarnings),
+                        FirstClauseLang, FirstClauseContext, StateVarWarnings),
                     Clauses = [FirstClause | LaterClauses]
                 )
             else
@@ -523,7 +525,7 @@ add_foreign_proc_update_existing_clauses(PredName, Arity, PredOrFunc,
             % A Mercury clause can never take precedence over a foreign_proc.
             Overridden = LaterOverridden
         ;
-            ClauseLang = impl_lang_foreign(OldLang),
+            FirstClauseLang = impl_lang_foreign(OldLang),
             (
                 ApplProcIds0 = all_modes,
                 unexpected($pred, "all_modes")
@@ -556,7 +558,8 @@ add_foreign_proc_update_existing_clauses(PredName, Arity, PredOrFunc,
                         %
                         % XXX This should not happen.
                         FirstClause = clause(selected_modes(ProcIds), Body,
-                            ClauseLang, ClauseContext, StateVarWarnings),
+                            FirstClauseLang, FirstClauseContext,
+                            StateVarWarnings),
                         Clauses = [FirstClause | LaterClauses],
                         Overridden = LaterOverridden
                     ),
@@ -582,19 +585,18 @@ add_foreign_proc_update_existing_clauses(PredName, Arity, PredOrFunc,
                     % out foreign_procs in such languages way before we get
                     % here.
                     ( if OldLang = NewLang then
-                        PiecesA = [words("Error: multiple clauses for"),
-                            p_or_f(PredOrFunc),
-                            unqual_sym_name_and_arity(
-                                sym_name_arity(PredName, Arity)),
-                            words("in language"),
-                            words(foreign_language_string(OldLang)),
-                            suffix("."), nl],
-                        PiecesB = [words("The first occurrence was here."),
-                            nl],
+                        SNA = sym_name_arity(PredName, Arity),
+                        OldLangStr = foreign_language_string(OldLang),
+                        PiecesA = [words("Error: duplicate"),
+                            pragma_decl("foreign_proc"), words("declaration"),
+                            words("for this mode of"), p_or_f(PredOrFunc),
+                            unqual_sym_name_arity(SNA),
+                            words("in"), words(OldLangStr), suffix("."), nl],
+                        PiecesB = [words("The first one was here."), nl],
                         MsgA = simplest_msg(NewContext, PiecesA),
-                        MsgB = error_msg(yes(ClauseContext), treat_as_first, 0,
-                            [always(PiecesB)]),
-                        Spec = error_spec(severity_error,
+                        MsgB = error_msg(yes(FirstClauseContext),
+                            treat_as_first, 0, [always(PiecesB)]),
+                        Spec = error_spec($pred, severity_error,
                             phase_parse_tree_to_hlds, [MsgA, MsgB]),
                         !:Specs = [Spec | !.Specs]
                     else

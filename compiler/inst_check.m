@@ -80,6 +80,7 @@
 :- import_module map.
 :- import_module maybe.
 :- import_module multi_map.
+:- import_module one_or_more.
 :- import_module pair.
 :- import_module require.
 :- import_module set.
@@ -90,14 +91,14 @@
 check_insts_have_matching_types(!ModuleInfo, !Specs) :-
     module_info_get_inst_table(!.ModuleInfo, InstTable0),
     inst_table_get_user_insts(InstTable0, UserInstTable0),
-    map.to_sorted_assoc_list(UserInstTable0, InstIdDefnPairs0),
+    map.to_sorted_assoc_list(UserInstTable0, InstCtorDefnPairs0),
     module_info_get_type_table(!.ModuleInfo, TypeTable),
     get_all_type_ctor_defns(TypeTable, TypeCtorsDefns),
     index_visible_types_by_unqualified_functors(TypeCtorsDefns,
         multi_map.init, FunctorsToTypeDefns),
     check_inst_defns_have_matching_types(TypeTable, FunctorsToTypeDefns,
-        InstIdDefnPairs0, InstIdDefnPairs, !Specs),
-    map.from_sorted_assoc_list(InstIdDefnPairs, UserInstTable),
+        InstCtorDefnPairs0, InstCtorDefnPairs, !Specs),
+    map.from_sorted_assoc_list(InstCtorDefnPairs, UserInstTable),
     inst_table_set_user_insts(UserInstTable, InstTable0, InstTable),
     module_info_set_inst_table(InstTable, !ModuleInfo).
 
@@ -208,28 +209,28 @@ constructor_to_functor_name_and_arity(Ctor, FunctorNameAndArity) :-
 
 :- pred check_inst_defns_have_matching_types(type_table::in,
     functors_to_types_map::in,
-    assoc_list(inst_id, hlds_inst_defn)::in,
-    assoc_list(inst_id, hlds_inst_defn)::out,
+    assoc_list(inst_ctor, hlds_inst_defn)::in,
+    assoc_list(inst_ctor, hlds_inst_defn)::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
 check_inst_defns_have_matching_types(_TypeTable, _FunctorsToTypeDefns,
         [], [], !Specs).
 check_inst_defns_have_matching_types(TypeTable, FunctorsToTypeDefns,
-        [InstIdDefnPair0 | InstIdDefnPairs0],
-        [InstIdDefnPair | InstIdDefnPairs], !Specs) :-
-    InstIdDefnPair0 = InstId - InstDefn0,
+        [InstCtorDefnPair0 | InstCtorDefnPairs0],
+        [InstCtorDefnPair | InstCtorDefnPairs], !Specs) :-
+    InstCtorDefnPair0 = InstCtor - InstDefn0,
     check_inst_defn_has_matching_type(TypeTable, FunctorsToTypeDefns,
-        InstId, InstDefn0, InstDefn, !Specs),
-    InstIdDefnPair = InstId - InstDefn,
+        InstCtor, InstDefn0, InstDefn, !Specs),
+    InstCtorDefnPair = InstCtor - InstDefn,
     check_inst_defns_have_matching_types(TypeTable, FunctorsToTypeDefns,
-        InstIdDefnPairs0, InstIdDefnPairs, !Specs).
+        InstCtorDefnPairs0, InstCtorDefnPairs, !Specs).
 
 :- pred check_inst_defn_has_matching_type(type_table::in,
-    functors_to_types_map::in, inst_id::in,
+    functors_to_types_map::in, inst_ctor::in,
     hlds_inst_defn::in, hlds_inst_defn::out,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-check_inst_defn_has_matching_type(TypeTable, FunctorsToTypesMap, InstId,
+check_inst_defn_has_matching_type(TypeTable, FunctorsToTypesMap, InstCtor,
         InstDefn0, InstDefn, !Specs) :-
     InstDefn0 = hlds_inst_defn(InstVarSet, InstParams, InstBody,
         IFTC0, Context, Status),
@@ -338,7 +339,7 @@ check_inst_defn_has_matching_type(TypeTable, FunctorsToTypesMap, InstId,
             ),
             (
                 MaybeForTypeKind = no,
-                maybe_issue_no_such_type_error(InstId, InstDefn0,
+                maybe_issue_no_such_type_error(InstCtor, InstDefn0,
                     ForTypeCtor, !Specs),
                 IFTC = iftc_not_applicable
             ;
@@ -346,7 +347,7 @@ check_inst_defn_has_matching_type(TypeTable, FunctorsToTypesMap, InstId,
                 check_for_type_bound_insts(ForTypeKind, BoundInsts,
                     cord.init, MismatchesCord),
                 Mismatches = cord.list(MismatchesCord),
-                maybe_issue_type_match_error(InstId, InstDefn0,
+                maybe_issue_type_match_error(InstCtor, InstDefn0,
                     ForTypeKind, IFTC, Mismatches, MatchSpecs),
                 !:Specs = MatchSpecs ++ !.Specs
             ),
@@ -364,7 +365,7 @@ check_inst_defn_has_matching_type(TypeTable, FunctorsToTypesMap, InstId,
                 TypeableFunctors = all_typeable_functors,
                 PossibleTypesSet = set.intersect_list(PossibleTypeSets),
                 PossibleTypes = set.to_sorted_list(PossibleTypesSet),
-                maybe_issue_no_matching_types_warning(InstId, InstDefn0,
+                maybe_issue_no_matching_types_warning(InstCtor, InstDefn0,
                     BoundInsts, PossibleTypes, PossibleTypeSets, !Specs),
                 list.map(type_defn_or_builtin_to_type_ctor, PossibleTypes,
                     PossibleTypeCtors),
@@ -887,10 +888,10 @@ find_matching_user_types(FunctorSymName,
 
 %---------------------------------------------------------------------------%
 
-:- pred maybe_issue_no_such_type_error(inst_id::in, hlds_inst_defn::in,
+:- pred maybe_issue_no_such_type_error(inst_ctor::in, hlds_inst_defn::in,
     type_ctor::in, list(error_spec)::in, list(error_spec)::out) is det.
 
-maybe_issue_no_such_type_error(InstId, InstDefn, TypeCtor, !Specs) :-
+maybe_issue_no_such_type_error(InstCtor, InstDefn, TypeCtor, !Specs) :-
     InstStatus = InstDefn ^ inst_status,
     InstDefinedInThisModule = inst_status_defined_in_this_module(InstStatus),
     (
@@ -898,28 +899,28 @@ maybe_issue_no_such_type_error(InstId, InstDefn, TypeCtor, !Specs) :-
     ;
         InstDefinedInThisModule = yes,
         Context = InstDefn ^ inst_context,
-        InstId = inst_id(InstName, InstArity),
+        InstCtor = inst_ctor(InstName, InstArity),
         TypeCtor = type_ctor(TypeCtorName, TypeCtorArity),
         Pieces = [words("Error: inst"),
-            unqual_sym_name_and_arity(sym_name_arity(InstName, InstArity)),
+            unqual_sym_name_arity(sym_name_arity(InstName, InstArity)),
             words("is specified to be for"),
-            qual_sym_name_and_arity(
+            qual_sym_name_arity(
                 sym_name_arity(TypeCtorName, TypeCtorArity)),
             suffix(","),
             words("but that type constructor is not visible here."), nl],
-        Spec = error_spec(severity_error, phase_inst_check,
-            [simple_msg(Context, [always(Pieces)])]),
+        Spec = simplest_spec($pred, severity_error, phase_inst_check,
+            Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ).
 
-:- pred maybe_issue_type_match_error(inst_id::in, hlds_inst_defn::in,
+:- pred maybe_issue_type_match_error(inst_ctor::in, hlds_inst_defn::in,
     for_type_kind::in, inst_for_type_ctor::out, list(cons_mismatch)::in,
     list(error_spec)::out) is det.
 
-maybe_issue_type_match_error(InstId, InstDefn, ForTypeKind, IFTC, Mismatches,
+maybe_issue_type_match_error(InstCtor, InstDefn, ForTypeKind, IFTC, Mismatches,
         !:Specs) :-
     !:Specs = [],
-    InstId = inst_id(InstSymName, InstArity),
+    InstCtor = inst_ctor(InstSymName, InstArity),
     ShortInstSymName = unqualified(unqualify_name(InstSymName)),
     Context = InstDefn ^ inst_context,
     InstStatus = InstDefn ^ inst_status,
@@ -976,14 +977,14 @@ maybe_issue_type_match_error(InstId, InstDefn, ForTypeKind, IFTC, Mismatches,
             not type_is_user_visible(ms_interface, ForTypeDefn)
         then
             VisPieces = [words("Error: inst"),
-                unqual_sym_name_and_arity(
+                unqual_sym_name_arity(
                     sym_name_arity(ShortInstSymName, InstArity)),
                 words("is exported, but the type it is for,"),
-                qual_sym_name_and_arity(
+                qual_sym_name_arity(
                     sym_name_arity(TypeCtorName, TypeCtorArity)),
                 suffix(","), words("is not visible outside this module."), nl],
-            VisSpec = error_spec(severity_error, phase_inst_check,
-                [simple_msg(Context, [always(VisPieces)])]),
+            VisSpec = simplest_spec($pred, severity_error, phase_inst_check,
+                Context, VisPieces),
             !:Specs = [VisSpec | !.Specs]
         else
             true
@@ -1003,10 +1004,10 @@ maybe_issue_type_match_error(InstId, InstDefn, ForTypeKind, IFTC, Mismatches,
         MismatchConsIdPieces =
             component_list_to_pieces("and", MismatchConsIdComponents),
         MismatchPieces = [words("Error: inst"),
-            unqual_sym_name_and_arity(
+            unqual_sym_name_arity(
                 sym_name_arity(ShortInstSymName, InstArity)),
             words("is declared to be for type"),
-            qual_sym_name_and_arity(
+            qual_sym_name_arity(
                 sym_name_arity(TypeCtorName, TypeCtorArity)),
             suffix(","), words("but its top level"),
             words(FuncSymbolPhrase)] ++ MismatchConsIdPieces ++
@@ -1026,9 +1027,8 @@ maybe_issue_type_match_error(InstId, InstDefn, ForTypeKind, IFTC, Mismatches,
                     list.map(project_if_several, NearMisses))
             )
         ),
-        MismatchSpec = error_spec(severity_error, phase_inst_check,
-            [simple_msg(Context,
-                [always(MismatchPieces), always(NearMissPieces)])]),
+        MismatchSpec = simplest_spec($pred, severity_error, phase_inst_check,
+            Context, MismatchPieces ++ NearMissPieces),
         !:Specs = [MismatchSpec | !.Specs]
     ),
     (
@@ -1082,12 +1082,13 @@ project_if_several(near_miss_cons_mismatch(_, IfSeveral)) = IfSeveral.
 
 %---------------------------------------------------------------------------%
 
-:- pred maybe_issue_no_matching_types_warning(inst_id::in, hlds_inst_defn::in,
+:- pred maybe_issue_no_matching_types_warning(
+    inst_ctor::in, hlds_inst_defn::in,
     list(bound_inst)::in, list(type_defn_or_builtin)::in,
     list(set(type_defn_or_builtin))::in,
     list(error_spec)::in, list(error_spec)::out) is det.
 
-maybe_issue_no_matching_types_warning(InstId, InstDefn, BoundInsts,
+maybe_issue_no_matching_types_warning(InstCtor, InstDefn, BoundInsts,
         PossibleTypes, PossibleTypeSets, !Specs) :-
     InstStatus = InstDefn ^ inst_status,
     DefinedInThisModule = inst_status_defined_in_this_module(InstStatus),
@@ -1098,9 +1099,9 @@ maybe_issue_no_matching_types_warning(InstId, InstDefn, BoundInsts,
         (
             PossibleTypes = [],
             Context = InstDefn ^ inst_context,
-            InstId = inst_id(InstName, InstArity),
+            InstCtor = inst_ctor(InstName, InstArity),
             NoMatchPieces = [words("Warning: inst"),
-                unqual_sym_name_and_arity(sym_name_arity(InstName, InstArity)),
+                unqual_sym_name_arity(sym_name_arity(InstName, InstArity)),
                 words("does not match any of the types in scope."), nl],
 
             AllPossibleTypesSet = set.union_list(PossibleTypeSets),
@@ -1113,8 +1114,8 @@ maybe_issue_no_matching_types_warning(InstId, InstDefn, BoundInsts,
                 MismatchPieces),
 
             Pieces = NoMatchPieces ++ MismatchPieces,
-            Spec = error_spec(severity_warning, phase_inst_check,
-                [simple_msg(Context, [always(Pieces)])]),
+            Spec = simplest_spec($pred, severity_warning, phase_inst_check,
+                Context, Pieces),
             !:Specs = [Spec | !.Specs]
         ;
             PossibleTypes = [_ | _],
@@ -1144,13 +1145,13 @@ maybe_issue_no_matching_types_warning(InstId, InstDefn, BoundInsts,
                 true
             else
                 Context = InstDefn ^ inst_context,
-                InstId = inst_id(InstName, InstArity),
+                InstCtor = inst_ctor(InstName, InstArity),
                 (
                     PossibleTypes = [OnePossibleType],
                     OnePossibleTypeStr =
                         type_defn_or_builtin_to_string(OnePossibleType),
                     Pieces = [words("Warning: inst"),
-                        unqual_sym_name_and_arity(
+                        unqual_sym_name_arity(
                             sym_name_arity(InstName, InstArity)),
                         words("is exported, but the one type it matches"),
                         prefix("("), words(OnePossibleTypeStr), suffix(")"),
@@ -1162,14 +1163,14 @@ maybe_issue_no_matching_types_warning(InstId, InstDefn, BoundInsts,
                     PossibleTypesStr =
                         string.join_list(", ", PossibleTypeStrs),
                     Pieces = [words("Warning: inst"),
-                        unqual_sym_name_and_arity(
+                        unqual_sym_name_arity(
                             sym_name_arity(InstName, InstArity)),
                         words("is exported, but none of the types it matches"),
                         prefix("("), words(PossibleTypesStr), suffix(")"),
                         words("are visible from outside this module.")]
                 ),
-                Spec = error_spec(severity_warning, phase_inst_check,
-                    [simple_msg(Context, [always(Pieces)])]),
+                Spec = simplest_spec($pred, severity_warning, phase_inst_check,
+                    Context, Pieces),
                 !:Specs = [Spec | !.Specs]
             )
         )

@@ -233,7 +233,6 @@
 :- import_module mdbcomp.
 :- import_module mdbcomp.prim_data.
 :- import_module mdbcomp.sym_name.
-:- import_module parse_tree.convert_parse_tree.
 :- import_module parse_tree.mercury_to_mercury.
 :- import_module parse_tree.parse_tree_out.
 :- import_module parse_tree.parse_tree_out_info.
@@ -258,6 +257,8 @@
 :- import_module map.
 :- import_module maybe.
 :- import_module multi_map.
+:- import_module one_or_more.
+:- import_module one_or_more_map.
 :- import_module pair.
 :- import_module require.
 :- import_module std_util.
@@ -1388,8 +1389,8 @@ write_opt_file_initial(IntermodInfo, ParseTreePlainOpt, !IO) :-
         some_type_needs_to_be_written(TypeCtorsDefns, no)
     then
         ParseTreePlainOpt = parse_tree_plain_opt(ModuleName, term.context_init,
-            [], [], [], [], [], [], [], [], [], [], [], [], [],
-            [], [], [], [], [], [], [], [])
+            map.init, set.init, [], [], [], [], [], [], [], [], [], [], [], [],
+            [], [], [], [], [], [], [], [], [])
     else
         write_opt_file_initial_body(IntermodInfo, ParseTreePlainOpt, !IO)
     ).
@@ -1421,12 +1422,23 @@ write_opt_file_initial_body(IntermodInfo, ParseTreePlainOpt, !IO) :-
     set.to_sorted_list(WriteDeclPredIdSet, WriteDeclPredIds),
 
     module_info_get_avail_module_map(ModuleInfo, AvailModuleMap),
-    % XXX We could and should reduce AvailModules to the set of modules
+    % XXX CLEANUP We could and should reduce AvailModules to the set of modules
     % that are *actually needed* by the items being written.
-    map.keys(AvailModuleMap, AvailModuleNames),
-    list.foldl(intermod_write_use_module, AvailModuleNames, !IO),
-
-    Uses = list.map(wrap_use, AvailModuleNames),
+    % XXX CLEANUP And even if builtin.m and/or private_builtin.m is needed
+    % by an item, we *still* shouldn't include them, since the importing
+    % module will import and use them respectively anyway.
+    map.keys(AvailModuleMap, UsedModuleNames),
+    list.foldl(intermod_write_use_module, UsedModuleNames, !IO),
+    AddToUseMap =
+        ( pred(MN::in, UM0::in, UM::out) is det :-
+            % We don't have a context for any use_module declaration
+            % of this module (since it may have a import_module declaration
+            % instead), which is why we specify a dummy context.
+            % However, these contexts are used only when the .opt file
+            % is read in, not when it is being generated.
+            one_or_more_map.add(MN, term.dummy_context_init, UM0, UM)
+        ),
+    list.foldl(AddToUseMap, UsedModuleNames, one_or_more_map.init, UseMap),
 
     module_info_get_globals(ModuleInfo, Globals),
     OutInfo0 = init_hlds_out_info(Globals, output_mercury),
@@ -1447,19 +1459,17 @@ write_opt_file_initial_body(IntermodInfo, ParseTreePlainOpt, !IO) :-
     intermod_write_instances(OutInfo, InstanceDefns, Instances, !IO),
     (
         NeedFIMs = do_need_foreign_import_modules,
-        module_info_get_foreign_import_modules(ModuleInfo,
-            ForeignImportModules),
-        FIMSpecs = get_all_fim_specs(ForeignImportModules),
+        module_info_get_c_j_cs_e_fims(ModuleInfo, CJCsEFIMs),
+        FIMSpecs = get_all_fim_specs(CJCsEFIMs),
         ( if set.is_empty(FIMSpecs) then
-            FIMs = []
+            true
         else
             io.nl(!IO),
-            set.fold(mercury_output_fim_spec, FIMSpecs, !IO),
-            FIMs = set.to_sorted_list(set.map(fim_spec_to_item, FIMSpecs))
+            set.fold(mercury_output_fim_spec, FIMSpecs, !IO)
         )
     ;
         NeedFIMs = do_not_need_foreign_import_modules,
-        FIMs = []
+        set.init(FIMSpecs)
     ),
     generate_order_pred_infos(ModuleInfo, WriteDeclPredIds,
         DeclOrderPredInfos),
@@ -1485,13 +1495,19 @@ write_opt_file_initial_body(IntermodInfo, ParseTreePlainOpt, !IO) :-
         PredMarkerPragmasCord1, PredMarkerPragmasCord, !IO),
     PredMarkerPragmas = cord.list(PredMarkerPragmasCord),
     Clauses = [],
+    ForeignProcs = [],
+    % XXX CLEANUP This *may* be a lie, in that some of the predicates we have
+    % written out above *may* have goal_type_promise. However, until
+    % we switch over completely to creating .opt files purely by building up
+    % and then writing out a parse_tree_plain_opt, this shouldn't matter.
+    Promises = [],
 
     module_info_get_name(ModuleInfo, ModuleName),
     ParseTreePlainOpt = parse_tree_plain_opt(ModuleName, term.context_init,
-        Uses, FIMs, TypeDefns, ForeignEnums, InstDefns, ModeDefns,
-        TypeClasses, Instances, PredDecls, ModeDecls,
-        PredMarkerPragmas, TypeSpecPragmas, Clauses,
-        [], [], [], [], [], [], [], []).
+        UseMap, FIMSpecs, TypeDefns, ForeignEnums,
+        InstDefns, ModeDefns, TypeClasses, Instances,
+        PredDecls, ModeDecls, Clauses, ForeignProcs, Promises,
+        PredMarkerPragmas, TypeSpecPragmas, [], [], [], [], [], [], [], []).
 
 :- type maybe_first
     --->    is_not_first
@@ -1720,14 +1736,14 @@ intermod_write_insts(OutInfo, ModuleInfo, InstDefns, !IO) :-
         cord.init, InstDefnsCord, is_first, _, !IO),
     InstDefns = cord.list(InstDefnsCord).
 
-:- pred intermod_write_inst(hlds_out_info::in, module_name::in, inst_id::in,
+:- pred intermod_write_inst(hlds_out_info::in, module_name::in, inst_ctor::in,
     hlds_inst_defn::in,
     cord(item_inst_defn_info)::in, cord(item_inst_defn_info)::out,
     maybe_first::in, maybe_first::out, io::di, io::uo) is det.
 
-intermod_write_inst(OutInfo, ModuleName, InstId, InstDefn,
+intermod_write_inst(OutInfo, ModuleName, InstCtor, InstDefn,
         !InstDefnsCord, !First, !IO) :-
-    InstId = inst_id(SymName, _Arity),
+    InstCtor = inst_ctor(SymName, _Arity),
     InstDefn = hlds_inst_defn(Varset, Args, Inst, IFTC, Context, InstStatus),
     ( if
         SymName = qualified(ModuleName, _),
@@ -1768,14 +1784,14 @@ intermod_write_modes(OutInfo, ModuleInfo, ModeDefns, !IO) :-
         cord.init, ModeDefnsCord, is_first, _, !IO),
     ModeDefns = cord.list(ModeDefnsCord).
 
-:- pred intermod_write_mode(hlds_out_info::in, module_name::in, mode_id::in,
+:- pred intermod_write_mode(hlds_out_info::in, module_name::in, mode_ctor::in,
     hlds_mode_defn::in,
     cord(item_mode_defn_info)::in, cord(item_mode_defn_info)::out,
     maybe_first::in, maybe_first::out, io::di, io::uo) is det.
 
-intermod_write_mode(OutInfo, ModuleName, ModeId, ModeDefn,
+intermod_write_mode(OutInfo, ModuleName, ModeCtor, ModeDefn,
         !ModeDefnsCord, !First, !IO) :-
-    ModeId = mode_id(SymName, _Arity),
+    ModeCtor = mode_ctor(SymName, _Arity),
     ModeDefn = hlds_mode_defn(Varset, Args, hlds_mode_body(Mode), Context,
         ModeStatus),
     ( if
@@ -3422,7 +3438,7 @@ init_intermod_info(ModuleInfo, IntermodInfo) :-
     intermod_info::in, intermod_info::out) is det.
 :- pred intermod_info_set_types(assoc_list(type_ctor, hlds_type_defn)::in,
     intermod_info::in, intermod_info::out) is det.
-%:- pred intermod_info_set_insts(set(inst_id)::in,
+%:- pred intermod_info_set_insts(set(inst_ctor)::in,
 %   intermod_info::in, intermod_info::out) is det.
 :- pred intermod_info_set_need_foreign_import_modules(intermod_info::in,
     intermod_info::out) is det.

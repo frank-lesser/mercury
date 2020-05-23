@@ -57,14 +57,14 @@
     %
 :- pred write_quoted_sym_name(sym_name::in, io::di, io::uo) is det.
 
-    % sym_name_and_arity_to_string(SymName, String):
+    % sym_name_arity_to_string(SymName, String):
     %
     % Convert a symbol name and arity to a "<Name>/<Arity>" string,
     % with module qualifiers separated by the standard Mercury module
     % qualifier operator.
     %
-:- func sym_name_and_arity_to_string(sym_name_and_arity) = string.
-:- pred write_sym_name_and_arity(sym_name_and_arity::in, io::di, io::uo)
+:- func sym_name_arity_to_string(sym_name_arity) = string.
+:- pred write_sym_name_arity(sym_name_arity::in, io::di, io::uo)
     is det.
 
 %-----------------------------------------------------------------------------%
@@ -76,19 +76,11 @@
 
 %-----------------------------------------------------------------------------%
 
-:- pred simple_call_id_to_sym_name_and_arity(simple_call_id::in,
-    sym_name_and_arity::out) is det.
-
-:- func simple_call_id_to_string(simple_call_id) = string.
-:- pred write_simple_call_id(simple_call_id::in, io::di, io::uo) is det.
-
-:- func simple_call_id_to_string(pred_or_func, sym_name_and_arity) = string.
-:- pred write_simple_call_id(pred_or_func::in, sym_name_and_arity::in,
-    io::di, io::uo) is det.
-
-:- func simple_call_id_to_string(pred_or_func, sym_name, arity) = string.
-:- pred write_simple_call_id(pred_or_func::in, sym_name::in, arity::in,
-    io::di, io::uo) is det.
+:- func pf_sym_name_orig_arity_to_string(pf_sym_name_arity) = string.
+:- func pf_sym_name_orig_arity_to_string(pred_or_func, sym_name_arity)
+    = string.
+:- func pf_sym_name_orig_arity_to_string(pred_or_func, sym_name, arity)
+    = string.
 
 %-----------------------------------------------------------------------------%
 
@@ -239,12 +231,12 @@ write_quoted_sym_name(SymName, !IO) :-
     write_sym_name(SymName, !IO),
     io.write_string("'", !IO).
 
-sym_name_and_arity_to_string(sym_name_arity(SymName, Arity)) = String :-
+sym_name_arity_to_string(sym_name_arity(SymName, Arity)) = String :-
     SymNameString = sym_name_to_string(SymName),
     string.int_to_string(Arity, ArityString),
     string.append_list([SymNameString, "/", ArityString], String).
 
-write_sym_name_and_arity(sym_name_arity(Name, Arity), !IO) :-
+write_sym_name_arity(sym_name_arity(Name, Arity), !IO) :-
     write_sym_name(Name, !IO),
     io.write_string("/", !IO),
     io.write_int(Arity, !IO).
@@ -259,67 +251,27 @@ write_module_name(ModuleName, !IO) :-
 
 %-----------------------------------------------------------------------------%
 
-simple_call_id_to_sym_name_and_arity(SimpleCallId, SNA) :-
-    SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
+pf_sym_name_orig_arity_to_string(PFSymNameArity) = Str :-
+    PFSymNameArity = pf_sym_name_arity(PredOrFunc, SymName, Arity),
+    Str = pf_sym_name_orig_arity_to_string(PredOrFunc, SymName, Arity).
+
+pf_sym_name_orig_arity_to_string(PredOrFunc, SNA) = Str :-
+    SNA = sym_name_arity(SymName, Arity),
+    Str = pf_sym_name_orig_arity_to_string(PredOrFunc, SymName, Arity).
+
+pf_sym_name_orig_arity_to_string(PredOrFunc, SymName, Arity) = Str :-
     adjust_func_arity(PredOrFunc, OrigArity, Arity),
-    SNA = sym_name_arity(SymName, OrigArity).
-
-simple_call_id_to_string(simple_call_id(PredOrFunc, SymName, Arity)) =
-    simple_call_id_to_string(PredOrFunc, SymName, Arity).
-
-write_simple_call_id(simple_call_id(PredOrFunc, Name, Arity), !IO) :-
-    Str = simple_call_id_to_string(PredOrFunc, Name, Arity),
-    io.write_string(Str, !IO).
-
-simple_call_id_to_string(PredOrFunc, sym_name_arity(SymName, Arity)) =
-    simple_call_id_to_string(PredOrFunc, SymName, Arity).
-
-write_simple_call_id(PredOrFunc, sym_name_arity(Name, Arity), !IO) :-
-    Str = simple_call_id_to_string(PredOrFunc, Name, Arity),
-    io.write_string(Str, !IO).
-
-simple_call_id_to_string(PredOrFunc, SymName, Arity) = Str :-
-    % XXX When printed, promises are differentiated from predicates or
-    % functions by module name, so the module names `promise',
-    % `promise_exclusive', etc. should be reserved, and their dummy
-    % predicates should have more unusual module names.
-    Name = unqualify_name(SymName),
-    % Is it really a promise?
-    ( if string.prefix(Name, "promise__") then
-        MaybePromise = yes(promise_type_true)
-    else if string.prefix(Name, "promise_exclusive__") then
-        MaybePromise = yes(promise_type_exclusive)
-    else if string.prefix(Name, "promise_exhaustive__") then
-        MaybePromise = yes(promise_type_exhaustive)
-    else if string.prefix(Name, "promise_exclusive_exhaustive__") then
-        MaybePromise = yes(promise_type_exclusive_exhaustive)
-    else
-        MaybePromise = no   % No, it is really a pred or func.
-    ),
-    (
-        MaybePromise = yes(PromiseType),
-        Pieces = [quote(promise_to_string(PromiseType)), words("declaration")]
-    ;
-        MaybePromise = no,
-        SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
-        simple_call_id_to_sym_name_and_arity(SimpleCallId,
-            AdjustedSymNameAndArity),
-        Pieces = [p_or_f(PredOrFunc),
-            qual_sym_name_and_arity(AdjustedSymNameAndArity)]
-    ),
-    Str = error_pieces_to_string(Pieces).
-
-write_simple_call_id(PredOrFunc, SymName, Arity, !IO) :-
-    Str = simple_call_id_to_string(PredOrFunc, SymName, Arity),
-    io.write_string(Str, !IO).
+    Str = pred_or_func_to_string(PredOrFunc) ++ " " ++
+        add_quotes(sym_name_to_string(SymName)) ++ "/" ++
+        string.int_to_string(OrigArity).
 
 %-----------------------------------------------------------------------------%
 
 type_ctor_to_string(type_ctor(Name, Arity)) =
-    prog_out.sym_name_and_arity_to_string(sym_name_arity(Name, Arity)).
+    prog_out.sym_name_arity_to_string(sym_name_arity(Name, Arity)).
 
 write_type_ctor(type_ctor(Name, Arity), !IO) :-
-    prog_out.write_sym_name_and_arity(sym_name_arity(Name, Arity), !IO).
+    prog_out.write_sym_name_arity(sym_name_arity(Name, Arity), !IO).
 
 type_name_to_string(type_ctor(Name, _Arity)) =
     sym_name_to_escaped_string(Name).
@@ -330,7 +282,7 @@ write_type_name(type_ctor(Name, _Arity), !IO) :-
 %-----------------------------------------------------------------------------%
 
 write_class_id(class_id(Name, Arity), !IO) :-
-    prog_out.write_sym_name_and_arity(sym_name_arity(Name, Arity), !IO).
+    prog_out.write_sym_name_arity(sym_name_arity(Name, Arity), !IO).
 
 %-----------------------------------------------------------------------------%
 
@@ -631,17 +583,30 @@ goal_warning_to_string(Warning) = Str :-
     ;
         Warning = goal_warning_suspicious_recursion,
         Str = "suspicious_recursion"
+    ;
+        Warning = goal_warning_no_solution_disjunct,
+        Str = "no_solution_disjunct"
     ).
 
 %-----------------------------------------------------------------------------%
 
 write_string_list([], !IO).
-write_string_list([Name], !IO) :-
-    io.write_string(Name, !IO).
+write_string_list([Name1], !IO) :-
+    io.write_string(Name1, !IO).
 write_string_list([Name1, Name2 | Names], !IO) :-
     io.write_string(Name1, !IO),
     io.write_string(", ", !IO),
-    write_string_list([Name2 | Names], !IO).
+    write_string_list_lag(Name2, Names, !IO).
+
+:- pred write_string_list_lag(string::in, list(string)::in, io::di, io::uo)
+    is det.
+
+write_string_list_lag(Name1, [], !IO) :-
+    io.write_string(Name1, !IO).
+write_string_list_lag(Name1, [Name2 | Names], !IO) :-
+    io.write_string(Name1, !IO),
+    io.write_string(", ", !IO),
+    write_string_list_lag(Name2, Names, !IO).
 
 %-----------------------------------------------------------------------------%
 :- end_module parse_tree.prog_out.

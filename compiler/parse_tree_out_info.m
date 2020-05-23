@@ -77,6 +77,23 @@
     --->    dont_output_line_numbers
     ;       do_output_line_numbers.
 
+    % Are we generating output that has be able to be read back in as
+    % valid Mercury, e.g. when the output goes to a .int* or .*opt file,
+    % or are we generating output only for humans to read?
+    %
+    % XXX We should split output for humans into two: one for developers,
+    % who won't mind, and will often need, variable numbers, and one
+    % for ordinary users, who don't, and shouldn't have to, know about
+    % the existence of variable numbers.
+    %
+    % XXX Since not all combinations of output_lang and var_name_print
+    % make sense, we shouldn't pass values of the output_lang and
+    % var_name_print types next to each other, as we now do in many places.
+    % Instead, each alternative here should *contain* the var_name_print
+    % value that we now pass next to it, but *only* if there is more than one
+    % var_name_print value that makes sense for the value of output_lang.
+    % This would require putting the two types next to each other.
+    %
 :- type output_lang
     --->    output_mercury
     ;       output_debug.
@@ -88,10 +105,9 @@
 
 :- func get_maybe_qualified_item_names(merc_out_info)
     = maybe_qualified_item_names.
-:- func get_output_line_numbers(merc_out_info)
-    = maybe_output_line_numbers.
-:- func get_output_lang(merc_out_info)
-    = output_lang.
+:- func get_output_line_numbers(merc_out_info) = maybe_output_line_numbers.
+:- func get_output_lang(merc_out_info) = output_lang.
+:- func get_human_comma_sep(merc_out_info) = string.
 
 :- pred maybe_output_line_number(merc_out_info::in, prog_context::in,
     io::di, io::uo) is det.
@@ -148,19 +164,31 @@
     --->    merc_out_info(
                 moi_qualify_item_names      :: maybe_qualified_item_names,
                 moi_output_line_numbers     :: maybe_output_line_numbers,
-                moi_output_lang             :: output_lang
+                moi_output_lang             :: output_lang,
+
+                % When writing out a comma in a type_repn, or some other
+                % output that humans may want to look at, what should
+                % we print to separate it from what follows?
+                %
+                % For humans, ",\n    "; for computers, just ", ".
+                moi_human_comma_sep     :: string
             ).
 
 init_debug_merc_out_info = Info :-
     Info = merc_out_info(qualified_item_names, dont_output_line_numbers,
-        output_debug).
+        output_debug, " ").
 
 init_merc_out_info(Globals, MaybeQualifiedItemNames, Lang) = Info :-
     globals.lookup_bool_option(Globals, line_numbers, LineNumbersOpt),
+    globals.lookup_bool_option(Globals, type_repns_for_humans,
+        TypeRepnsForHumans),
     ( LineNumbersOpt = no, LineNumbers = dont_output_line_numbers
     ; LineNumbersOpt = yes, LineNumbers = do_output_line_numbers
     ),
-    Info = merc_out_info(MaybeQualifiedItemNames, LineNumbers, Lang).
+    ( TypeRepnsForHumans = no, CommaSep = ", "
+    ; TypeRepnsForHumans = yes, CommaSep = ",\n    "
+    ),
+    Info = merc_out_info(MaybeQualifiedItemNames, LineNumbers, Lang, CommaSep).
 
 merc_out_info_disable_line_numbers(Info0) = Info :-
     Info = Info0 ^ moi_output_line_numbers := dont_output_line_numbers.
@@ -168,6 +196,7 @@ merc_out_info_disable_line_numbers(Info0) = Info :-
 get_maybe_qualified_item_names(Info) = Info ^ moi_qualify_item_names.
 get_output_line_numbers(Info) = Info ^ moi_output_line_numbers.
 get_output_lang(Info) = Info ^ moi_output_lang.
+get_human_comma_sep(Info) = Info ^ moi_human_comma_sep.
 
 %---------------------------------------------------------------------------%
 
@@ -456,14 +485,21 @@ output_format(Format, Items, Str0, Str) :-
     string::di, string::uo) is det.
 
 output_list([], _, _, !Str).
-output_list([Item | Items], Sep, Pred, !Str) :-
-    Pred(Item, !Str),
+output_list([Item | Items], Sep, OutputPred, !Str) :-
+    output_list_lag(Item, Items, Sep, OutputPred, !Str).
+
+:- pred output_list_lag(T::in, list(T)::in, string::in,
+    pred(T, string, string)::in(pred(in, di, uo) is det),
+    string::di, string::uo) is det.
+
+output_list_lag(Item1, Items, Sep, OutputPred, !Str) :-
+    OutputPred(Item1, !Str),
     (
         Items = []
     ;
-        Items = [_ | _],
+        Items = [Item2 | Items3plus],
         output_string(Sep, !Str),
-        output_list(Items, Sep, Pred, !Str)
+        output_list_lag(Item2, Items3plus, Sep, OutputPred, !Str)
     ).
 
 %---------------------------------------------------------------------------%

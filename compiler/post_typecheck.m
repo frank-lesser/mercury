@@ -232,7 +232,8 @@ report_unsatisfied_constraints(ModuleInfo, PredId, PredInfo, Constraints,
             ConstrainedGoals),
         ContextMsgs = [ContextMsgsPrefix | ContextMsgsList]
     ),
-    Spec = error_spec(severity_error, phase_type_check, [Msg | ContextMsgs]),
+    Spec = error_spec($pred, severity_error, phase_type_check,
+        [Msg | ContextMsgs]),
     !:Specs = [Spec | !.Specs].
 
 :- func constraint_to_error_piece(tvarset, prog_constraint)
@@ -284,9 +285,10 @@ gather_constraint_ids(ReverseConstraintMap, Constraint, !ConstraintIdSets) :-
     % constraint map (it only stores as many as the type checker requires).
     % We should store context information for unproven constraints separately
     % so we can report it in error messages.
-    ( if map.search(ReverseConstraintMap, Constraint, ConstraintIdSet)
-    then !:ConstraintIdSets = [ConstraintIdSet | !.ConstraintIdSets]
-    else true
+    ( if map.search(ReverseConstraintMap, Constraint, ConstraintIdSet) then
+        !:ConstraintIdSets = [ConstraintIdSet | !.ConstraintIdSets]
+    else
+        true
     ).
 
 :- func constrained_goals_to_error_msgs(module_info, list(hlds_goal))
@@ -325,8 +327,8 @@ describe_constrained_goal(ModuleInfo, Goal) = Pieces :-
                 should_module_qualify, PredId)
         ;
             GoalExpr = generic_call(GenericCall, _, _, _, _),
-            GenericCall = class_method(_, _, _, SimpleCallId),
-            CallPieces = [simple_call(SimpleCallId)]
+            GenericCall = class_method(_, _, _, PFSymNameArity),
+            CallPieces = [qual_pf_sym_name_orig_arity(PFSymNameArity)]
         ;
             GoalExpr = call_foreign_proc(_, PredId, _, _, _, _, _),
             CallPieces = describe_one_pred_name(ModuleInfo,
@@ -498,11 +500,9 @@ report_unresolved_type_warning(ModuleInfo, PredId, PredInfo, VarSet, Errs,
         words("but I'm afraid you'll have to work it out yourself."),
         words("My apologies.)")],
     Msg = simple_msg(Context,
-        [option_is_set(warn_unresolved_polymorphism, yes,
-            [always(MainPieces), verbose_only(verbose_once, VerbosePieces)])]),
-    Severity = severity_conditional(warn_unresolved_polymorphism, yes,
-        severity_warning, no),
-    Spec = error_spec(Severity, phase_type_check, [Msg]),
+        [always(MainPieces), verbose_only(verbose_once, VerbosePieces)]),
+    Spec = conditional_spec($pred, warn_unresolved_polymorphism, yes,
+        severity_warning, phase_type_check, [Msg]),
     !:Specs = [Spec | !.Specs].
 
 :- func var_and_type_to_pieces(prog_varset, tvarset,
@@ -536,7 +536,7 @@ check_type_of_main(PredInfo, !Specs) :-
             pred_info_get_context(PredInfo, Context),
             Pieces = [words("Error: arguments of main/2"),
                 words("must have type"), quote("io.state"), suffix("."), nl],
-            Spec = simplest_spec(severity_error, phase_type_check,
+            Spec = simplest_spec($pred, severity_error, phase_type_check,
                 Context, Pieces),
             !:Specs = [Spec | !.Specs]
         )
@@ -640,7 +640,8 @@ report_unbound_inst_var_error(ModuleInfo, PredId, ProcId, Procs0, Procs,
         ++ [suffix(":"), nl,
         words("error: unbound inst variable(s)."), nl,
         words("(Sorry, polymorphic modes are not supported.)"), nl],
-    Spec = simplest_spec(severity_error, phase_type_check, Context, Pieces),
+    Spec = simplest_spec($pred, severity_error, phase_type_check,
+        Context, Pieces),
     !:Specs = [Spec | !.Specs],
     % Delete this mode, to avoid internal errors.
     map.det_remove(ProcId, _, Procs0, Procs).

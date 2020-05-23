@@ -543,7 +543,7 @@ modecheck_head_inst_vars(Vars, InstVarSub, !ModeInfo) :-
         mode_info_get_instmap(!.ModeInfo, InstMap),
         instmap_lookup_vars(InstMap, Vars, VarInsts),
         WaitingVars = set_of_var.list_to_set(Vars),
-        ModeError = mode_error_no_matching_mode(Vars, VarInsts),
+        ModeError = mode_error_no_matching_mode(Vars, VarInsts, []),
         mode_info_error(WaitingVars, ModeError, !ModeInfo)
     ).
 
@@ -901,8 +901,8 @@ mode_context_to_unify_context(ModeInfo, ModeContext, UnifyContext) :-
         ModeContext = mode_context_call(ModeCallId, Arg),
         (
             ModeCallId = mode_call_plain(PredId),
-            mode_info_get_simple_call_id(ModeInfo, PredId, SimpleCallId),
-            CallId = plain_call_id(SimpleCallId)
+            mode_info_get_pf_sym_name_arity(ModeInfo, PredId, PFSymNameArity),
+            CallId = plain_call_id(PFSymNameArity)
         ;
             ModeCallId = mode_call_generic(GenericCallId),
             CallId = generic_call_id(GenericCallId)

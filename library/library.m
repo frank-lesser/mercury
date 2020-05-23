@@ -58,6 +58,8 @@
 %   not be included in that documentation).
 %
 % Please keep all these lists in alphabetical order.
+% NOTES_TO_IMPLEMENTORS But do it manually. The standard Unix sort program
+% NOTES_TO_IMPLEMENTORS screws up the ordering of e.g. int8 vs int16.
 
 % The modules intended for application programmers.
 
@@ -102,6 +104,7 @@
 :- import_module int64.
 :- import_module integer.
 :- import_module io.
+:- import_module kv_list.
 :- import_module lazy.
 :- import_module lexer.
 :- import_module list.
@@ -109,6 +112,8 @@
 :- import_module math.
 :- import_module maybe.
 :- import_module multi_map.
+:- import_module one_or_more.
+:- import_module one_or_more_map.
 :- import_module ops.
 :- import_module pair.
 :- import_module parser.
@@ -284,6 +289,7 @@ mercury_std_library_module("int32").
 mercury_std_library_module("int64").
 mercury_std_library_module("integer").
 mercury_std_library_module("io").
+mercury_std_library_module("kv_list").
 mercury_std_library_module("lazy").
 mercury_std_library_module("lexer").
 mercury_std_library_module("library").
@@ -292,6 +298,8 @@ mercury_std_library_module("map").
 mercury_std_library_module("math").
 mercury_std_library_module("maybe").
 mercury_std_library_module("multi_map").
+mercury_std_library_module("one_or_more").
+mercury_std_library_module("one_or_more_map").
 mercury_std_library_module("mutvar").
 mercury_std_library_module("ops").
 mercury_std_library_module("pair").
@@ -350,6 +358,7 @@ mercury_std_library_module("time").
 mercury_std_library_module("thread").
 mercury_std_library_module("thread.barrier").
 mercury_std_library_module("thread.channel").
+mercury_std_library_module("thread.closeable_channel").
 mercury_std_library_module("thread.future").
 mercury_std_library_module("thread.mvar").
 mercury_std_library_module("thread.semaphore").

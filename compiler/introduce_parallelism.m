@@ -62,6 +62,7 @@
 :- import_module transform_hlds.implicit_parallelism.push_goals_together.
 
 :- import_module assoc_list.
+:- import_module bimap.
 :- import_module list.
 :- import_module map.
 :- import_module maybe.
@@ -125,13 +126,13 @@ do_apply_implicit_parallelism_transformation(SourceFileMap, Specs,
             module_info_set_has_parallel_conj(!ModuleInfo)
         )
     else
-        map.lookup(SourceFileMap, ModuleName, ModuleFilename),
+        bimap.lookup(SourceFileMap, ModuleName, ModuleFilename),
         Context = context(ModuleFilename, 1),
         Pieces = [words("Implicit parallelism was requested but the"),
             words("feedback file does not the candidate parallel"),
             words("conjunctions feedback information.")],
-        Specs = [error_spec(severity_error, phase_auto_parallelism,
-            [simple_msg(Context, [always(Pieces)])])]
+        Specs = [simplest_spec($pred, severity_error, phase_auto_parallelism,
+            Context, Pieces)]
     ).
 
     % Information retrieved from the feedback system to be used for
@@ -581,14 +582,14 @@ report_failed_parallelisation(PredInfo, GoalPath, Error) = Spec :-
     Arity = pred_info_orig_arity(PredInfo),
     SNA = sym_name_arity(qualified(ModuleName, PredName), Arity),
     Pieces = [words("In"), p_or_f(PredOrFunc),
-        unqual_sym_name_and_arity(SNA), suffix(":"), nl,
+        unqual_sym_name_arity(SNA), suffix(":"), nl,
         words("Warning: could not auto-parallelise"),
         quote(GoalPath), suffix(":"), words(Error), nl],
     pred_info_get_context(PredInfo, Context),
     % XXX Make this a warning or error if the user wants compilation to
     % abort.
-    Spec = error_spec(severity_informational, phase_auto_parallelism,
-        [simple_msg(Context, [always(Pieces)])]).
+    Spec = simplest_spec($pred, severity_informational, phase_auto_parallelism,
+        Context, Pieces).
 
 :- func report_already_parallelised(pred_info) = error_spec.
 
@@ -600,12 +601,12 @@ report_already_parallelised(PredInfo) = Spec :-
     Arity = pred_info_orig_arity(PredInfo),
     SNA = sym_name_arity(qualified(ModuleName, PredName), Arity),
     Pieces = [words("In"), p_or_f(PredOrFunc),
-        qual_sym_name_and_arity(SNA), suffix(":"), nl,
+        qual_sym_name_arity(SNA), suffix(":"), nl,
         words("Warning: this procedure contains explicit parallel"),
         words("conjunctions, it will not be automatically parallelised."), nl],
     pred_info_get_context(PredInfo, Context),
-    Spec = error_spec(severity_warning, phase_auto_parallelism,
-        [simple_msg(Context, [always(Pieces)])]).
+    Spec = simplest_spec($pred, severity_warning, phase_auto_parallelism,
+        Context, Pieces).
 
 %-----------------------------------------------------------------------------%
 

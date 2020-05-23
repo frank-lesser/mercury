@@ -49,12 +49,10 @@
                 gv_pregen               :: grade_var_pregen,
                 gv_backend              :: grade_var_backend,
                 gv_target               :: grade_var_target,
-                gv_datarep              :: grade_var_datarep,
                 gv_gcc_conf             :: grade_var_gcc_conf,
                 gv_low_tag_bits_use     :: grade_var_low_tag_bits_use,
                 gv_stack_len            :: grade_var_stack_len,
                 gv_trail                :: grade_var_trail,
-                gv_trail_segments       :: grade_var_trail_segments,
                 gv_minmodel             :: grade_var_minmodel,
                 gv_thread_safe          :: grade_var_thread_safe,
                 gv_gc                   :: grade_var_gc,
@@ -88,11 +86,6 @@
     ;       grade_var_target_csharp
     ;       grade_var_target_java
     ;       grade_var_target_erlang.
-
-:- type grade_var_datarep
-    --->    grade_var_datarep_heap_cells
-    ;       grade_var_datarep_classes
-    ;       grade_var_datarep_erlang.
 
 :- type grade_var_nested_funcs
     --->    grade_var_nested_funcs_no
@@ -225,12 +218,10 @@ success_map_to_grade_vars(!.SuccMap) = GradeVars :-
     map.det_remove(svar_pregen, Pregen, !SuccMap),
     map.det_remove(svar_backend, Backend, !SuccMap),
     map.det_remove(svar_target, Target, !SuccMap),
-    map.det_remove(svar_datarep, DataRep, !SuccMap),
     map.det_remove(svar_gcc_conf, GccConf, !SuccMap),
     map.det_remove(svar_low_tag_bits_use, LowTagBitsUse, !SuccMap),
     map.det_remove(svar_stack_len, StackLen, !SuccMap),
     map.det_remove(svar_trail, Trail, !SuccMap),
-    map.det_remove(svar_trail_segments, TrailSegments, !SuccMap),
     map.det_remove(svar_minmodel, MinimalModel, !SuccMap),
     map.det_remove(svar_thread_safe, ThreadSafe, !SuccMap),
     map.det_remove(svar_gc, Gc, !SuccMap),
@@ -281,16 +272,6 @@ success_map_to_grade_vars(!.SuccMap) = GradeVars :-
         unexpected($pred, "unexpected value of Target")
     ),
 
-    ( if DataRep = svalue_datarep_heap_cells then
-        GradeVarDataRep = grade_var_datarep_heap_cells
-    else if DataRep = svalue_datarep_classes then
-        GradeVarDataRep = grade_var_datarep_classes
-    else if DataRep = svalue_datarep_erlang then
-        GradeVarDataRep = grade_var_datarep_erlang
-    else
-        unexpected($pred, "unexpected value of DataRep")
-    ),
-
     ( if GccConf = svalue_gcc_conf_none then
         GradeVarGccConf = grade_var_gcc_conf_none
     else if GccConf = svalue_gcc_conf_reg then
@@ -333,14 +314,6 @@ success_map_to_grade_vars(!.SuccMap) = GradeVars :-
         GradeVarTrail = grade_var_trail_yes
     else
         unexpected($pred, "unexpected value of Trail")
-    ),
-
-    ( if TrailSegments = svalue_trail_segments_no then
-        GradeVarTrailSegments = grade_var_trail_segments_no
-    else if TrailSegments = svalue_trail_segments_yes then
-        GradeVarTrailSegments = grade_var_trail_segments_yes
-    else
-        unexpected($pred, "unexpected value of TrailSegments")
     ),
 
     ( if MinimalModel = svalue_minmodel_no then
@@ -501,10 +474,9 @@ success_map_to_grade_vars(!.SuccMap) = GradeVars :-
         unexpected($pred, "unexpected value of MercFloat")
     ),
 
-    GradeVars = grade_vars(GradeVarPregen, GradeVarBackend,
-        GradeVarTarget, GradeVarDataRep,
+    GradeVars = grade_vars(GradeVarPregen, GradeVarBackend, GradeVarTarget,
         GradeVarGccConf, GradeVarLowTagBitsUse, GradeVarStackLen,
-        GradeVarTrail, GradeVarTrailSegments,
+        GradeVarTrail,
         GradeVarMinimalModel, GradeVarThreadSafe, GradeVarGc,
         GradeVarDeepProf,
         GradeVarMprofCall, GradeVarMprofTime, GradeVarMprofMemory,

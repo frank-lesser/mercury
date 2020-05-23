@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1995-1997, 1999-2001, 2004-2006, 2010-2011 The University of Melbourne.
-% Copyright (C) 2013-2018 The Mercury team.
+% Copyright (C) 2013-2020 The Mercury team.
 % This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
@@ -28,17 +28,27 @@
 
 :- type assoc_list(T) == list(pair(T, T)).
 
-    % Swap the two sides of the pairs in each member of the list.
-    %
-:- func reverse_members(assoc_list(K, V)) = assoc_list(V, K).
-:- pred reverse_members(assoc_list(K, V)::in, assoc_list(V, K)::out) is det.
+%---------------------------------------------------------------------------%
+%
+% Creating assoc_lists from lists of keys and values.
+%
 
-    % Zip together two lists.
+    % Zip together a list of keys and a list of values.
     % Throw an exception if they are of different lengths.
     %
 :- func from_corresponding_lists(list(K), list(V)) = assoc_list(K, V).
 :- pred from_corresponding_lists(list(K)::in, list(V)::in,
     assoc_list(K, V)::out) is det.
+
+%---------------------------------------------------------------------------%
+%
+% Operations on lists of keys and/or values.
+%
+
+    % Swap the two sides of the pairs in each member of the list.
+    %
+:- func reverse_members(assoc_list(K, V)) = assoc_list(V, K).
+:- pred reverse_members(assoc_list(K, V)::in, assoc_list(V, K)::out) is det.
 
     % Return the first member of each pair.
     %
@@ -56,23 +66,51 @@
 :- pred keys_and_values(assoc_list(K, V)::in,
     list(K)::out, list(V)::out) is det.
 
+%---------------------------------------------------------------------------%
+%
+% Searching assoc_lists.
+%
+
     % Find the first element of the association list that matches
     % the given key, and return the associated value.
+    % Fail if there is no matching key.
     %
 :- pred search(assoc_list(K, V)::in, K::in, V::out) is semidet.
 
-    % An alternative version of search.
+    % Find the first element of the association list that matches
+    % the given key, and return the associated value.
+    % Throw an exception if there is no matching key.
+    %
+:- pred lookup(assoc_list(K, V)::in, K::in, V::out) is det.
+
+    % A field access version of search.
     %
 :- func assoc_list(K, V) ^ elem(K) = V is semidet.
 
-    % An alternative version of search that throws an exception if the key in
-    % question does not appear in the assoc_list.
+    % A field access version of lookup.
     %
 :- func assoc_list(K, V) ^ det_elem(K) = V is det.
 
-    % Find the first element of the association list that matches the given
-    % key. Return the associated value, and the original list with the selected
-    % element removed.
+%---------------------------------------------------------------------------%
+%
+% Updating elements in assoc_lists.
+%
+
+    % Find the first element of the assoc_list list that matches
+    % the given key, and update the associated value.
+    % Fail if there is no matching key.
+    %
+:- pred update(K::in, V::in, assoc_list(K, V)::in, assoc_list(K, V)::out)
+    is semidet.
+
+%---------------------------------------------------------------------------%
+%
+% Removing elements from assoc_lists.
+%
+
+    % Find the first element of the association list that matches
+    % the given key. Return the associated value, and the original list
+    % with the selected element removed.
     %
 :- pred remove(assoc_list(K, V)::in, K::in, V::out, assoc_list(K, V)::out)
     is semidet.
@@ -82,6 +120,11 @@
     %
 :- pred svremove(K::in, V::out, assoc_list(K, V)::in, assoc_list(K, V)::out)
     is semidet.
+
+%---------------------------------------------------------------------------%
+%
+% Mapping keys or values.
+%
 
 :- func map_keys_only(func(K) = L, assoc_list(K, V)) = assoc_list(L, V).
 :- pred map_keys_only(pred(K, L), assoc_list(K, V), assoc_list(L, V)).
@@ -95,31 +138,42 @@
 :- pred map_values(pred(K, V, W), assoc_list(K, V), assoc_list(K, W)).
 :- mode map_values(pred(in, in, out) is det, in, out) is det.
 
-    % filter(Pred, List, TrueList) takes a closure with one
-    % input argument and for each member K - V of List X, calls the closure
-    % on the key. K - V is included in TrueList iff Pred(K) is true.
+%---------------------------------------------------------------------------%
+%
+% Filtering elements in assoc_lists.
+%
+
+    % filter(Pred, List, TrueList) takes a closure with one input argument,
+    % and for each key-value pair in List, calls the closure on the key K.
+    % The key-value pair is included in TrueList iff Pred(K) is true.
     %
-:- pred filter(pred(K)::in(pred(in) is semidet),
-    assoc_list(K, V)::in, assoc_list(K, V)::out) is det.
 :- func filter(pred(K)::in(pred(in) is semidet),
     assoc_list(K, V)::in) = (assoc_list(K, V)::out) is det.
+:- pred filter(pred(K)::in(pred(in) is semidet),
+    assoc_list(K, V)::in, assoc_list(K, V)::out) is det.
 
     % negated_filter(Pred, List, FalseList) takes a closure with one
-    % input argument and for each member K - V of List X, calls the closure
-    % on the key. K - V is included in FalseList iff Pred(K) is false.
+    % input argument, and for each key-value pair in List, calls the closure
+    % on the key K. The key-value pair is included in TrueList iff
+    % Pred(K) is false.
     %
-:- pred negated_filter(pred(K)::in(pred(in) is semidet),
-    assoc_list(K, V)::in, assoc_list(K, V)::out) is det.
 :- func negated_filter(pred(K)::in(pred(in) is semidet),
     assoc_list(K, V)::in) = (assoc_list(K, V)::out) is det.
+:- pred negated_filter(pred(K)::in(pred(in) is semidet),
+    assoc_list(K, V)::in, assoc_list(K, V)::out) is det.
 
     % filter(Pred, List, TrueList, FalseList) takes a closure with
-    % one input argument and for each member K - V of List X, calls the closure
-    % on the key. K - V is included in TrueList iff Pred(K) is true.
-    % K - V is included in FalseList iff Pred(K) is false.
-    %
+    % one input argument, and for each key-value pair in List,
+    % calls the closure on the key K. If Pred(K) is true, the key-value pair
+    % is included in TrueList; otherwise, it is included in FalseList.
+    %      
 :- pred filter(pred(K)::in(pred(in) is semidet),
     assoc_list(K, V)::in, assoc_list(K, V)::out, assoc_list(K, V)::out) is det.
+
+%---------------------------------------------------------------------------%
+%
+% Merging assoc_lists.
+%
 
     % merge(L1, L2, L):
     %
@@ -130,9 +184,34 @@
 :- pred merge(assoc_list(K, V)::in, assoc_list(K, V)::in,
     assoc_list(K, V)::out) is det.
 
+%---------------------------------------------------------------------------%
+%
+% Folding over assoc_lists.
+%
+
+    % foldl(Pred, List, Start End) calls Pred
+    % with each key-value pair in List, working left-to-right,
+    % and an accumulator whose initial value is Start,
+    % and returns the final value in End.
+    %
+:- pred foldl(pred(K, V, A, A), assoc_list(K, V), A, A).
+:- mode foldl(pred(in, in, in, out) is det, in, in, out) is det.
+:- mode foldl(pred(in, in, mdi, muo) is det, in, mdi, muo) is det.
+:- mode foldl(pred(in, in, di, uo) is det, in, di, uo) is det.
+:- mode foldl(pred(in, in, in, out) is semidet, in, in, out) is semidet.
+:- mode foldl(pred(in, in, mdi, muo) is semidet, in, mdi, muo) is semidet.
+:- mode foldl(pred(in, in, di, uo) is semidet, in, di, uo) is semidet.
+:- mode foldl(pred(in, in, in, out) is nondet, in, in, out) is nondet.
+
+    % foldl_keys(Func List, Start) = End calls Func
+    % with each key in List, working left-to-right, and an accumulator
+    % whose initial value is Start, and returns the final value in End.
+    %
+:- func foldl_keys(func(K, A) = A, assoc_list(K, V), A) = A.
+
     % foldl_keys(Pred, List, Start End) calls Pred
-    % with each key in List (working left-to-right) and an accumulator
-    % (with initial value of Start), and returns the final value in End.
+    % with each key in List, working left-to-right, and an accumulator
+    % whose initial value is Start, and returns the final value in End.
     %
 :- pred foldl_keys(pred(K, A, A), assoc_list(K, V), A, A).
 :- mode foldl_keys(pred(in, in, out) is det, in, in, out) is det.
@@ -144,9 +223,15 @@
 :- mode foldl_keys(pred(in, in, out) is multi, in, in, out) is multi.
 :- mode foldl_keys(pred(in, in, out) is nondet, in, in, out) is nondet.
 
+    % foldl_values(Func List, Start) = End calls Func
+    % with each value in List, working left-to-right, and an accumulator
+    % whose initial value is Start, and returns the final value in End.
+    %
+:- func foldl_values(func(V, A) = A, assoc_list(K, V), A) = A.
+
     % foldl_values(Pred, List, Start End) calls Pred
-    % with each value in List (working left-to-right) and an accumulator
-    % (with initial value of Start), and returns the final value in End.
+    % with each value in List, working left-to-right, and an accumulator
+    % whose initial value is Start, and returns the final value in End.
     %
 :- pred foldl_values(pred(V, A, A), assoc_list(K, V), A, A).
 :- mode foldl_values(pred(in, in, out) is det, in,
@@ -166,7 +251,25 @@
 :- mode foldl_values(pred(in, in, out) is nondet, in,
     in, out) is nondet.
 
-    % As above, but with two accumulators.
+    % As foldl, but with two accumulators.
+    %
+:- pred foldl2(pred(K, V, A, A, B, B), assoc_list(K, V), A, A, B, B).
+:- mode foldl2(pred(in, in, in, out, in, out) is det, in, in, out,
+    in, out) is det.
+:- mode foldl2(pred(in, in, in, out, mdi, muo) is det, in, in, out,
+    mdi, muo) is det.
+:- mode foldl2(pred(in, in, in, out, di, uo) is det, in, in, out,
+    di, uo) is det.
+:- mode foldl2(pred(in, in, in, out, in, out) is semidet, in, in, out,
+    in, out) is semidet.
+:- mode foldl2(pred(in, in, in, out, mdi, muo) is semidet, in,in, out,
+    mdi, muo) is semidet.
+:- mode foldl2(pred(in, in, in, out, di, uo) is semidet, in, in, out,
+    di, uo) is semidet.
+:- mode foldl2(pred(in, in, in, out, in, out) is nondet, in, in, out,
+    in, out) is nondet.
+
+    % As foldl_values, but with two accumulators.
     %
 :- pred foldl2_values(pred(V, A, A, B, B), assoc_list(K, V),
     A, A, B, B).
@@ -187,7 +290,26 @@
 :- mode foldl2_values(pred(in, in, out, in, out) is nondet, in,
     in, out, in, out) is nondet.
 
-    % As above, but with three accumulators.
+    % As foldl, but with three accumulators.
+    %
+:- pred foldl3(pred(K, V, A, A, B, B, C, C), assoc_list(K, V),
+    A, A, B, B, C, C).
+:- mode foldl3(pred(in, in, in, out, in, out, in, out) is det, in,
+    in, out, in, out, in, out) is det.
+:- mode foldl3(pred(in, in, in, out, in, out, mdi, muo) is det, in,
+    in, out, in, out, mdi, muo) is det.
+:- mode foldl3(pred(in, in, in, out, in, out, di, uo) is det, in,
+    in, out, in, out, di, uo) is det.
+:- mode foldl3(pred(in, in, in, out, in, out, in, out) is semidet, in,
+    in, out, in, out, in, out) is semidet.
+:- mode foldl3(pred(in, in, in, out, in, out, mdi, muo) is semidet, in,
+        in, out, in, out, mdi, muo) is semidet.
+:- mode foldl3(pred(in, in, in, out, in, out, di, uo) is semidet, in,
+    in, out, in, out, di, uo) is semidet.
+:- mode foldl3(pred(in, in, in, out, in, out, in, out) is nondet, in,
+    in, out, in, out, in, out) is nondet.
+
+    % As foldl_values, but with three accumulators.
     %
 :- pred foldl3_values(pred(V, A, A, B, B, C, C), assoc_list(K, V),
     A, A, B, B, C, C).
@@ -219,18 +341,11 @@
 
 %---------------------------------------------------------------------------%
 
-reverse_members(AL1) = AL2 :-
-    assoc_list.reverse_members(AL1, AL2).
-
-reverse_members([], []).
-reverse_members([K - V | KVs], [V - K | VKs]) :-
-    assoc_list.reverse_members(KVs, VKs).
-
 from_corresponding_lists(Ks, Vs) = AL :-
     assoc_list.from_corresponding_lists(Ks, Vs, AL).
 
 from_corresponding_lists(Ks, Vs, KVs) :-
-    ( if assoc_list.from_corresponding_2(Ks, Vs, KVsPrime) then
+    ( if assoc_list.from_corresponding_loop(Ks, Vs, KVsPrime) then
         KVs = KVsPrime
     else
         KeyType = type_name(type_of(Ks)),
@@ -248,12 +363,21 @@ from_corresponding_lists(Ks, Vs, KVs) :-
         unexpected($pred, ErrorString)
     ).
 
-:- pred assoc_list.from_corresponding_2(list(K)::in, list(V)::in,
+:- pred assoc_list.from_corresponding_loop(list(K)::in, list(V)::in,
     assoc_list(K,V)::out) is semidet.
 
-from_corresponding_2([], [], []).
-from_corresponding_2([A | As], [B | Bs], [A - B | ABs]) :-
-    assoc_list.from_corresponding_2(As, Bs, ABs).
+from_corresponding_loop([], [], []).
+from_corresponding_loop([A | As], [B | Bs], [A - B | ABs]) :-
+    assoc_list.from_corresponding_loop(As, Bs, ABs).
+
+%---------------------------------------------------------------------------%
+
+reverse_members(AL1) = AL2 :-
+    assoc_list.reverse_members(AL1, AL2).
+
+reverse_members([], []).
+reverse_members([K - V | KVs], [V - K | VKs]) :-
+    assoc_list.reverse_members(KVs, VKs).
 
 keys(AL) = Ks :-
     assoc_list.keys(AL, Ks).
@@ -273,6 +397,8 @@ keys_and_values([], [], []).
 keys_and_values([K - V | KVs], [K | Ks], [V | Vs]) :-
     assoc_list.keys_and_values(KVs, Ks, Vs).
 
+%---------------------------------------------------------------------------%
+
 search([K - V | KVs], Key, Value) :-
     ( if K = Key then
         Value = V
@@ -280,15 +406,37 @@ search([K - V | KVs], Key, Value) :-
         assoc_list.search(KVs, Key, Value)
     ).
 
+lookup(KVs, K, V) :-
+    ( if assoc_list.search(KVs, K, VPrime) then
+        V = VPrime
+    else
+        report_lookup_error("assoc_list.lookup: key not found", K)
+    ).
+
 AL ^ elem(K) = V :-
     assoc_list.search(AL, K, V).
 
 AL ^ det_elem(K) = V :-
-    ( if assoc_list.search(AL, K, VPrime) then
-        V = VPrime
-    else
-        report_lookup_error("assoc_list.det_elem: key not found", K)
+    assoc_list.lookup(AL, K, V).
+
+%---------------------------------------------------------------------------%
+
+update(Key, Value, KVs0, KVs) :-
+    require_complete_switch [KVs0]
+    (
+        KVs0 = [],
+        fail
+    ;
+        KVs0 = [K - V | TailKVs0],
+        ( if Key = K then
+            KVs = [K - Value | TailKVs0]
+        else
+            update(Key, Value, TailKVs0, TailKVs),
+            KVs = [K - V | TailKVs]
+        )
     ).
+
+%---------------------------------------------------------------------------%
 
 remove([K - V | KVs], Key, Value, Filtered) :-
     ( if K = Key then
@@ -301,6 +449,8 @@ remove([K - V | KVs], Key, Value, Filtered) :-
 
 svremove(Key, Value, !AL) :-
     assoc_list.remove(!.AL, Key, Value, !:AL).
+
+%---------------------------------------------------------------------------%
 
 map_keys_only(_F, []) = [].
 map_keys_only(F, [K0 - V | KVs0]) = [K - V | KVs] :-
@@ -332,6 +482,11 @@ map_values(P, [K - V0 | KVs0], [K - V | KVs]) :-
     P(K, V0, V),
     assoc_list.map_values(P, KVs0, KVs).
 
+%---------------------------------------------------------------------------%
+
+filter(P, List) = Trues :-
+    assoc_list.filter(P, List, Trues).
+
 filter(_, [],  []).
 filter(P, [HK - HV | T], True) :-
     ( if P(HK) then
@@ -341,8 +496,8 @@ filter(P, [HK - HV | T], True) :-
         assoc_list.filter(P, T, True)
     ).
 
-filter(P, List) = Trues :-
-    assoc_list.filter(P, List, Trues).
+negated_filter(P, List) = Falses :-
+    assoc_list.negated_filter(P, List, Falses).
 
 negated_filter(_, [],  []).
 negated_filter(P, [HK - HV | T], False) :-
@@ -352,9 +507,6 @@ negated_filter(P, [HK - HV | T], False) :-
         assoc_list.negated_filter(P, T, FalseTail),
         False = [HK - HV | FalseTail]
     ).
-
-negated_filter(P, List) = Falses :-
-    assoc_list.negated_filter(P, List, Falses).
 
 filter(_, [],  [], []).
 filter(P, [HK - HV | T], True, False) :-
@@ -366,12 +518,13 @@ filter(P, [HK - HV | T], True, False) :-
         False = [HK - HV | FalseTail]
     ).
 
+%---------------------------------------------------------------------------%
+
 merge(As, Bs) = ABs :-
     assoc_list.merge(As, Bs, ABs).
 
-merge([], [], []).
+merge([], Bs, Bs).
 merge([A | As], [], [A | As]).
-merge([], [B | Bs], [B | Bs]).
 merge([A | As], [B | Bs], Cs) :-
     ( if
         A = AK - _AV,
@@ -386,29 +539,58 @@ merge([A | As], [B | Bs], Cs) :-
         Cs = [A | Cs0]
     ).
 
-foldl_keys(_, [], !Acc).
-foldl_keys(P, [KV | KVs], !Acc) :-
+%---------------------------------------------------------------------------%
+
+foldl(_P, [], !A).
+foldl(P, [K - V | KVs], !A) :-
+    P(K, V, !A),
+    foldl(P, KVs, !A).
+
+foldl_keys(_F, [], A) = A.
+foldl_keys(F, [KV | KVs], !.A) = !:A :-
     KV = K - _V,
-    P(K, !Acc),
-    assoc_list.foldl_keys(P, KVs, !Acc).
+    !:A = F(K, !.A),
+    !:A = assoc_list.foldl_keys(F, KVs, !.A).
 
-foldl_values(_, [], !Acc).
-foldl_values(P, [KV | KVs], !Acc) :-
-    KV = _K - V,
-    P(V, !Acc),
-    assoc_list.foldl_values(P, KVs, !Acc).
+foldl_keys(_P, [], !A).
+foldl_keys(P, [KV | KVs], !A) :-
+    KV = K - _V,
+    P(K, !A),
+    assoc_list.foldl_keys(P, KVs, !A).
 
-foldl2_values(_, [], !Acc1, !Acc2).
-foldl2_values(P, [KV | KVs], !Acc1, !Acc2) :-
+foldl_values(_F, [], A) = A.
+foldl_values(F, [KV | KVs], !.A) = !:A :-
     KV = _K - V,
-    P(V, !Acc1, !Acc2),
-    assoc_list.foldl2_values(P, KVs, !Acc1, !Acc2).
+    !:A = F(V, !.A),
+    !:A = assoc_list.foldl_values(F, KVs, !.A).
 
-foldl3_values(_, [], !Acc1, !Acc2, !Acc3).
-foldl3_values(P, [KV | KVs], !Acc1, !Acc2, !Acc3) :-
+foldl_values(_P, [], !A).
+foldl_values(P, [KV | KVs], !A) :-
     KV = _K - V,
-    P(V, !Acc1, !Acc2, !Acc3),
-    assoc_list.foldl3_values(P, KVs, !Acc1, !Acc2, !Acc3).
+    P(V, !A),
+    assoc_list.foldl_values(P, KVs, !A).
+
+foldl2(_P, [], !A, !B).
+foldl2(P, [K - V | KVs], !A, !B) :-
+    P(K, V, !A, !B),
+    foldl2(P, KVs, !A, !B).
+
+foldl2_values(_P, [], !A, !B).
+foldl2_values(P, [KV | KVs], !A, !B) :-
+    KV = _K - V,
+    P(V, !A, !B),
+    assoc_list.foldl2_values(P, KVs, !A, !B).
+
+foldl3(_P, [], !A, !B, !C).
+foldl3(P, [K - V | KVs], !A, !B, !C) :-
+    P(K, V, !A, !B, !C),
+    foldl3(P, KVs, !A, !B, !C).
+
+foldl3_values(_P, [], !A, !B, !C).
+foldl3_values(P, [KV | KVs], !A, !B, !C) :-
+    KV = _K - V,
+    P(V, !A, !B, !C),
+    assoc_list.foldl3_values(P, KVs, !A, !B, !C).
 
 %---------------------------------------------------------------------------%
 :- end_module assoc_list.

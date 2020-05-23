@@ -10,7 +10,7 @@
 
 # We need to explicitly include scripts/Mmake.vars here, even though `mmake'
 # includes that file automatically, to make sure that we get the right
-# version of that file.  The settings in that file include values set
+# version of that file. The settings in that file include values set
 # by parameters to configure (e.g. --prefix), and we need to make sure
 # that we pick up the values from the Mmake.vars that we're going to install,
 # rather than from the old version of mmake that we're installing with,
@@ -42,6 +42,7 @@ SUBDIRS = \
 		ssdb \
 		mdbcomp \
 		browser \
+		grade_lib \
 		compiler \
 		doc \
 		slice \
@@ -56,17 +57,18 @@ MMAKEFLAGS =
 # from the grade install directories, and we need mfilterjavac in our path
 # when executing in install_grade_dir.java/library and others.
 SUBDIR_MMAKE = \
-    PATH=../scripts:../util:../mfilterjavac:../../mfilterjavac:$$PATH \
-    MMAKE_VPATH=. \
-    MMAKE_DIR=../scripts \
-    DESTDIR=$(DESTDIR) \
-    ../scripts/mmake $(MMAKEFLAGS)
+	PATH=../scripts:../util:../mfilterjavac:../../mfilterjavac:$$PATH \
+	MMAKE_VPATH=. \
+	MMAKE_DIR=../scripts \
+	DESTDIR=$(DESTDIR) \
+	../scripts/mmake $(MMAKEFLAGS)
 
-SUBSUBDIR_MMAKE = PATH=../../scripts:../../util:../../mfilterjavac:$$PATH \
-		MMAKE_VPATH=. \
-		MMAKE_DIR=../../scripts \
-		DESTDIR=$(DESTDIR) \
-		../../scripts/mmake $(MMAKEFLAGS)
+SUBSUBDIR_MMAKE = \
+	PATH=../../scripts:../../util:../../mfilterjavac:$$PATH \
+	MMAKE_VPATH=. \
+	MMAKE_DIR=../../scripts \
+	DESTDIR=$(DESTDIR) \
+	../../scripts/mmake $(MMAKEFLAGS)
 
 GENERATED_DOCS = README INSTALL WORK_IN_PROGRESS TODO
 
@@ -90,6 +92,7 @@ dep:	dep_library \
 	dep_ssdb \
 	dep_mdbcomp \
 	dep_browser \
+	dep_grade_lib \
 	dep_compiler \
 	dep_slice \
 	dep_profiler \
@@ -146,6 +149,16 @@ dep_compiler: compiler/$(deps_subdir)mercury_compile.dep
 compiler/$(deps_subdir)mercury_compile.dep: library/$(deps_subdir)$(STD_LIB_NAME).dep
 	+cd compiler && $(SUBDIR_MMAKE) depend
 
+.PHONY: dep_grade_lib
+dep_grade_lib: grade_lib/$(deps_subdir)/choose_grade.dep \
+	grade_lib/$(deps_subdir)/test_grades.dep \
+	grade_lib/$(deps_subdir)/try_all_grade_structs.dep
+
+grade_lib/$(deps_subdir)/choose_grade.dep \
+grade_lib/$(deps_subdir)/test_grades.dep \
+grade_lib/$(deps_subdir)/try_all_grade_structs.dep:
+	+cd grade_lib && $(SUBDIR_MMAKE) depend
+
 .PHONY: dep_slice
 dep_slice: slice/$(deps_subdir)mcov.dep \
 	slice/$(deps_subdir)mslice.dep \
@@ -153,9 +166,9 @@ dep_slice: slice/$(deps_subdir)mcov.dep \
 	slice/$(deps_subdir)mtc_union.dep \
 	slice/$(deps_subdir)mtc_diff.dep
 
-slice/$(deps_subdir)mcov.dep \
 slice/$(deps_subdir)mslice.dep \
 slice/$(deps_subdir)mdice.dep \
+slice/$(deps_subdir)mcov.dep \
 slice/$(deps_subdir)mtc_union.dep \
 slice/$(deps_subdir)mtc_diff.dep:
 	+cd slice && $(SUBDIR_MMAKE) depend
@@ -205,6 +218,7 @@ depend: depend_library \
 	depend_mdbcomp \
 	depend_browser \
 	depend_ssdb \
+	depend_grade_lib \
 	depend_compiler \
 	depend_slice \
 	depend_profiler \
@@ -226,6 +240,10 @@ depend_browser:
 .PHONY: depend_ssdb
 depend_ssdb:
 	+cd ssdb && $(SUBDIR_MMAKE) depend
+
+.PHONY: depend_grade_lib
+depend_grade_lib:
+	+cd grade_lib && $(SUBDIR_MMAKE) depend
 
 .PHONY: depend_compiler
 depend_compiler:
@@ -249,11 +267,11 @@ depend_mfilterjavac:
 
 #-----------------------------------------------------------------------------#
 
-# NOTE: there are two targets that concern the util directory here.  The first
+# NOTE: there are two targets that concern the util directory here. The first
 # is the "util_no_rt" target (short for "util no runtime") and the second is the
-# "util" target.  The first target builds those programs in the util directory
+# "util" target. The first target builds those programs in the util directory
 # that do *not* depend on the runtime directory, at present just mfiltercc.
-# The second target builds the rest.  Things are arranged in this fashion so
+# The second target builds the rest. Things are arranged in this fashion so
 # that when building the source distribution we can build mfiltercc before
 # it is required.
 
@@ -305,15 +323,15 @@ ssdb: dep_ssdb scripts boehm_gc runtime library mdbcomp browser
 trace: scripts boehm_gc runtime library mdbcomp browser
 	+cd trace && $(SUBDIR_MMAKE)
 
+.PHONY: grade_lib
+grade_lib: dep_grade_lib scripts util boehm_gc runtime library \
+		mdbcomp browser ssdb trace
+	+cd grade_lib && $(SUBDIR_MMAKE)
+
 .PHONY: compiler
 compiler: dep_compiler scripts util boehm_gc runtime library \
 		mdbcomp browser ssdb trace
 	+cd compiler && $(SUBDIR_MMAKE)
-
-.PHONY: libmmc
-libmmc: dep_compiler scripts util boehm_gc runtime library \
-		mdbcomp browser ssdb trace
-	+cd compiler && $(SUBDIR_MMAKE) libmmc
 
 .PHONY: doc
 doc: 	scripts util
@@ -342,16 +360,19 @@ mfilterjavac: dep_mfilterjavac scripts util boehm_gc runtime library \
 #-----------------------------------------------------------------------------#
 
 .PHONY: tags
-tags: 	tags_library \
+tags: 	\
+	tags_library \
 	tags_mdbcomp \
 	tags_browser \
 	tags_ssdb \
+	tags_grade_lib \
 	tags_compiler \
 	tags_slice \
 	tags_profiler \
 	tags_deep_profiler \
 	tags_runtime \
-	tags_trace
+	tags_trace \
+	tags_mfilterjavac
 
 .PHONY: tags_compiler
 tags_compiler:
@@ -373,6 +394,10 @@ tags_browser:
 tags_ssdb:
 	+cd ssdb && $(SUBDIR_MMAKE) tags
 
+.PHONY: tags_grade_lib
+tags_grade_lib:
+	+cd grade_lib && $(SUBDIR_MMAKE) tags
+
 .PHONY: tags_slice
 tags_slice:
 	+cd slice && $(SUBDIR_MMAKE) tags
@@ -393,12 +418,16 @@ tags_runtime:
 tags_trace:
 	+cd trace && $(SUBDIR_MMAKE) tags
 
+.PHONY: tags_mfilterjavac
+tags_mfilterjavac:
+	+cd mfilterjavac && $(SUBDIR_MMAKE) tags
+
 #-----------------------------------------------------------------------------#
 
 # Remove from each of the listed directories mmc-generated files that don't
 # belong there.
 cleanint:
-	for dir in library mdbcomp browser ssdb compiler \
+	for dir in library mdbcomp browser ssdb grade_lib compiler \
 		slice profiler deep_profiler; \
 	do \
 		echo Looking for inappropriate files in the $$dir directory: ; \
@@ -481,6 +510,8 @@ tar: 	$(GENERATED_DOCS)
 	+cd deep_profiler && $(SUBDIR_MMAKE) cs tags
 	+cd mfilterjavac && $(SUBDIR_MMAKE) depend
 	+cd mfilterjavac && $(SUBDIR_MMAKE) cs tags
+	+cd grade_lib && $(SUBDIR_MMAKE) depend
+	+cd grade_lib && $(SUBDIR_MMAKE) cs tags
 	+cd doc && $(SUBDIR_MMAKE) info html dvi mdb_doc
 	# the following commands might fail on Windows?
 	-cd bindist && $(SUBDIR_MMAKE) bindist.Makefile
@@ -515,13 +546,13 @@ tar: 	$(GENERATED_DOCS)
 			--dereference -cf - 				\
 			mercury-srcdist-$(VERSION) | 			\
 			gzip -9 > mercury-srcdist-$(VERSION).tar.gz;	\
-		test -z $(XZ) || $(TAR) --exclude ".git"                \
+		test -z $(XZ) || $(TAR) --exclude ".git"		\
 			--exclude ".gitignore"				\
 			--dereference -cf - 				\
 			mercury-srcdist-$(VERSION) | 			\
 			$(XZ) > mercury-srcdist-$(VERSION).tar.xz;	\
 		mv mercury-srcdist-$(VERSION)	$$ROOTNAME;		\
-		mv stuff-to-exclude/quickcheck  $$ROOTNAME/extras/quickcheck; \
+		mv stuff-to-exclude/quickcheck	$$ROOTNAME/extras/quickcheck; \
 		mv stuff-to-exclude/*		$$ROOTNAME;		\
 		rmdir stuff-to-exclude;					\
 	)
@@ -665,7 +696,7 @@ install_deep_profiler: deep_profiler
 	+cd deep_profiler && $(SUBDIR_MMAKE) install
 
 # LIBGRADE_SUFFIXES = .m .int3 .date3 .int2 .int .date .opt .optdate \
-#	.trans_opt .trans_opt_date .d .mh .mih .c_date  .c .o .pic_o
+#	.trans_opt .trans_opt_date .d .mh .mih .c_date .c .o .pic_o
 
 ifeq ($(CROSS_COMPILING),yes)
 OVERRIDE_MC_FOR_LIBGRADE =
@@ -774,6 +805,9 @@ touch_files:
 	touch ssdb/*.optdate
 	chmod +w ssdb/*.dep
 	touch ssdb/*.dep
+	touch grade_lib/*.date*
+	chmod +w grade_lib/*.dep
+	touch grade_lib/*.dep
 	touch compiler/*.date*
 	chmod +w compiler/*.dep
 	touch compiler/*.dep

@@ -38,6 +38,7 @@ int32.m
 int64.m
 integer.m
 io.m
+kv_list.m
 lazy.m
 lexer.m
 library.m
@@ -46,6 +47,8 @@ map.m
 math.m
 maybe.m
 multi_map.m
+one_or_more.m
+one_or_more_map.m
 ops.m
 pair.m
 parser.m
@@ -87,6 +90,7 @@ term_io.m
 term_to_xml.m
 thread.barrier.m
 thread.channel.m
+thread.closeable_channel.m
 thread.future.m
 thread.m
 thread.mvar.m

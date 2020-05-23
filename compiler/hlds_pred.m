@@ -157,12 +157,12 @@
 :- pred next_mode_id(proc_table::in, proc_id::out) is det.
 
 :- type call_id
-    --->    plain_call_id(simple_call_id)
+    --->    plain_call_id(pf_sym_name_arity)
     ;       generic_call_id(generic_call_id).
 
 :- type generic_call_id
     --->    gcid_higher_order(purity, pred_or_func, arity)
-    ;       gcid_class_method(class_id, simple_call_id)
+    ;       gcid_class_method(class_id, pf_sym_name_arity)
     ;       gcid_event_call(string)
     ;       gcid_cast(cast_kind).
 
@@ -472,7 +472,7 @@
             % context to allow polymorphism.m to correctly set up the
             % extra type_info and typeclass_info arguments.
 
-    ;       origin_class_method
+    ;       origin_class_method(class_id, pf_sym_name_arity)
             % The predicate is a class method implementation.
 
     ;       origin_transformed(pred_transformation, pred_origin, pred_id)
@@ -499,9 +499,9 @@
             % the solver_type_pred_kind, for the type constructor given by
             % the sym_name and arity.
 
-    ;       origin_tabling(simple_call_id, tabling_aux_pred_kind)
+    ;       origin_tabling(pf_sym_name_arity, tabling_aux_pred_kind)
             % The predicate is an auxiliary predicate of the indicated kind
-            % for the tabled predicate identified by the simple_call_id.
+            % for the tabled predicate identified by the pf_sym_name_arity.
 
     ;       origin_mutable(module_name, string, mutable_pred_kind)
             % The predicate is a predicate that operates on the mutable
@@ -663,7 +663,7 @@
 :- pred pred_info_get_assertions(pred_info::in,
     set(assert_id)::out) is det.
 :- pred pred_info_get_obsolete_in_favour_of(pred_info::in,
-    maybe(list(sym_name_and_arity))::out) is det.
+    maybe(list(sym_name_arity))::out) is det.
 :- pred pred_info_get_instance_method_arg_types(pred_info::in,
     list(mer_type)::out) is det.
 :- pred pred_info_get_clauses_info(pred_info::in,
@@ -716,7 +716,7 @@
 :- pred pred_info_set_assertions(set(assert_id)::in,
     pred_info::in, pred_info::out) is det.
 :- pred pred_info_set_obsolete_in_favour_of(
-    maybe(list(sym_name_and_arity))::in,
+    maybe(list(sym_name_arity))::in,
     pred_info::in, pred_info::out) is det.
 :- pred pred_info_set_instance_method_arg_types(list(mer_type)::in,
     pred_info::in, pred_info::out) is det.
@@ -846,7 +846,8 @@
 
 :- pred purity_to_markers(purity::in, list(pred_marker)::out) is det.
 
-:- pred pred_info_get_simple_call_id(pred_info::in, simple_call_id::out) is det.
+:- pred pred_info_get_pf_sym_name_arity(pred_info::in, pf_sym_name_arity::out)
+    is det.
 
 :- pred pred_info_get_sym_name(pred_info::in, sym_name::out) is det.
 
@@ -1115,7 +1116,7 @@ calls_are_fully_qualified(Markers) =
                 % In the usual case where this predicate is NOT marked
                 % as obsolete, this will be "no".
                 psi_obsolete_in_favour_of       :: maybe(list(
-                                                    sym_name_and_arity)),
+                                                    sym_name_arity)),
 
                 % If this predicate is a class method implementation, this
                 % list records the argument types before substituting the type
@@ -1785,11 +1786,11 @@ purity_to_markers(purity_impure, [marker_is_impure]).
 
 %-----------------------------------------------------------------------------%
 
-pred_info_get_simple_call_id(PredInfo, SimpleCallId) :-
+pred_info_get_pf_sym_name_arity(PredInfo, PFSymNameArity) :-
     PredOrFunc = pred_info_is_pred_or_func(PredInfo),
     pred_info_get_sym_name(PredInfo, SymName),
     Arity = pred_info_orig_arity(PredInfo),
-    SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity).
+    PFSymNameArity = pf_sym_name_arity(PredOrFunc, SymName, Arity).
 
 pred_info_get_sym_name(PredInfo, SymName) :-
     Module = pred_info_module(PredInfo),
@@ -2218,6 +2219,8 @@ marker_list_to_markers(Markers, MarkerSet) :-
 :- pred proc_info_get_item_number(proc_info::in, int::out) is det.
 :- pred proc_info_get_can_process(proc_info::in, can_process::out) is det.
 :- pred proc_info_get_detism_decl(proc_info::in, detism_decl::out) is det.
+:- pred proc_info_get_cse_nopull_contexts(proc_info::in,
+    list(prog_context)::out) is det.
 :- pred proc_info_get_maybe_untuple_info(proc_info::in,
     maybe(untuple_proc_info)::out) is det.
 :- pred proc_info_get_var_name_remap(proc_info::in,
@@ -2257,7 +2260,7 @@ marker_list_to_markers(Markers, MarkerSet) :-
 :- pred proc_info_get_table_attributes(proc_info::in,
     maybe(table_attributes)::out) is det.
 :- pred proc_info_get_obsolete_in_favour_of(proc_info::in,
-    maybe(list(sym_name_and_arity))::out) is det.
+    maybe(list(sym_name_arity))::out) is det.
 :- pred proc_info_get_maybe_deep_profile_info(proc_info::in,
     maybe(deep_profile_proc_info)::out) is det.
 :- pred proc_info_get_maybe_arg_size_info(proc_info::in,
@@ -2291,8 +2294,6 @@ marker_list_to_markers(Markers, MarkerSet) :-
     proc_info::in, proc_info::out) is det.
 :- pred proc_info_set_argmodes(list(mer_mode)::in,
     proc_info::in, proc_info::out) is det.
-:- pred proc_info_set_head_modes_constraint(mode_constraint::in,
-    proc_info::in, proc_info::out) is det.
 :- pred proc_info_set_maybe_arglives(maybe(list(is_live))::in,
     proc_info::in, proc_info::out) is det.
 :- pred proc_info_set_inferred_determinism(determinism::in,
@@ -2304,7 +2305,11 @@ marker_list_to_markers(Markers, MarkerSet) :-
 
 :- pred proc_info_set_can_process(can_process::in,
     proc_info::in, proc_info::out) is det.
+:- pred proc_info_set_head_modes_constraint(mode_constraint::in,
+    proc_info::in, proc_info::out) is det.
 :- pred proc_info_set_detism_decl(detism_decl::in,
+    proc_info::in, proc_info::out) is det.
+:- pred proc_info_set_cse_nopull_contexts(list(prog_context)::in,
     proc_info::in, proc_info::out) is det.
 :- pred proc_info_set_maybe_untuple_info(maybe(untuple_proc_info)::in,
     proc_info::in, proc_info::out) is det.
@@ -2347,7 +2352,7 @@ marker_list_to_markers(Markers, MarkerSet) :-
 :- pred proc_info_set_table_attributes(maybe(table_attributes)::in,
     proc_info::in, proc_info::out) is det.
 :- pred proc_info_set_obsolete_in_favour_of(
-    maybe(list(sym_name_and_arity))::in,
+    maybe(list(sym_name_arity))::in,
     proc_info::in, proc_info::out) is det.
 :- pred proc_info_set_maybe_deep_profile_info(
     maybe(deep_profile_proc_info)::in,
@@ -2522,9 +2527,10 @@ marker_list_to_markers(Markers, MarkerSet) :-
 :- type proc_info
     --->    proc_info(
                 % The Boehm collector allocates blocks whose sizes are
-                % multiples of 2. Ideally, we would want the number of fields
-                % of pred_info to be a multiple of 2 as well, but as of
-                % 2017 march 15, this seems to be the optimal arrangement (zs).
+                % multiples (and usually powers) of 2. Ideally, we would want
+                % the number of fields of pred_info to match one of the Boehm
+                % block sizes, but as of 2017 march 15, this seems to be the
+                % optimal arrangement (zs).
 
 /*  1 */        proc_head_vars                  :: list(prog_var),
 /*  2 */        proc_body                       :: hlds_goal,
@@ -2541,24 +2547,23 @@ marker_list_to_markers(Markers, MarkerSet) :-
 /*  7 */        proc_maybe_decl_head_modes      :: maybe(list(mer_mode)),
 
 /*  8 */        proc_actual_head_modes          :: list(mer_mode),
-/*  9 */        proc_maybe_head_modes_constr    :: maybe(mode_constraint),
 
                 % Liveness (in the mode analysis sense) of the arguments
                 % in the caller; says whether each argument may be used
                 % after the call.
-/* 10 */        proc_headvar_caller_liveness    :: maybe(list(is_live)),
+/*  9 */        proc_headvar_caller_liveness    :: maybe(list(is_live)),
 
                 % The _declared_ determinism of the procedure, or `no'
                 % if there was no detism declaration.
-/* 11 */        proc_declared_detism            :: maybe(determinism),
-/* 12 */        proc_inferred_detism            :: determinism,
+/* 10 */        proc_declared_detism            :: maybe(determinism),
+/* 11 */        proc_inferred_detism            :: determinism,
 
                 % How should the proc be evaluated.
-/* 13 */        proc_eval_method                :: eval_method,
+/* 12 */        proc_eval_method                :: eval_method,
 
-/* 14 */        proc_mode_errors                :: list(mode_error_info),
+/* 13 */        proc_mode_errors                :: list(mode_error_info),
 
-/* 15 */        proc_sub_info                   :: proc_sub_info
+/* 14 */        proc_sub_info                   :: proc_sub_info
             ).
 
 :- type proc_sub_info
@@ -2577,9 +2582,25 @@ marker_list_to_markers(Markers, MarkerSet) :-
                 % of the unique_modes pass.
                 psi_can_process                 :: can_process,
 
+                % XXX The mode of the procedure in the ROBDD based
+                % constraint system. Whether it represents the declared
+                % or the actual mode is unclear, but since that constraint
+                % system is obsolete, this does not much matter :-(
+                psi_maybe_head_modes_constr    :: maybe(mode_constraint),
+
                 % Was the determinism declaration explicit, or was it implicit,
                 % as for functions?
                 psi_detism_decl                 :: detism_decl,
+
+                % A list of all the contexts at which cse_detection.m
+                % declined to pull out a common deconstruction out of
+                % a branched control structure due to concerns about
+                % uniqueness in the inst of the affected variable.
+                % Determinism analysis wants this information so that
+                % it knows whether to mention this fact to the user
+                % as a possible cause of a determinism error.
+                % See Mantis bug #496.
+                psi_cse_nopull_contexts         :: list(prog_context),
 
                 % If set, it means this procedure was created from another
                 % procedure by the untupling transformation. This slot records
@@ -2743,7 +2764,7 @@ marker_list_to_markers(Markers, MarkerSet) :-
                 % In the usual case where this predicate is NOT marked
                 % as obsolete, this will be "no".
                 psi_proc_obsolete_in_favour_of  :: maybe(list(
-                                                    sym_name_and_arity)),
+                                                    sym_name_arity)),
 
                 %-----------------------------------------------------------%
                 % Information needed for deep profiling.
@@ -2908,6 +2929,7 @@ proc_info_init(MainContext, ItemNumber, Arity, Types, DeclaredModes, Modes,
     % argument ItemNumber
     CanProcess = can_process_now,
     % argument DetismDecl
+    CseNopullContexts = [],
     MaybeUntupleInfo = no `with_type` maybe(untuple_proc_info),
     % argument VarNameRemap
     StateVarWarnings = [],
@@ -2929,7 +2951,7 @@ proc_info_init(MainContext, ItemNumber, Arity, Types, DeclaredModes, Modes,
     MaybeCallTableTip = no `with_type` maybe(prog_var),
     MaybeTableIOInfo = no `with_type` maybe(proc_table_io_info),
     MaybeTableAttrs = no `with_type` maybe(table_attributes),
-    MaybeObsoleteInFavourOf = no `with_type` maybe(list(sym_name_and_arity)),
+    MaybeObsoleteInFavourOf = no `with_type` maybe(list(sym_name_arity)),
     MaybeDeepProfProcInfo = no `with_type` maybe(deep_profile_proc_info),
     MaybeArgSizes = no `with_type` maybe(arg_size_info),
     MaybeTermInfo = no `with_type` maybe(termination_info),
@@ -2944,7 +2966,9 @@ proc_info_init(MainContext, ItemNumber, Arity, Types, DeclaredModes, Modes,
         MainContext,
         ItemNumber,
         CanProcess,
+        MaybeHeadModesConstr,
         DetismDecl,
+        CseNopullContexts,
         MaybeUntupleInfo,
         VarNameRemap,
         StateVarWarnings,
@@ -3003,7 +3027,6 @@ proc_info_init(MainContext, ItemNumber, Arity, Types, DeclaredModes, Modes,
         InstVarSet,
         DeclaredModes,
         Modes,
-        MaybeHeadModesConstr,
         MaybeArgLives,
         MaybeDeclaredDetism,
         InferredDetism,
@@ -3040,6 +3063,7 @@ proc_info_create_with_declared_detism(MainContext, ItemNumber,
     % argument ItemNumber
     CanProcess = can_process_now,
     % argument DetismDecl
+    CseNopullContexts = [],
     MaybeUntupleInfo = no `with_type` maybe(untuple_proc_info),
     % argument VarNameRemap
     StateVarWarnings = [],
@@ -3061,7 +3085,7 @@ proc_info_create_with_declared_detism(MainContext, ItemNumber,
     MaybeCallTableTip = no `with_type` maybe(prog_var),
     MaybeTableIOInfo = no `with_type` maybe(proc_table_io_info),
     MaybeTableAttrs = no `with_type` maybe(table_attributes),
-    MaybeObsoleteInFavourOf = no `with_type` maybe(list(sym_name_and_arity)),
+    MaybeObsoleteInFavourOf = no `with_type` maybe(list(sym_name_arity)),
     MaybeDeepProfProcInfo = no `with_type` maybe(deep_profile_proc_info),
     MaybeArgSizes = no `with_type` maybe(arg_size_info),
     MaybeTermInfo = no `with_type` maybe(termination_info),
@@ -3076,7 +3100,9 @@ proc_info_create_with_declared_detism(MainContext, ItemNumber,
         MainContext,
         ItemNumber,
         CanProcess,
+        MaybeHeadModesConstr,
         DetismDecl,
+        CseNopullContexts,
         MaybeUntupleInfo,
         VarNameRemap,
         StateVarWarnings,
@@ -3132,7 +3158,6 @@ proc_info_create_with_declared_detism(MainContext, ItemNumber,
         InstVarSet,
         DeclaredModes,
         Modes,
-        MaybeHeadModesConstr,
         MaybeArgLives,
         MaybeDeclaredDetism,
         Detism,
@@ -3182,6 +3207,8 @@ proc_info_get_can_process(PI, X) :-
     X = PI ^ proc_sub_info ^ psi_can_process.
 proc_info_get_detism_decl(PI, X) :-
     X = PI ^ proc_sub_info ^ psi_detism_decl.
+proc_info_get_cse_nopull_contexts(PI, X) :-
+    X = PI ^ proc_sub_info ^ psi_cse_nopull_contexts.
 proc_info_get_maybe_untuple_info(PI, X) :-
     X = PI ^ proc_sub_info ^ psi_maybe_untuple_info.
 proc_info_get_var_name_remap(PI, X) :-
@@ -3255,8 +3282,6 @@ proc_info_set_maybe_declared_argmodes(X, !PI) :-
     !PI ^ proc_maybe_decl_head_modes := X.
 proc_info_set_argmodes(X, !PI) :-
     !PI ^ proc_actual_head_modes := X.
-proc_info_set_head_modes_constraint(X, !PI) :-
-    !PI ^ proc_maybe_head_modes_constr := yes(X).
 proc_info_set_maybe_arglives(X, !PI) :-
     !PI ^ proc_headvar_caller_liveness := X.
 proc_info_set_inferred_determinism(X, !PI) :-
@@ -3268,8 +3293,12 @@ proc_info_set_mode_errors(X, !PI) :-
 
 proc_info_set_can_process(X, !PI) :-
     !PI ^ proc_sub_info ^ psi_can_process := X.
+proc_info_set_head_modes_constraint(X, !PI) :-
+    !PI ^ proc_sub_info ^ psi_maybe_head_modes_constr := yes(X).
 proc_info_set_detism_decl(X, !PI) :-
     !PI ^ proc_sub_info ^ psi_detism_decl := X.
+proc_info_set_cse_nopull_contexts(X, !PI) :-
+    !PI ^ proc_sub_info ^ psi_cse_nopull_contexts := X.
 proc_info_set_maybe_untuple_info(X, !PI) :-
     !PI ^ proc_sub_info ^ psi_maybe_untuple_info := X.
 proc_info_set_var_name_remap(X, !PI) :-
@@ -3376,7 +3405,8 @@ proc_info_reset_imported_structure_reuse(!ProcInfo) :-
         ^ maybe_imported_reuse := no.
 
 proc_info_head_modes_constraint(ProcInfo, HeadModesConstraint) :-
-    MaybeHeadModesConstraint = ProcInfo ^ proc_maybe_head_modes_constr,
+    MaybeHeadModesConstraint =
+        ProcInfo ^ proc_sub_info ^ psi_maybe_head_modes_constr,
     (
         MaybeHeadModesConstraint = yes(HeadModesConstraint)
     ;

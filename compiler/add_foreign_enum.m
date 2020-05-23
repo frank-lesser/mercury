@@ -119,6 +119,7 @@
 :- import_module parse_tree.prog_data_foreign.
 
 :- import_module bool.
+:- import_module one_or_more.
 :- import_module pair.
 :- import_module require.
 :- import_module string.
@@ -134,12 +135,6 @@ add_pragma_foreign_enum(ModuleInfo, ImsItem, !TypeCtorForeignEnumMap,
     ImsItem = {ItemMercuryStatus, ItemForeignEnum},
     ItemForeignEnum = item_foreign_enum_info(Lang, TypeCtor,
         OoMMercuryForeignTagPairs, Context, _SeqNum),
-    % Here we construct ItemPragmaInfo just to test whether this pragma
-    % was in the interface. Unfortunately, while we *could* avoid this
-    % (e.g. by making report_if_pragma_is_wrongly_in_interface work
-    % not on full pragmas but on pragma kinds, a flattened-to-an-enum
-    % form of pragmas), the cost in increased code complexity is
-    % not worth it.
     item_mercury_status_to_type_status(ItemMercuryStatus, PragmaStatus),
     TypeCtor = type_ctor(TypeSymName, TypeArity),
     TypeSNA = sym_name_arity(TypeSymName, TypeArity),
@@ -183,16 +178,18 @@ add_pragma_foreign_enum(ModuleInfo, ImsItem, !TypeCtorForeignEnumMap,
             else if
                 PragmaStatus = type_status(status_exported)
             then
-                add_foreign_enum_pragma_in_interface_error(Context,
-                    TypeSymName, TypeArity, !Specs)
+                % We should have filtered out foreign_enum pragmas
+                % in the interface section when we constructed the parse tree;
+                % this is just a sanity check.
+                unexpected($pred, "foreign_enum in the interface section")
             else
                 % As of 2019 Sep 29, this should not happen anymore,
                 % since we now catch foreign_enum pragmas that refer
                 % to types in other modules when parsing them.
                 NotThisModulePieces = ContextPieces ++
-                    [words("error: "), qual_sym_name_and_arity(TypeSNA),
+                    [words("error: "), qual_sym_name_arity(TypeSNA),
                     words("is not defined in this module."), nl],
-                NotThisModuleSpec = simplest_spec(severity_error,
+                NotThisModuleSpec = simplest_spec($pred, severity_error,
                     phase_parse_tree_to_hlds, Context, NotThisModulePieces),
                 !:Specs = [NotThisModuleSpec | !.Specs]
             ),
@@ -438,7 +435,8 @@ build_export_enum_name_map(ContextPieces, Context, Lang, Prefix, MakeUpperCase,
         Msg = simple_msg(Context,
             [always(AlwaysPieces),
             verbose_only(verbose_always, VerbosePieces)]),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+        Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
+            [Msg]),
         !:Specs = [Spec | !.Specs]
     ).
 
@@ -602,7 +600,7 @@ build_mercury_foreign_map(TypeModuleName, TypeSymName, TypeArity, ForWhat,
                 [suffix("."), nl_indent_delta(-2)]
         ),
         Pieces = MainPieces ++ CtorNamePieces ++ ForeignNamePieces,
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ),
@@ -623,7 +621,7 @@ build_mercury_foreign_map(TypeModuleName, TypeSymName, TypeArity, ForWhat,
 
 :- pred find_nonenum_ctors_build_valid_ctor_names(list(constructor)::in,
     set_tree234(string)::in, set_tree234(string)::out,
-    cord(sym_name_and_arity)::in, cord(sym_name_and_arity)::out) is det.
+    cord(sym_name_arity)::in, cord(sym_name_arity)::out) is det.
 
 find_nonenum_ctors_build_valid_ctor_names([], !ValidNamesSet, !NonEnumSNAs).
 find_nonenum_ctors_build_valid_ctor_names([Ctor | Ctors],
@@ -728,7 +726,7 @@ add_foreign_enum_unmapped_ctors_error(Context, ContextPieces, CtorNames0,
             verbose_and_nonverbose(VerboseCtorsPieces, NonVerboseCtorsPieces)
     ),
     Msg = simple_msg(Context, [always(PrefixPieces), CtorsComponent]),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds, [Msg]),
+    Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds, [Msg]),
     !:Specs = [Spec | !.Specs].
 
 %---------------------------------------------------------------------------%
@@ -779,7 +777,7 @@ add_unknown_ctors_error(Context, ContextPieces, Ctors, !Specs) :-
         words("error: the following"), words(IsOrAre),
         words("of the type:"), nl_indent_delta(2)] ++
         unqual_ctors_to_line_pieces(Ctors, [suffix(".")]),
-    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
         Context, ContextPieces ++ ErrorPieces),
     !:Specs = [Spec | !.Specs].
 
@@ -796,24 +794,8 @@ add_bad_qual_ctors_error(Context, ContextPieces, Ctors, !Specs) :-
         words("that is not compatible with the type definition:"),
         nl_indent_delta(2)] ++
         qual_ctors_to_line_pieces(Ctors, [suffix(".")]),
-    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
         Context, ContextPieces ++ ErrorPieces),
-    !:Specs = [Spec | !.Specs].
-
-%---------------------------------------------------------------------------%
-
-:- pred add_foreign_enum_pragma_in_interface_error(prog_context::in,
-    sym_name::in, arity::in, list(error_spec)::in, list(error_spec)::out)
-    is det.
-
-add_foreign_enum_pragma_in_interface_error(Context, TypeSymame, TypeArity,
-        !Specs) :-
-    ErrorPieces = [words("Error: "),
-        pragma_decl("foreign_enum"), words("declaration for"),
-        qual_sym_name_and_arity(sym_name_arity(TypeSymame, TypeArity)),
-        words("in module interface."), nl],
-    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-        Context, ErrorPieces),
     !:Specs = [Spec | !.Specs].
 
 %---------------------------------------------------------------------------%
@@ -831,14 +813,14 @@ maybe_add_duplicate_foreign_enum_error(TypeSymame, TypeArity, Lang,
         LangStr = mercury_foreign_language_to_string(Lang),
         CurPieces = [words("Error: duplicate foreign_enum pragma"),
             words("for type constructor"),
-            qual_sym_name_and_arity(TypeSymNameArity),
+            qual_sym_name_arity(TypeSymNameArity),
             words("and target language"), fixed(LangStr), suffix("."), nl],
         OldPieces = [words("The first foreign_enum pragma"),
-            words("for"), qual_sym_name_and_arity(TypeSymNameArity),
+            words("for"), qual_sym_name_arity(TypeSymNameArity),
             words("and"), fixed(LangStr), words("was here."), nl],
         CurMsg = simplest_msg(Context, CurPieces),
         OldMsg = simplest_msg(OldContext, OldPieces),
-        Spec = error_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
             [CurMsg, OldMsg]),
         !:Specs = [Spec | !.Specs]
     ).
@@ -858,9 +840,9 @@ report_if_builtin_type(Context, ContextPieces, TypeSymame, TypeArity,
         is_builtin_type_sym_name(TypeSymame)
     then
         Pieces = ContextPieces ++ [words("error: "),
-            unqual_sym_name_and_arity(sym_name_arity(TypeSymame, TypeArity)),
+            unqual_sym_name_arity(sym_name_arity(TypeSymame, TypeArity)),
             words("is a builtin type."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     else
@@ -870,7 +852,7 @@ report_if_builtin_type(Context, ContextPieces, TypeSymame, TypeArity,
 :- type not_enum_info
     --->    not_enum_du(
                 % The non-enum sym_names and their (nonzero) arities.
-                list(sym_name_and_arity)
+                list(sym_name_arity)
             )
     ;       not_enum_non_du(
                 % What kind of non-du type is it?
@@ -915,10 +897,10 @@ report_not_enum_type(Context, ContextPieces, TypeSymName, TypeArity,
     (
         NotEnumInfo = not_enum_non_du(TypeKindDesc),
         Pieces = ContextPieces ++ [words("error: "),
-            qual_sym_name_and_arity(TypeSNA),
+            qual_sym_name_arity(TypeSNA),
             words("is not an enumeration type;"),
             words("it is"), words(TypeKindDesc), suffix("."), nl],
-        Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+        Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
             Context, Pieces),
         !:Specs = [Spec | !.Specs]
     ;
@@ -935,18 +917,18 @@ report_not_enum_type(Context, ContextPieces, TypeSymName, TypeArity,
             OrderedNonEnumSNAs = [_ | _],
             SNAPieces =
                 component_list_to_pieces("and",
-                    list.map(func(SNA) = unqual_sym_name_and_arity(SNA),
+                    list.map(func(SNA) = unqual_sym_name_arity(SNA),
                         OrderedNonEnumSNAs)),
             ItHasThese = choose_number(OrderedNonEnumSNAs,
                 words("It has this non-zero arity constructor:"),
                 words("It has these non-zero arity constructors:")),
             Pieces = ContextPieces ++ [words("error: "),
-                qual_sym_name_and_arity(TypeSNA),
+                qual_sym_name_arity(TypeSNA),
                 words("is not an enumeration type."), nl,
                 ItHasThese, nl_indent_delta(2)] ++ SNAPieces ++
                 [suffix("."), nl_indent_delta(-2)],
-            Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-                Context, Pieces),
+            Spec = simplest_spec($pred, severity_error,
+                phase_parse_tree_to_hlds, Context, Pieces),
             !:Specs = [Spec | !.Specs]
         )
     ).

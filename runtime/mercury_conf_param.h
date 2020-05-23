@@ -131,7 +131,6 @@
 // Code generation options:
 //
 // MR_HIGHLEVEL_CODE
-// MR_HIGHLEVEL_DATA
 // MR_USE_GCC_GLOBAL_REGISTERS
 // MR_USE_GCC_NONLOCAL_GOTOS
 // MR_USE_ASM_LABELS
@@ -150,7 +149,6 @@
 // MR_USE_SINGLE_PREC_FLOAT
 // MR_EXTEND_STACKS_WHEN_NEEDED
 // MR_STACK_SEGMENTS
-// MR_TRAIL_SEGMENTS
 // MR_INLINE_ALLOC
 // MR_TAGBITS
 // MR_USE_REGIONS
@@ -173,7 +171,6 @@
 //    --single-prec-float
 //    --extend-stacks-when-needed
 //    --stack-segments
-//    --trail-segments
 //    --inline-alloc
 //    --pic-reg
 //    --tags
@@ -393,6 +390,10 @@
 // MR_DEBUG_TRAIL_SEGMENTS
 // Enables low-level debugging messages when updating the list of
 // trail segments.
+//
+// MR_USE_FIXED_SIZE_TRAIL
+// Disables the trail segment mechanism; this is sometimes useful for
+// developers working on that mechanism.
 //
 // MR_TRACE_CHECK_INTEGRITY
 // Enables the -i and --integrity options on mdb's forward movement

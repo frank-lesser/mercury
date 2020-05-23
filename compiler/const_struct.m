@@ -133,24 +133,7 @@ const_struct_db_init(Globals, Db) :-
     globals.get_target(Globals, Target),
     (
         Target = target_c,
-        globals.lookup_bool_option(Globals, highlevel_data, HighLevelData),
-        (
-            HighLevelData = no,
-            globals.get_tags_method(Globals, Tags),
-            (
-                Tags = tags_low,
-                can_enable_const_struct(Globals, PolyEnabled,
-                    GroundTermEnabled)
-            ;
-                Tags = tags_none,
-                PolyEnabled = no,
-                GroundTermEnabled = no
-            )
-        ;
-            HighLevelData = yes,
-            PolyEnabled = no,
-            GroundTermEnabled = no
-        )
+        can_enable_const_struct(Globals, PolyEnabled, GroundTermEnabled)
     ;
         Target = target_java,
         can_enable_const_struct(Globals, PolyEnabled, _GroundTermEnabled),

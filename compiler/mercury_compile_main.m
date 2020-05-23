@@ -55,7 +55,6 @@
 :- import_module hlds.make_hlds.
 :- import_module hlds.passes_aux.
 :- import_module libs.check_libgrades.
-:- import_module libs.compiler_util.
 :- import_module libs.compute_grade.
 :- import_module libs.file_util.
 :- import_module libs.handle_options.
@@ -63,8 +62,8 @@
 :- import_module libs.options.
 :- import_module libs.timestamp.
 :- import_module make.
+:- import_module make.build.
 :- import_module make.options_file.
-:- import_module make.util.
 :- import_module mdbcomp.
 :- import_module mdbcomp.builtin_modules.
 :- import_module mdbcomp.shared_utilities.
@@ -76,10 +75,11 @@
 :- import_module parse_tree.file_kind.
 :- import_module parse_tree.file_names.
 :- import_module parse_tree.generate_dep_d_files.
+:- import_module parse_tree.grab_modules.
+:- import_module parse_tree.item_util.
 :- import_module parse_tree.module_cmds.
 :- import_module parse_tree.module_imports.
 :- import_module parse_tree.module_qual.
-:- import_module parse_tree.grab_modules.
 :- import_module parse_tree.parse_error.
 :- import_module parse_tree.parse_tree_out.
 :- import_module parse_tree.prog_data.
@@ -567,18 +567,22 @@ main_after_setup(Globals, DetectedGradeFlags, OptionVariables, OptionArgs,
         io.set_output_stream(OldOutputStream, _, !IO)
     else
         globals.get_op_mode(Globals, OpMode),
+        HaveReadModuleMaps0 = init_have_read_module_maps,
         do_op_mode(Globals, OpMode, DetectedGradeFlags,
-            OptionVariables, OptionArgs, Args, !IO)
+            OptionVariables, OptionArgs, Args,
+            HaveReadModuleMaps0, _HaveReadModuleMaps, !IO)
     ).
 
 %---------------------------------------------------------------------------%
 
 :- pred do_op_mode(globals::in, op_mode::in,
     list(string)::in, options_variables::in,
-    list(string)::in, list(string)::in, io::di, io::uo) is det.
+    list(string)::in, list(string)::in,
+    have_read_module_maps::in, have_read_module_maps::out,
+    io::di, io::uo) is det.
 
 do_op_mode(Globals, OpMode, DetectedGradeFlags, OptionVariables,
-        OptionArgs, Args, !IO) :-
+        OptionArgs, Args, !HaveReadModuleMaps, !IO) :-
     (
         OpMode = opm_top_make,
         make_process_compiler_args(Globals, DetectedGradeFlags,
@@ -603,7 +607,8 @@ do_op_mode(Globals, OpMode, DetectedGradeFlags, OptionVariables,
             usage(!IO)
         else
             do_op_mode_args(Globals, OpModeArgs, FileNamesFromStdin,
-                DetectedGradeFlags, OptionVariables, OptionArgs, Args, !IO)
+                DetectedGradeFlags, OptionVariables, OptionArgs, Args,
+                !HaveReadModuleMaps, !IO)
         )
     ).
 
@@ -673,7 +678,7 @@ do_op_mode_query(Globals, OpModeQuery, !IO) :-
     ;
         OpModeQuery = opmq_output_grade_defines,
         io.stdout_stream(StdOut, !IO),
-        output_grade_defines(Globals, StdOut, !IO)
+        output_c_grade_defines(Globals, StdOut, !IO)
     ;
         OpModeQuery = opmq_output_link_command,
         globals.lookup_string_option(Globals, link_executable_command,
@@ -730,22 +735,24 @@ do_op_mode_query(Globals, OpModeQuery, !IO) :-
 
 :- pred do_op_mode_args(globals::in, op_mode_args::in, bool::in,
     list(string)::in, options_variables::in,
-    list(string)::in, list(string)::in, io::di, io::uo) is det.
+    list(string)::in, list(string)::in,
+    have_read_module_maps::in, have_read_module_maps::out,
+    io::di, io::uo) is det.
 
 do_op_mode_args(Globals, OpModeArgs, FileNamesFromStdin, DetectedGradeFlags,
-        OptionVariables, OptionArgs, Args, !IO) :-
+        OptionVariables, OptionArgs, Args, !HaveReadModuleMaps, !IO) :-
     (
         FileNamesFromStdin = yes,
         process_compiler_stdin_args(Globals, OpModeArgs,
             DetectedGradeFlags, OptionVariables, OptionArgs,
-            cord.empty, ModulesToLinkCord,
-            cord.empty, ExtraObjFilesCord, !IO)
+            cord.empty, ModulesToLinkCord, cord.empty, ExtraObjFilesCord,
+            !HaveReadModuleMaps, !IO)
     ;
         FileNamesFromStdin = no,
         process_compiler_cmd_line_args(Globals, OpModeArgs,
             DetectedGradeFlags, OptionVariables, OptionArgs, Args,
-            cord.empty, ModulesToLinkCord,
-            cord.empty, ExtraObjFilesCord, !IO)
+            cord.empty, ModulesToLinkCord, cord.empty, ExtraObjFilesCord,
+            !HaveReadModuleMaps, !IO)
     ),
     ModulesToLink = cord.list(ModulesToLinkCord),
     ExtraObjFiles = cord.list(ExtraObjFilesCord),
@@ -861,10 +868,13 @@ compile_with_module_options(Globals, ModuleName, DetectedGradeFlags,
 :- pred process_compiler_stdin_args(globals::in, op_mode_args::in,
     list(string)::in, options_variables::in, list(string)::in,
     cord(string)::in, cord(string)::out,
-    cord(string)::in, cord(string)::out, io::di, io::uo) is det.
+    cord(string)::in, cord(string)::out,
+    have_read_module_maps::in, have_read_module_maps::out,
+    io::di, io::uo) is det.
 
 process_compiler_stdin_args(Globals, OpModeArgs, DetectedGradeFlags,
-        OptionVariables, OptionArgs, !Modules, !ExtraObjFiles, !IO) :-
+        OptionVariables, OptionArgs, !Modules, !ExtraObjFiles,
+        !HaveReadModuleMaps, !IO) :-
     ( if is_empty(!.Modules) then
         true
     else
@@ -876,11 +886,12 @@ process_compiler_stdin_args(Globals, OpModeArgs, DetectedGradeFlags,
         Arg = string.rstrip(Line),
         process_compiler_arg(Globals, OpModeArgs, DetectedGradeFlags,
             OptionVariables, OptionArgs, Arg, ArgModules, ArgExtraObjFiles,
-            !IO),
+            !HaveReadModuleMaps, !IO),
         !:Modules = !.Modules ++ cord.from_list(ArgModules),
         !:ExtraObjFiles = !.ExtraObjFiles ++ cord.from_list(ArgExtraObjFiles),
         process_compiler_stdin_args(Globals, OpModeArgs, DetectedGradeFlags,
-            OptionVariables, OptionArgs, !Modules, !ExtraObjFiles, !IO)
+            OptionVariables, OptionArgs, !Modules, !ExtraObjFiles,
+            !HaveReadModuleMaps, !IO)
     ;
         FileResult = eof
     ;
@@ -894,16 +905,18 @@ process_compiler_stdin_args(Globals, OpModeArgs, DetectedGradeFlags,
 :- pred process_compiler_cmd_line_args(globals::in, op_mode_args::in,
     list(string)::in, options_variables::in,
     list(string)::in, list(string)::in,
-    cord(string)::in, cord(string)::out,
-    cord(string)::in, cord(string)::out, io::di, io::uo) is det.
+    cord(string)::in, cord(string)::out, cord(string)::in, cord(string)::out,
+    have_read_module_maps::in, have_read_module_maps::out,
+    io::di, io::uo) is det.
 
 process_compiler_cmd_line_args(_, _, _, _, _, [],
-        !Modules, !ExtraObjFiles, !IO).
+        !Modules, !ExtraObjFiles, !HaveReadModuleMaps, !IO).
 process_compiler_cmd_line_args(Globals, OpModeArgs, DetectedGradeFlags,
         OptionVariables, OptionArgs, [Arg | Args],
-        !Modules, !ExtraObjFiles, !IO) :-
+        !Modules, !ExtraObjFiles, !HaveReadModuleMaps, !IO) :-
     process_compiler_arg(Globals, OpModeArgs, DetectedGradeFlags,
-        OptionVariables, OptionArgs, Arg, ArgModules, ArgExtraObjFiles, !IO),
+        OptionVariables, OptionArgs, Arg, ArgModules, ArgExtraObjFiles,
+        !HaveReadModuleMaps, !IO),
     (
         Args = [_ | _],
         garbage_collect(!IO)
@@ -913,7 +926,8 @@ process_compiler_cmd_line_args(Globals, OpModeArgs, DetectedGradeFlags,
     !:Modules = !.Modules ++ cord.from_list(ArgModules),
     !:ExtraObjFiles = !.ExtraObjFiles ++ cord.from_list(ArgExtraObjFiles),
     process_compiler_cmd_line_args(Globals, OpModeArgs, DetectedGradeFlags,
-        OptionVariables, OptionArgs, Args, !Modules, !ExtraObjFiles, !IO).
+        OptionVariables, OptionArgs, Args, !Modules, !ExtraObjFiles,
+        !HaveReadModuleMaps, !IO).
 
     % Figure out whether the compiler argument is a module name or a file name.
     % Open the specified file or module, and process it.
@@ -930,10 +944,12 @@ process_compiler_cmd_line_args(Globals, OpModeArgs, DetectedGradeFlags,
 :- pred process_compiler_arg(globals::in, op_mode_args::in,
     list(string)::in, options_variables::in,
     list(string)::in, string::in, list(string)::out, list(string)::out,
+    have_read_module_maps::in, have_read_module_maps::out,
     io::di, io::uo) is det.
 
 process_compiler_arg(Globals, OpModeArgs, DetectedGradeFlags, OptionVariables,
-        OptionArgs, Arg, ModulesToLink, ExtraObjFiles, !IO) :-
+        OptionArgs, Arg, ModulesToLink, ExtraObjFiles,
+        !HaveReadModuleMaps, !IO) :-
     FileOrModule = string_to_file_or_module(Arg),
     globals.lookup_bool_option(Globals, invoked_by_mmc_make, InvokedByMake),
     (
@@ -943,7 +959,8 @@ process_compiler_arg(Globals, OpModeArgs, DetectedGradeFlags, OptionVariables,
         build_with_module_options_args(Globals,
             file_or_module_to_module_name(FileOrModule),
             DetectedGradeFlags, OptionVariables, OptionArgs, ExtraOptions,
-            process_compiler_arg_build(OpModeArgs, FileOrModule, OptionArgs),
+            process_compiler_arg_build(OpModeArgs, FileOrModule, OptionArgs,
+                !.HaveReadModuleMaps),
             _Succeeded, DummyInput, MaybeTuple, !IO),
         % XXX Why do we ignore _Succeeded? We know it is set to `yes'
         % by process_compiler_arg_build, but this could be overridden by
@@ -952,7 +969,7 @@ process_compiler_arg(Globals, OpModeArgs, DetectedGradeFlags, OptionVariables,
         % expect(unify(Succeeded, yes), $pred, "Succeeded != yes"),
         (
             MaybeTuple = yes(Tuple),
-            Tuple = {ModulesToLink, ExtraObjFiles}
+            Tuple = {ModulesToLink, ExtraObjFiles, !:HaveReadModuleMaps}
         ;
             MaybeTuple = no,
             ModulesToLink = [],
@@ -962,26 +979,32 @@ process_compiler_arg(Globals, OpModeArgs, DetectedGradeFlags, OptionVariables,
         InvokedByMake = yes,
         % `mmc --make' has already set up the options.
         do_process_compiler_arg(Globals, OpModeArgs, OptionArgs, FileOrModule,
-            ModulesToLink, ExtraObjFiles, !IO)
+            ModulesToLink, ExtraObjFiles, !HaveReadModuleMaps, !IO)
     ).
 
 :- pred process_compiler_arg_build(op_mode_args::in, file_or_module::in,
-    list(string)::in, globals::in, list(string)::in, bool::out,
-    unit::in, {list(string), list(string)}::out, io::di, io::uo) is det.
+    list(string)::in, have_read_module_maps::in,
+    globals::in, list(string)::in, bool::out,
+    unit::in, {list(string), list(string), have_read_module_maps}::out,
+    io::di, io::uo) is det.
 
-process_compiler_arg_build(OpModeArgs, FileOrModule, OptionArgs, Globals, _,
-        Succeeded, _DummyInput, {Modules, ExtraObjFiles}, !IO) :-
+process_compiler_arg_build(OpModeArgs, FileOrModule, OptionArgs,
+        HaveReadModuleMaps0, Globals, _, Succeeded,
+        _DummyInput, {Modules, ExtraObjFiles, HaveReadModuleMaps},
+        !IO) :-
     maybe_check_libraries_are_installed(Globals, LibgradeCheckSucceeded, !IO),
     (
         LibgradeCheckSucceeded = yes,
         do_process_compiler_arg(Globals, OpModeArgs, OptionArgs, FileOrModule,
-            Modules, ExtraObjFiles, !IO),
+            Modules, ExtraObjFiles,
+            HaveReadModuleMaps0, HaveReadModuleMaps, !IO),
         Succeeded = yes
     ;
         LibgradeCheckSucceeded = no,
         Modules = [],
         ExtraObjFiles = [],
-        Succeeded = no
+        Succeeded = no,
+        HaveReadModuleMaps = HaveReadModuleMaps0
     ).
 
 :- func version_numbers_return_timestamp(bool) = maybe_return_timestamp.
@@ -991,10 +1014,11 @@ version_numbers_return_timestamp(yes) = do_return_timestamp.
 
 :- pred do_process_compiler_arg(globals::in, op_mode_args::in,
     list(string)::in, file_or_module::in, list(string)::out, list(string)::out,
+    have_read_module_maps::in, have_read_module_maps::out,
     io::di, io::uo) is det.
 
 do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
-        ModulesToLink, ExtraObjFiles, !IO) :-
+        ModulesToLink, ExtraObjFiles, !HaveReadModuleMaps, !IO) :-
     % XXX ITEM_LIST There is an inconsistency between the various OpModeArgs
     % that construct a module_and_imports structure in how they do it.
     %
@@ -1045,11 +1069,9 @@ do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
         ExtraObjFiles = []
     ;
         OpModeArgs = opma_convert_to_mercury,
-        HaveReadModuleMaps0 =
-            have_read_module_maps(map.init, map.init, map.init),
         read_module_or_file(Globals0, Globals, FileOrModule, ModuleName, _,
             dont_return_timestamp, _, ParseTreeSrc, Specs, Errors,
-            HaveReadModuleMaps0, _HaveReadModuleMaps, !IO),
+            !HaveReadModuleMaps, !IO),
         write_error_specs_ignore(Specs, Globals, !IO),
         ( if halt_at_module_error(Globals, Errors) then
             true
@@ -1078,31 +1100,30 @@ do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
             ReturnTimestamp =
                 version_numbers_return_timestamp(GenerateVersionNumbers)
         ),
-        HaveReadModuleMaps0 =
-            have_read_module_maps(map.init, map.init, map.init),
         read_module_or_file(Globals0, Globals, FileOrModule,
             ModuleName, FileName, ReturnTimestamp, MaybeTimestamp,
-            ParseTreeSrc, Specs0, Errors,
-            HaveReadModuleMaps0, _HaveReadModuleMaps, !IO),
-        ( if halt_at_module_error(Globals, Errors) then
-            true
+            ParseTreeSrc, ReadSpecs, ReadErrors, !HaveReadModuleMaps, !IO),
+        ( if halt_at_module_error(Globals, ReadErrors) then
+            write_error_specs_ignore(ReadSpecs, Globals, !IO)
         else
             split_into_compilation_units_perform_checks(ParseTreeSrc,
-                RawCompUnits, Specs0, Specs),
+                RawCompUnits, ReadSpecs, ReadSplitSpecs),
+            filter_interface_generation_specs(Globals,
+                ReadSplitSpecs, Specs, !IO),
             write_error_specs_ignore(Specs, Globals, !IO),
             maybe_print_delayed_error_messages(Globals, !IO),
             (
                 InterfaceFile = omif_int0,
-                list.foldl(
+                list.foldl2(
                     write_private_interface_file_int0(Globals0,
                         FileName, ModuleName, MaybeTimestamp),
-                    RawCompUnits, !IO)
+                    RawCompUnits, !HaveReadModuleMaps, !IO)
             ;
                 InterfaceFile = omif_int1_int2,
-                list.foldl(
+                list.foldl2(
                     write_interface_file_int1_int2(Globals0,
                         FileName, ModuleName, MaybeTimestamp),
-                    RawCompUnits, !IO)
+                    RawCompUnits, !HaveReadModuleMaps, !IO)
             ;
                 InterfaceFile = omif_int3,
                 list.foldl(
@@ -1144,11 +1165,9 @@ do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
             find_timestamp_files(Globals, FindTimestampFiles),
             recompilation.check.should_recompile(Globals, ModuleName,
                 FindTargetFiles, FindTimestampFiles, ModulesToRecompile,
-                HaveReadModuleMaps, !IO)
+                !HaveReadModuleMaps, !IO)
         ;
             Smart = no,
-            HaveReadModuleMaps =
-                have_read_module_maps(map.init, map.init, map.init),
             ModulesToRecompile = all_modules
         ),
         ( if ModulesToRecompile = some_modules([]) then
@@ -1159,8 +1178,8 @@ do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
             ExtraObjFiles = []
         else
             read_augment_and_process_module(Globals, OpModeAugment, OptionArgs,
-                FileOrModule, ModulesToRecompile, HaveReadModuleMaps,
-                ModulesToLink, ExtraObjFiles, !IO)
+                FileOrModule, ModulesToRecompile,
+                ModulesToLink, ExtraObjFiles, !HaveReadModuleMaps, !IO)
         )
     ).
 
@@ -1230,12 +1249,13 @@ find_timestamp_files_2(Globals, TimestampSuffix, ModuleName, TimestampFiles,
 
 :- pred read_augment_and_process_module(globals::in,
     op_mode_augment::in, list(string)::in, file_or_module::in,
-    modules_to_recompile::in, have_read_module_maps::in,
-    list(string)::out, list(string)::out, io::di, io::uo) is det.
+    modules_to_recompile::in, list(string)::out, list(string)::out,
+    have_read_module_maps::in, have_read_module_maps::out,
+    io::di, io::uo) is det.
 
 read_augment_and_process_module(Globals0, OpModeAugment, OptionArgs,
-        FileOrModule, MaybeModulesToRecompile, HaveReadModuleMap0,
-        ModulesToLink, ExtraObjFiles, !IO) :-
+        FileOrModule, MaybeModulesToRecompile, ModulesToLink, ExtraObjFiles,
+        !HaveReadModuleMaps, !IO) :-
     (
         ( OpModeAugment = opmau_make_opt_int
         ; OpModeAugment = opmau_make_trans_opt_int
@@ -1254,7 +1274,7 @@ read_augment_and_process_module(Globals0, OpModeAugment, OptionArgs,
 
     read_module_or_file(Globals0, Globals, FileOrModule, ModuleName, FileName,
         do_return_timestamp, MaybeTimestamp, ParseTreeSrc, Specs0, Errors,
-        HaveReadModuleMap0, HaveReadModuleMaps, !IO),
+        !HaveReadModuleMaps, !IO),
 
     ( if halt_at_module_error(Globals, Errors) then
         write_error_specs_ignore(Specs0, Globals, !IO),
@@ -1306,8 +1326,8 @@ read_augment_and_process_module(Globals0, OpModeAugment, OptionArgs,
         ),
         augment_and_process_all_submodules(GlobalsToUse, OpModeAugment,
             FileName, ModuleName, MaybeTimestamp, NestedCompUnitNames,
-            HaveReadModuleMaps, FindTimestampFiles, RawCompUnitsToCompile,
-            Specs1, ModulesToLink, ExtraObjFiles, !IO)
+            FindTimestampFiles, RawCompUnitsToCompile,
+            Specs1, ModulesToLink, ExtraObjFiles, !HaveReadModuleMaps, !IO)
     ).
 
 :- pred maybe_report_cmd_line(bool::in, list(string)::in, list(string)::in,
@@ -1379,7 +1399,7 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
             % XXX When we have read the module before, it *could* have had
             % problems that should cause smart recompilation to be disabled.
             HaveReadModuleMapSrc0 = !.HaveReadModuleMaps ^ hrmm_src,
-            map.delete(have_read_module_key(ModuleName, sfk_src),
+            map.delete(ModuleName,
                 HaveReadModuleMapSrc0, HaveReadModuleMapSrc),
             !HaveReadModuleMaps ^ hrmm_src := HaveReadModuleMapSrc,
             FileNameDotM = FileNameDotMPrime,
@@ -1428,7 +1448,7 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
             % XXX When we have read the module before, it *could* have had
             % problems that should cause smart recompilation to be disabled.
             HaveReadModuleMapSrc0 = !.HaveReadModuleMaps ^ hrmm_src,
-            map.delete(have_read_module_key(ModuleName, sfk_src),
+            map.delete(ModuleName,
                 HaveReadModuleMapSrc0, HaveReadModuleMapSrc),
             !HaveReadModuleMaps ^ hrmm_src := HaveReadModuleMapSrc,
             ModuleName = DefaultModuleName,
@@ -1444,6 +1464,7 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
                 "Reading file", do_not_search,
                 always_read_module(ReturnTimestamp), MaybeTimestamp,
                 ParseTreeSrc, Specs, Errors, !IO),
+            ParseTreeSrc = parse_tree_src(ModuleName, _, _),
             io_get_disable_smart_recompilation(DisableSmart, !IO),
             (
                 DisableSmart = yes,
@@ -1452,41 +1473,6 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
             ;
                 DisableSmart = no,
                 Globals = Globals0
-            ),
-
-            % XXX If the module name doesn't match the file name, the compiler
-            % won't be able to find the `.used' file (the name of the `.used'
-            % file is derived from the module name not the file name).
-            % This will be fixed when mmake functionality is moved into
-            % the compiler.
-
-            globals.lookup_bool_option(Globals, smart_recompilation, Smart),
-            ParseTreeSrc = parse_tree_src(ModuleName, _, _),
-            ( if
-                Smart = yes,
-                ModuleName \= DefaultModuleName
-                % We want to give this warning even if smart recompilation
-                % was disabled before this.
-            then
-                globals.lookup_bool_option(Globals, warn_smart_recompilation,
-                    Warn),
-                (
-                    Warn = yes,
-                    Pieces = [words("Warning:"),
-                        words("module name does not match file name: "), nl,
-                        fixed(FileNameDotM), words("contains module"),
-                        qual_sym_name(ModuleName), suffix("."), nl,
-                        words("Smart recompilation will not work unless"),
-                        words("a module name to file name mapping is created"),
-                        words("using"), quote("mmc -f *.m"), suffix("."), nl],
-                    write_error_pieces_plain(Globals, Pieces, !IO),
-                    record_warning(Globals, !IO)
-                ;
-                    Warn = no
-                ),
-                io_set_disable_smart_recompilation(yes, !IO)
-            else
-                true
             )
         ),
         globals.lookup_bool_option(Globals, detailed_statistics, Stats),
@@ -1507,20 +1493,22 @@ read_module_or_file(Globals0, Globals, FileOrModuleName,
     %
 :- pred augment_and_process_all_submodules(globals::in,
     op_mode_augment::in, string::in, module_name::in,
-    maybe(timestamp)::in, set(module_name)::in, have_read_module_maps::in,
+    maybe(timestamp)::in, set(module_name)::in,
     find_timestamp_file_names::in(find_timestamp_file_names),
     list(raw_compilation_unit)::in, list(error_spec)::in,
-    list(string)::out, list(string)::out, io::di, io::uo) is det.
+    list(string)::out, list(string)::out,
+    have_read_module_maps::in, have_read_module_maps::out,
+    io::di, io::uo) is det.
 
 augment_and_process_all_submodules(Globals, OpModeAugment,
         FileName, SourceFileModuleName, MaybeTimestamp, NestedSubModules,
-        HaveReadModuleMaps, FindTimestampFiles, RawCompUnits, !.Specs,
-        ModulesToLink, ExtraObjFiles, !IO) :-
-    list.map_foldl2(
+        FindTimestampFiles, RawCompUnits, !.Specs,
+        ModulesToLink, ExtraObjFiles, !HaveReadModuleMaps, !IO) :-
+    list.map_foldl3(
         augment_and_process_module(Globals, OpModeAugment,
             FileName, SourceFileModuleName, MaybeTimestamp, NestedSubModules,
-            HaveReadModuleMaps, FindTimestampFiles),
-        RawCompUnits, ExtraObjFileLists, !Specs, !IO),
+            FindTimestampFiles),
+        RawCompUnits, ExtraObjFileLists, !Specs, !HaveReadModuleMaps, !IO),
     write_error_specs_ignore(!.Specs, Globals, !IO),
     list.map(module_to_link, RawCompUnits, ModulesToLink),
     list.condense(ExtraObjFileLists, ExtraObjFiles).
@@ -1548,16 +1536,17 @@ module_to_link(raw_compilation_unit(ModuleName, _, _), ModuleToLink) :-
     %
 :- pred augment_and_process_module(globals::in,
     op_mode_augment::in, file_name::in, module_name::in,
-    maybe(timestamp)::in, set(module_name)::in, have_read_module_maps::in,
+    maybe(timestamp)::in, set(module_name)::in,
     find_timestamp_file_names::in(find_timestamp_file_names),
     raw_compilation_unit::in, list(string)::out,
     list(error_spec)::in, list(error_spec)::out,
+    have_read_module_maps::in, have_read_module_maps::out,
     io::di, io::uo) is det.
 
 augment_and_process_module(Globals, OpModeAugment,
         SourceFileName, SourceFileModuleName, MaybeTimestamp,
-        NestedSubModules0, HaveReadModuleMaps, FindTimestampFiles,
-        RawCompUnit, ExtraObjFiles, !Specs, !IO) :-
+        NestedSubModules0, FindTimestampFiles, RawCompUnit, ExtraObjFiles,
+        !Specs, !HaveReadModuleMaps, !IO) :-
     RawCompUnit = raw_compilation_unit(ModuleName, ModuleNameContext,
         RawItemBlocks),
     check_interface_item_blocks_for_no_exports(Globals,
@@ -1567,9 +1556,9 @@ augment_and_process_module(Globals, OpModeAugment,
     else
         set.init(NestedSubModules)
     ),
-    grab_imported_modules_augment(Globals, SourceFileName,
+    grab_qual_imported_modules_augment(Globals, SourceFileName,
         SourceFileModuleName, MaybeTimestamp, NestedSubModules, RawCompUnit,
-        HaveReadModuleMaps, ModuleAndImports, !IO),
+        ModuleAndImports, !HaveReadModuleMaps, !IO),
     module_and_imports_get_aug_comp_unit(ModuleAndImports, _AugCompUnit,
         ImportedSpecs, Errors),
     !:Specs = ImportedSpecs ++ !.Specs,
@@ -1577,7 +1566,7 @@ augment_and_process_module(Globals, OpModeAugment,
     ( if set.is_empty(FatalErrors) then
         process_augmented_module(Globals, OpModeAugment, ModuleAndImports,
             NestedSubModules, FindTimestampFiles, ExtraObjFiles,
-            no_prev_dump, _, !Specs, !IO)
+            no_prev_dump, _, !Specs, !HaveReadModuleMaps, !IO)
     else
         ExtraObjFiles = []
     ).
@@ -1586,11 +1575,13 @@ augment_and_process_module(Globals, OpModeAugment,
     module_and_imports::in, set(module_name)::in,
     find_timestamp_file_names::in(find_timestamp_file_names),
     list(string)::out, dump_info::in, dump_info::out,
-    list(error_spec)::in, list(error_spec)::out, io::di, io::uo) is det.
+    list(error_spec)::in, list(error_spec)::out,
+    have_read_module_maps::in, have_read_module_maps::out,
+    io::di, io::uo) is det.
 
 process_augmented_module(Globals0, OpModeAugment, ModuleAndImports,
         NestedSubModules, FindTimestampFiles, ExtraObjFiles,
-        !DumpInfo, !Specs, !IO) :-
+        !DumpInfo, !Specs, !HaveReadModuleMaps, !IO) :-
     (
         ( OpModeAugment = opmau_typecheck_only
         ; OpModeAugment = opmau_errorcheck_only
@@ -1623,7 +1614,7 @@ process_augmented_module(Globals0, OpModeAugment, ModuleAndImports,
     ),
     pre_hlds_pass(Globals, OpModeAugment, WriteDFile, ModuleAndImports, HLDS1,
         QualInfo, MaybeTimestampMap, UndefTypes, UndefModes, PreHLDSErrors,
-        !DumpInfo, !Specs, !IO),
+        !DumpInfo, !Specs, !HaveReadModuleMaps, !IO),
     frontend_pass(OpModeAugment, QualInfo, UndefTypes, UndefModes,
         PreHLDSErrors, FrontEndErrors, HLDS1, HLDS20, !DumpInfo, !Specs, !IO),
     ( if
@@ -1712,11 +1703,12 @@ disable_warning_options(Globals0, Globals) :-
     module_and_imports::in, module_info::out, make_hlds_qual_info::out,
     maybe(module_timestamp_map)::out, bool::out, bool::out, bool::out,
     dump_info::in, dump_info::out, list(error_spec)::in, list(error_spec)::out,
+    have_read_module_maps::in, have_read_module_maps::out,
     io::di, io::uo) is det.
 
 pre_hlds_pass(Globals, OpModeAugment, WriteDFile0, ModuleAndImports0, HLDS1,
         QualInfo, MaybeTimestampMap, UndefTypes, UndefModes,
-        FoundSemanticError, !DumpInfo, !Specs, !IO) :-
+        FoundSemanticError, !DumpInfo, !Specs, !HaveReadModuleMaps, !IO) :-
     globals.lookup_bool_option(Globals, statistics, Stats),
     globals.lookup_bool_option(Globals, verbose, Verbose),
 
@@ -1744,12 +1736,14 @@ pre_hlds_pass(Globals, OpModeAugment, WriteDFile0, ModuleAndImports0, HLDS1,
         % .d files. In the absence of MaybeTransOptDeps, we will write out
         % a .d file that does not include the trans_opt_deps mmake rule,
         % which will require an "mmake depend" before the next rebuild.
-        maybe_read_dependency_file(Globals, ModuleName, MaybeTransOptDeps, !IO)
+        maybe_read_d_file_for_trans_opt_deps(Globals, ModuleName,
+            MaybeTransOptDeps, !IO)
     ),
 
     % Errors in .opt and .trans_opt files result in software errors.
-    maybe_grab_optfiles(Globals, OpModeAugment, Verbose, MaybeTransOptDeps,
-        ModuleAndImports0, ModuleAndImports1, IntermodError, !IO),
+    maybe_grab_plain_and_trans_opt_files(Globals, OpModeAugment, Verbose,
+        MaybeTransOptDeps, IntermodError, ModuleAndImports0, ModuleAndImports1,
+        !HaveReadModuleMaps, !IO),
 
     % We pay attention to IntermodError instead of _Error. XXX Is this right?
     module_and_imports_get_aug_comp_unit(ModuleAndImports1, AugCompUnit1,
@@ -1780,7 +1774,7 @@ pre_hlds_pass(Globals, OpModeAugment, WriteDFile0, ModuleAndImports0, HLDS1,
         )
     ),
 
-    maybe_write_out_errors_no_module(Verbose, Globals, !Specs, !IO),
+    pre_hlds_maybe_write_out_errors(Verbose, Globals, !Specs, !IO),
     maybe_write_string(Verbose, "% Module qualifying items...\n", !IO),
     maybe_flush_output(Verbose, !IO),
     module_qualify_aug_comp_unit(Globals, AugCompUnit1, AugCompUnit2,
@@ -1788,12 +1782,12 @@ pre_hlds_pass(Globals, OpModeAugment, WriteDFile0, ModuleAndImports0, HLDS1,
         MQUndefTypes, MQUndefInsts, MQUndefModes, MQUndefTypeClasses,
         [], QualifySpecs),
     !:Specs = QualifySpecs ++ !.Specs,
-    maybe_write_out_errors_no_module(Verbose, Globals, !Specs, !IO),
+    pre_hlds_maybe_write_out_errors(Verbose, Globals, !Specs, !IO),
     maybe_write_string(Verbose, "% done.\n", !IO),
     maybe_report_stats(Stats, !IO),
 
     mq_info_get_recompilation_info(MQInfo0, RecompInfo0),
-    maybe_write_out_errors_no_module(Verbose, Globals, !Specs, !IO),
+    pre_hlds_maybe_write_out_errors(Verbose, Globals, !Specs, !IO),
     maybe_write_string(Verbose,
         "% Expanding equivalence types and insts...\n", !IO),
     maybe_flush_output(Verbose, !IO),
@@ -1802,7 +1796,7 @@ pre_hlds_pass(Globals, OpModeAugment, WriteDFile0, ModuleAndImports0, HLDS1,
         RecompInfo0, RecompInfo, ExpandSpecs),
     ExpandErrors = contains_errors(Globals, ExpandSpecs),
     !:Specs = ExpandSpecs ++ !.Specs,
-    maybe_write_out_errors_no_module(Verbose, Globals, !Specs, !IO),
+    pre_hlds_maybe_write_out_errors(Verbose, Globals, !Specs, !IO),
     maybe_write_string(Verbose, "% done.\n", !IO),
     maybe_report_stats(Stats, !IO),
     mq_info_set_recompilation_info(RecompInfo, MQInfo0, MQInfo),
@@ -1814,6 +1808,7 @@ pre_hlds_pass(Globals, OpModeAugment, WriteDFile0, ModuleAndImports0, HLDS1,
         FoundSemanticError, !Specs, !IO),
     maybe_write_definitions(Verbose, Stats, HLDS0, !IO),
     maybe_write_definition_line_counts(Verbose, Stats, HLDS0, !IO),
+    maybe_write_definition_extents(Verbose, Stats, HLDS0, !IO),
 
     ( if
         MQUndefTypes = did_not_find_undef_type,
@@ -1868,16 +1863,18 @@ pre_hlds_pass(Globals, OpModeAugment, WriteDFile0, ModuleAndImports0, HLDS1,
 
 %---------------------%
 
-    % maybe_read_dependency_file(Globals, ModuleName, MaybeTransOptDeps, !IO):
+    % maybe_read_d_file_for_trans_opt_deps(Globals, ModuleName,
+    %   MaybeTransOptDeps, !IO):
     %
     % If transitive intermodule optimization has been enabled, then read
     % <ModuleName>.d to find the modules which <ModuleName>.trans_opt may
     % depend on. Otherwise return `no'.
     %
-:- pred maybe_read_dependency_file(globals::in, module_name::in,
+:- pred maybe_read_d_file_for_trans_opt_deps(globals::in, module_name::in,
     maybe(list(module_name))::out, io::di, io::uo) is det.
 
-maybe_read_dependency_file(Globals, ModuleName, MaybeTransOptDeps, !IO) :-
+maybe_read_d_file_for_trans_opt_deps(Globals, ModuleName,
+        MaybeTransOptDeps, !IO) :-
     globals.lookup_bool_option(Globals, transitive_optimization, TransOpt),
     (
         TransOpt = yes,
@@ -1982,13 +1979,15 @@ read_dependency_file_get_modules(TransOptDeps, !IO) :-
 
 %---------------------%
 
-:- pred maybe_grab_optfiles(globals::in, op_mode_augment::in, bool::in,
-    maybe(list(module_name))::in, 
-    module_and_imports::in, module_and_imports::out, bool::out,
+:- pred maybe_grab_plain_and_trans_opt_files(globals::in, op_mode_augment::in,
+    bool::in, maybe(list(module_name))::in, bool::out,
+    module_and_imports::in, module_and_imports::out,
+    have_read_module_maps::in, have_read_module_maps::out,
     io::di, io::uo) is det.
 
-maybe_grab_optfiles(Globals, OpModeAugment, Verbose, MaybeTransOptDeps,
-        ModuleAndImports0, ModuleAndImports, Error, !IO) :-
+maybe_grab_plain_and_trans_opt_files(Globals, OpModeAugment, Verbose,
+        MaybeTransOptDeps, Error, ModuleAndImports0, ModuleAndImports,
+        !HaveReadModuleMaps, !IO) :-
     globals.lookup_bool_option(Globals, intermodule_optimization, IntermodOpt),
     globals.lookup_bool_option(Globals, use_opt_files, UseOptInt),
     globals.lookup_bool_option(Globals, transitive_optimization, TransOpt),
@@ -2003,8 +2002,8 @@ maybe_grab_optfiles(Globals, OpModeAugment, Verbose, MaybeTransOptDeps,
     then
         maybe_write_string(Verbose, "% Reading .opt files...\n", !IO),
         maybe_flush_output(Verbose, !IO),
-        grab_opt_files(Globals, ModuleAndImports0, ModuleAndImports1, Error1,
-            !IO),
+        grab_plain_opt_and_int_for_opt_files(Globals, Error1,
+            ModuleAndImports0, ModuleAndImports1, !HaveReadModuleMaps, !IO),
         maybe_write_string(Verbose, "% Done.\n", !IO)
     else
         ModuleAndImports1 = ModuleAndImports0,
@@ -2016,8 +2015,8 @@ maybe_grab_optfiles(Globals, OpModeAugment, Verbose, MaybeTransOptDeps,
             MaybeTransOptDeps = yes(TransOptDeps),
             % When creating the trans_opt file, only import the
             % trans_opt files which are lower in the ordering.
-            grab_trans_opt_files(Globals, TransOptDeps, ModuleAndImports1,
-                ModuleAndImports, Error2, !IO)
+            grab_trans_opt_files(Globals, TransOptDeps, Error2,
+                ModuleAndImports1, ModuleAndImports, !HaveReadModuleMaps, !IO)
         ;
             MaybeTransOptDeps = no,
             ModuleAndImports = ModuleAndImports1,
@@ -2033,7 +2032,8 @@ maybe_grab_optfiles(Globals, OpModeAugment, Verbose, MaybeTransOptDeps,
                     words("You need to remake the dependencies."), nl],
                 Msg = error_msg(no, do_not_treat_as_first, 0,
                     [always(Pieces)]),
-                Spec = error_spec(severity_warning, phase_read_files, [Msg]),
+                Spec = error_spec($pred, severity_warning, phase_read_files,
+                    [Msg]),
                 write_error_spec_ignore(Spec, Globals, !IO)
             ;
                 WarnNoTransOptDeps = no
@@ -2064,8 +2064,8 @@ maybe_grab_optfiles(Globals, OpModeAugment, Verbose, MaybeTransOptDeps,
             module_and_imports_get_imp_deps_set(ModuleAndImports0, ImpDeps),
             TransOptFiles = set.union_list([Ancestors, IntDeps, ImpDeps]),
             set.to_sorted_list(TransOptFiles, TransOptFilesList),
-            grab_trans_opt_files(Globals, TransOptFilesList,
-                ModuleAndImports1, ModuleAndImports, Error2, !IO)
+            grab_trans_opt_files(Globals, TransOptFilesList, Error2,
+                ModuleAndImports1, ModuleAndImports, !HaveReadModuleMaps, !IO)
         ;
             TransOpt = no,
             ModuleAndImports = ModuleAndImports1,
@@ -2086,7 +2086,7 @@ make_hlds(Globals, AugCompUnit, EventSet, MQInfo, TypeEqvMap, UsedModules,
         Verbose, Stats, !:HLDS, QualInfo,
         FoundInvalidType, FoundInvalidInstOrMode,
         FoundSemanticError, !Specs, !IO) :-
-    maybe_write_out_errors_no_module(Verbose, Globals, !Specs, !IO),
+    pre_hlds_maybe_write_out_errors(Verbose, Globals, !Specs, !IO),
     maybe_write_string(Verbose, "% Converting parse tree to hlds...\n", !IO),
     ModuleName = aug_compilation_unit_project_name(AugCompUnit),
     module_name_to_file_name(Globals, do_create_dirs, ".hlds_dump",
@@ -2108,7 +2108,7 @@ make_hlds(Globals, AugCompUnit, EventSet, MQInfo, TypeEqvMap, UsedModules,
     else
         FoundSemanticError = no
     ),
-    maybe_write_out_errors_no_module(Verbose, Globals, !Specs, !IO),
+    pre_hlds_maybe_write_out_errors(Verbose, Globals, !Specs, !IO),
     maybe_write_string(Verbose, "% done.\n", !IO),
     maybe_report_stats(Stats, !IO).
 
@@ -2153,7 +2153,7 @@ maybe_write_definition_line_counts(Verbose, Stats, HLDS, !IO) :-
     (
         LineCounts = yes,
         maybe_write_string(Verbose,
-            "% Writing definition line coints...", !IO),
+            "% Writing definition line counts...", !IO),
         module_info_get_name(HLDS, ModuleName),
         module_name_to_file_name(Globals, do_create_dirs, ".defn_line_counts",
             ModuleName, FileName, !IO),
@@ -2172,6 +2172,36 @@ maybe_write_definition_line_counts(Verbose, Stats, HLDS, !IO) :-
         maybe_report_stats(Stats, !IO)
     ;
         LineCounts = no
+    ).
+
+:- pred maybe_write_definition_extents(bool::in, bool::in,
+    module_info::in, io::di, io::uo) is det.
+
+maybe_write_definition_extents(Verbose, Stats, HLDS, !IO) :-
+    module_info_get_globals(HLDS, Globals),
+    globals.lookup_bool_option(Globals, show_definition_extents, Extents),
+    (
+        Extents = yes,
+        maybe_write_string(Verbose,
+            "% Writing definition extents...", !IO),
+        module_info_get_name(HLDS, ModuleName),
+        module_name_to_file_name(Globals, do_create_dirs, ".defn_extents",
+            ModuleName, FileName, !IO),
+        io.open_output(FileName, Res, !IO),
+        (
+            Res = ok(FileStream),
+            hlds.hlds_defns.write_hlds_defn_extents(FileStream, HLDS, !IO),
+            io.close_output(FileStream, !IO),
+            maybe_write_string(Verbose, " done.\n", !IO)
+        ;
+            Res = error(IOError),
+            ErrorMsg = "unable to write definition extents: " ++
+                io.error_message(IOError),
+            report_error(ErrorMsg, !IO)
+        ),
+        maybe_report_stats(Stats, !IO)
+    ;
+        Extents = no
     ).
 
 %---------------------------------------------------------------------------%

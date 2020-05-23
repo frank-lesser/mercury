@@ -47,8 +47,8 @@
     ;       nested_submodule
     ;       separate_submodule.
 
-    % Check if a module is a top-level module, a nested sub-module,
-    % or a separate sub-module.
+    % Check if a module is a top-level module, a nested submodule,
+    % or a separate submodule.
     %
 :- func get_submodule_kind(module_name, deps_map) = submodule_kind.
 
@@ -61,19 +61,19 @@
     % in the deps_map, then we just replace the old entry (presumed to be
     % a dummy entry) with the new one.
     %
-    % This can only occur for sub-modules which have been imported before
+    % This can only occur for submodules which have been imported before
     % their parent module was imported: before reading a module and
     % inserting it into the deps map, we check if it was already there,
     % but when we read in the module, we try to insert not just that module
-    % but also all the nested sub-modules inside that module. If a sub-module
+    % but also all the nested submodules inside that module. If a submodule
     % was previously imported, then it may already have an entry in the
-    % deps_map. However, unless the sub-module is defined both as a separate
-    % sub-module and also as a nested sub-module, the previous entry will be
+    % deps_map. However, unless the submodule is defined both as a separate
+    % submodule and also as a nested submodule, the previous entry will be
     % a dummy entry that we inserted after trying to read the source file
     % and failing.
     %
     % Note that the case where a module is defined as both a separate
-    % sub-module and also as a nested sub-module is caught in
+    % submodule and also as a nested submodule is caught in
     % split_into_submodules.
     %
     % XXX This shouldn't need to be exported.
@@ -87,15 +87,14 @@
 
 :- import_module libs.timestamp.
 :- import_module parse_tree.error_util.
-:- import_module parse_tree.file_kind.
 :- import_module parse_tree.parse_error.
 :- import_module parse_tree.prog_data_foreign.
 :- import_module parse_tree.prog_item.
 :- import_module parse_tree.read_modules.
 
-:- import_module cord.
 :- import_module list.
-:- import_module multi_map.
+:- import_module one_or_more.
+:- import_module one_or_more_map.
 :- import_module pair.
 :- import_module set.
 :- import_module term.
@@ -160,16 +159,14 @@ generate_deps_map_step(Globals, Module, ExpectationContexts,
         Done0 = not_yet_processed,
         Deps = deps(already_processed, ModuleImports),
         map.det_update(Module, Deps, !DepsMap),
-        module_and_imports_get_foreign_import_modules(ModuleImports,
-            ForeignImportedModules),
+        module_and_imports_get_c_j_cs_e_fims(ModuleImports, CJCsEFIMs),
         % We could keep a list of the modules we have already processed
         % and subtract it from the sets of modules we add here, but doing that
         % actually leads to a small slowdown.
         module_and_imports_get_module_name_context(ModuleImports,
             ModuleNameContext),
         module_and_imports_get_ancestors(ModuleImports, AncestorModuleNames),
-        ForeignImportedModuleNames =
-            get_all_foreign_import_modules(ForeignImportedModules),
+        ForeignImportedModuleNames = get_all_foreign_import_modules(CJCsEFIMs),
         set.foldl(add_module_name_and_context(ModuleNameContext),
             AncestorModuleNames, !Modules),
         set.foldl(add_module_name_and_context(ModuleNameContext),
@@ -179,9 +176,10 @@ generate_deps_map_step(Globals, Module, ExpectationContexts,
         module_and_imports_get_imp_deps_map(ModuleImports, ImpDepsMap),
         module_and_imports_get_public_children_map(ModuleImports,
             PublicChildren),
-        multi_map.to_assoc_list(IntDepsMap, IntDepsModuleNamesContexts),
-        multi_map.to_assoc_list(ImpDepsMap, ImpDepsModuleNamesContexts),
-        multi_map.to_assoc_list(PublicChildren, ChildrenModuleNamesContexts),
+        one_or_more_map.to_assoc_list(IntDepsMap, IntDepsModuleNamesContexts),
+        one_or_more_map.to_assoc_list(ImpDepsMap, ImpDepsModuleNamesContexts),
+        one_or_more_map.to_assoc_list(PublicChildren,
+            ChildrenModuleNamesContexts),
         list.foldl(add_module_name_with_contexts,
             IntDepsModuleNamesContexts, !Modules),
         list.foldl(add_module_name_with_contexts,
@@ -204,15 +202,17 @@ add_module_name_and_context(Context, ModuleName, !Modules) :-
     ).
 
 :- pred add_module_name_with_contexts(
-    pair(module_name, list(term.context))::in,
+    pair(module_name, one_or_more(term.context))::in,
     map(module_name, list(term.context))::in,
     map(module_name, list(term.context))::out) is det.
 
 add_module_name_with_contexts(ModuleName - NewContexts, !Modules) :-
     ( if map.search(!.Modules, ModuleName, OldContexts) then
-        map.det_update(ModuleName, NewContexts ++ OldContexts, !Modules)
+        NewOldContexts = one_or_more_to_list(NewContexts) ++ OldContexts,
+        map.det_update(ModuleName, NewOldContexts, !Modules)
     else
-        map.det_insert(ModuleName, NewContexts, !Modules)
+        NewOldContexts = one_or_more_to_list(NewContexts),
+        map.det_insert(ModuleName, NewOldContexts, !Modules)
     ).
 
     % Look up a module in the dependency map.
@@ -240,10 +240,8 @@ insert_into_deps_map(ModuleImports, !DepsMap) :-
     map.set(ModuleName, Deps, !DepsMap).
 
     % Read a module to determine the (direct) dependencies of that module
-    % and any nested sub-modules it contains. Return the module_and_imports
+    % and any nested submodules it contains. Return the module_and_imports
     % structure for the named module, and each of its nested submodules.
-    % If we cannot do better, return a dummy module_and_imports structure
-    % for the named module.
     %
 :- pred read_dependencies(globals::in, module_name::in, list(term.context)::in,
     maybe_search::in, list(module_and_imports)::out, io::di, io::uo) is det.
@@ -256,29 +254,11 @@ read_dependencies(Globals, ModuleName, ExpectationContexts, Search,
         ignore_errors, Search, ModuleName, ExpectationContexts,
         SourceFileName, always_read_module(dont_return_timestamp), _,
         ParseTreeSrc, SrcSpecs, SrcReadModuleErrors, !IO),
-    ParseTreeSrc = parse_tree_src(_ModuleNameSrc0, _ModuleNameContext0,
-        ModuleComponentCord0),
-    ( if
-        cord.is_empty(ModuleComponentCord0),
-        set.intersect(SrcReadModuleErrors, fatal_read_module_errors,
-            FatalErrors),
-        set.is_non_empty(FatalErrors)
-    then
-        read_module_int(Globals, "Getting dependencies for module interface",
-            ignore_errors, Search, ModuleName, ifk_int1, IntFileName,
-            always_read_module(dont_return_timestamp), _,
-            ParseTreeInt, _IntSpecs, _IntReadModuleErrors, !IO),
-        % XXX Shouldn't we pass *Int*ReadModuleErrors?
-        parse_tree_int_to_module_and_imports(Globals, IntFileName,
-            ParseTreeInt, SrcReadModuleErrors, ModuleAndImports),
-        ModuleAndImportsList = [ModuleAndImports]
-    else
-        parse_tree_src_to_module_and_imports_list(Globals, SourceFileName,
-            ParseTreeSrc, SrcReadModuleErrors, SrcSpecs, Specs,
-            _RawCompUnits, ModuleAndImportsList),
-        % XXX Why do we print out these error messages?
-        write_error_specs_ignore(Specs, Globals, !IO)
-    ).
+    parse_tree_src_to_module_and_imports_list(Globals, SourceFileName,
+        ParseTreeSrc, SrcReadModuleErrors, SrcSpecs, Specs,
+        _RawCompUnits, ModuleAndImportsList),
+    % XXX Why do we print out these error messages?
+    write_error_specs_ignore(Specs, Globals, !IO).
 
 %-----------------------------------------------------------------------------%
 :- end_module parse_tree.deps_map.

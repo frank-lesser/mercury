@@ -27,7 +27,6 @@
 :- import_module parse_tree.
 :- import_module parse_tree.error_util.
 :- import_module parse_tree.prog_data.
-:- import_module parse_tree.prog_item.
 
 :- import_module list.
 :- import_module maybe.
@@ -55,17 +54,6 @@
     sym_name::in, int::in, pred_or_func::in, pred_status::in,
     maybe_class_method::in, prog_context::in, list(format_component)::in,
     list(error_spec)::in, list(error_spec)::out) is det.
-
-    % Emit an error reporting that something should not have occurred in
-    % a module interface.
-    %
-:- pred error_is_exported(prog_context::in, list(format_component)::in,
-    list(error_spec)::in, list(error_spec)::out) is det.
-
-    % Check for invalid pragmas in interface sections.
-    %
-:- pred report_if_pragma_is_wrongly_in_interface(item_mercury_status::in,
-    item_pragma_info::in, list(error_spec)::in, list(error_spec)::out) is det.
 
 %----------------------------------------------------------------------------%
 %----------------------------------------------------------------------------%
@@ -106,7 +94,7 @@ report_multiple_def_error(Name, Arity, DefType, Context, OrigContext,
         SecondContext = OrigContext
     ),
 
-    SNA = qual_sym_name_and_arity(sym_name_arity(Name, Arity)),
+    SNA = qual_sym_name_arity(sym_name_arity(Name, Arity)),
     SecondDeclPieces = [words("Error:"), fixed(DefType), SNA,
         words("multiply defined."), nl],
     FirstDeclPieces = [words("Here is the previous definition of"),
@@ -121,8 +109,8 @@ report_multiple_def_error(Name, Arity, DefType, Context, OrigContext,
         ExtraPieces = [_ | _],
         ExtraMsgs = [simplest_msg(SecondContext, ExtraPieces)]
     ),
-    Spec = error_spec(severity_error, phase_parse_tree_to_hlds,
-        [SecondDeclMsg, FirstDeclMsg] ++ ExtraMsgs),
+    Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
+        [SecondDeclMsg, FirstDeclMsg | ExtraMsgs]),
     !:Specs = [Spec | !.Specs].
 
 report_undefined_pred_or_func_error(MaybePorF, Name, Arity, OtherArities,
@@ -138,7 +126,7 @@ report_undefined_pred_or_func_error(MaybePorF, Name, Arity, OtherArities,
         PredOrFuncPieces = [decl("func")]
     ),
     MainPieces = [words("Error:") | DescPieces] ++ [words("for"),
-        unqual_sym_name_and_arity(sym_name_arity(Name, Arity)),
+        unqual_sym_name_arity(sym_name_arity(Name, Arity)),
         words("without corresponding")] ++ PredOrFuncPieces ++
         [words("declaration."), nl],
     (
@@ -152,15 +140,15 @@ report_undefined_pred_or_func_error(MaybePorF, Name, Arity, OtherArities,
             list_to_pieces(OtherArityStrs) ++
             [suffix("."), nl]
     ),
-    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
         Context, MainPieces ++ OtherArityPieces),
     !:Specs = [Spec | !.Specs].
 
 report_undefined_mode_error(Name, Arity, Context, DescPieces, !Specs) :-
     Pieces = [words("Error:") | DescPieces] ++ [words("for"),
-        qual_sym_name_and_arity(sym_name_arity(Name, Arity)),
+        qual_sym_name_arity(sym_name_arity(Name, Arity)),
         words("specifies non-existent mode.")],
-    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
+    Spec = simplest_spec($pred, severity_error, phase_parse_tree_to_hlds,
         Context, Pieces),
     !:Specs = [Spec | !.Specs].
 
@@ -198,10 +186,11 @@ maybe_report_undefined_pred_error(ModuleInfo, Name, Arity, PredOrFunc, Status,
     then
         true
     else
+        PFSymNameArity = pf_sym_name_arity(PredOrFunc, Name, Arity),
         PredOrFuncStr = pred_or_func_to_str(PredOrFunc),
         MainPieces = [invis_order_default_start(1),
             words("Error:") | DescPieces] ++ [words("for"),
-            simple_call(simple_call_id(PredOrFunc, Name, Arity)), nl,
+            unqual_pf_sym_name_orig_arity(PFSymNameArity), nl,
             words("without corresponding"),
             decl(PredOrFuncStr), words("declaration."), nl],
         MainMsg = simplest_msg(Context, MainPieces),
@@ -219,7 +208,7 @@ maybe_report_undefined_pred_error(ModuleInfo, Name, Arity, PredOrFunc, Status,
         FullPredOrFuncStr = pred_or_func_to_full_str(PredOrFunc),
         (
             OtherAritiesList = [],
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds,
+            Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
                 [MainMsg])
         ;
             (
@@ -238,7 +227,7 @@ maybe_report_undefined_pred_error(ModuleInfo, Name, Arity, PredOrFunc, Status,
                     [suffix("."), nl]
             ),
             OtherAritiesMsg = simplest_msg(Context, OtherAritiesPieces),
-            Spec = error_spec(severity_error, phase_parse_tree_to_hlds,
+            Spec = error_spec($pred, severity_error, phase_parse_tree_to_hlds,
                 [MainMsg, OtherAritiesMsg])
         ),
         !:Specs = [Spec | !.Specs]
@@ -275,34 +264,6 @@ gather_porf_arities(ModuleInfo, [PredId | PredIds], WantedPorF,
 :- func wrap_int_fixed(int) = format_component.
 
 wrap_int_fixed(N) = int_fixed(N).
-
-%----------------------------------------------------------------------------%
-
-error_is_exported(Context, ItemPieces, !Specs) :-
-    Pieces = [words("Error:")] ++ ItemPieces ++
-        [words("in module interface."), nl],
-    Spec = simplest_spec(severity_error, phase_parse_tree_to_hlds,
-        Context, Pieces),
-    !:Specs = [Spec | !.Specs].
-
-%----------------------------------------------------------------------------%
-
-report_if_pragma_is_wrongly_in_interface(ItemMercuryStatus, ItemPragmaInfo,
-        !Specs) :-
-    ItemPragmaInfo = item_pragma_info(Pragma, Context, _SeqNum),
-    ( if
-        % Is the pragma in the interface?
-        ItemMercuryStatus = item_defined_in_this_module(ItemExport),
-        ItemExport = item_export_anywhere,
-
-        % Is the pragma *wrongly* in the interface?
-        pragma_allowed_in_interface(Pragma) = no
-    then
-        ContextPieces = pragma_desc_pieces(Pragma),
-        error_is_exported(Context, ContextPieces, !Specs)
-    else
-        true
-    ).
 
 %----------------------------------------------------------------------------%
 :- end_module hlds.make_hlds_error.

@@ -511,8 +511,6 @@ decide_field_gen(Info, VarLval, VarType, ConsId, ConsTag, Ptag, FieldGen) :-
             FieldVia = field_via_offset
         else if ConsId = cons(ConsSymName, ConsArity, TypeCtor) then
             ml_gen_info_get_target(Info, Target),
-            ConsName = ml_gen_du_ctor_name(Target, TypeCtor,
-                ConsSymName, ConsArity),
             % XXX ARG_PACK Delete this sanity test after it has been tested
             % for a while.
             type_to_ctor_det(VarType, VarTypeCtor),
@@ -533,6 +531,8 @@ decide_field_gen(Info, VarLval, VarType, ConsId, ConsTag, Ptag, FieldGen) :-
             ;
                 UsesBaseClass = tag_does_not_use_base_class,
                 % The class name is determined by the constructor.
+                ConsName = ml_gen_du_ctor_name(Target, TypeCtor,
+                    ConsSymName, ConsArity),
                 QualConsName =
                     qual_class_name(TypeQualifier, type_qual, ConsName),
                 ClassId = mlds_class_id(QualConsName, ConsArity, mlds_class),
@@ -730,8 +730,9 @@ ml_left_shift_rval(Rval, Shift, Fill) = ShiftedRval :-
     then
         ShiftedRval = CastRval
     else
-        ShiftedRval = ml_binop(unchecked_left_shift(int_type_uint),
-            CastRval, ml_const(mlconst_int(ShiftInt)))
+        ShiftedRval =
+            ml_binop(unchecked_left_shift(int_type_uint, shift_by_int),
+                CastRval, ml_const(mlconst_int(ShiftInt)))
     ).
 
 ml_right_shift_rval(Rval, Shift) = ShiftedRval :-
@@ -751,8 +752,9 @@ ml_right_shift_rval(Rval, Shift) = ShiftedRval :-
     then
         ShiftedRval = Rval
     else
-        ShiftedRval = ml_binop(unchecked_right_shift(int_type_uint),
-            Rval, ml_const(mlconst_int(ShiftInt)))
+        ShiftedRval =
+            ml_binop(unchecked_right_shift(int_type_uint, shift_by_int),
+                Rval, ml_const(mlconst_int(ShiftInt)))
     ).
 
 %---------------------------------------------------------------------------%
@@ -877,8 +879,8 @@ ml_cast_to_unsigned_without_sign_extend(Fill, Rval0, Rval) :-
         ;
             % Shifted unsigned constants are also unsigned.
             Rval1 = ml_binop(Binop, ml_const(mlconst_uint(_)), _),
-            ( Binop = unchecked_left_shift(int_type_uint)
-            ; Binop = unchecked_right_shift(int_type_uint)
+            ( Binop = unchecked_left_shift(int_type_uint, _)
+            ; Binop = unchecked_right_shift(int_type_uint, _)
             )
         )
     then

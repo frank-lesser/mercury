@@ -42,7 +42,7 @@
 This file documents the Mercury implementation, version <VERSION>.
 
 Copyright @copyright{} 1995--2012 The University of Melbourne.@*
-Copyright @copyright{} 2013--2019 The Mercury team.
+Copyright @copyright{} 2013--2020 The Mercury team.
 
 Permission is granted to make and distribute verbatim copies of
 this manual provided the copyright notice and this permission notice
@@ -78,7 +78,7 @@ into another language, under the above conditions for modified versions.
 @page
 @vskip 0pt plus 1filll
 Copyright @copyright{} 1995--2012 The University of Melbourne.@*
-Copyright @copyright{} 2013--2019 The Mercury team.
+Copyright @copyright{} 2013--2020 The Mercury team.
 
 Permission is granted to make and distribute verbatim copies of
 this manual provided the copyright notice and this permission notice
@@ -121,7 +121,7 @@ how to build and debug Mercury programs.
 * C compilers::     How to use a C compiler other than GNU C.
 * Foreign language interface:: Interfacing to other programming
 		    languages from Mercury.
-* Stand-alone Interfaces:: Calling procedures in Mercury libraries from
+* Stand-alone interfaces:: Calling procedures in Mercury libraries from
                            programs written in other languages.
 * Index::
 @end menu
@@ -311,7 +311,7 @@ where @var{module} is the name of the Mercury module defined in
 @file{@var{filename}.m}.
 It also will leave the intermediate C code in a file called
 @file{@var{module}.c}.
-If the source file contains nested modules, then each sub-module will get
+If the source file contains nested modules, then each submodule will get
 compiled to separate C and object files.
 
 Before you can compile a module,
@@ -474,9 +474,7 @@ mmc --make @var{main-module}
 @noindent
 The usage of Mmake is discouraged.
 
-Mmake is built on top of ordinary or GNU Make @footnote{
-We might eventually add support for ordinary ``Make'' programs,
-but currently only GNU Make is supported.}.
+Mmake is built on top of GNU Make.
 With Mmake, building even a complicated Mercury program
 consisting of a number of modules is as simple as
 
@@ -491,32 +489,35 @@ based on automatically generated dependency information.
 Most of the dependencies are stored in @file{.d} files that are
 automatically recomputed every time you recompile,
 so they are never out-of-date.
-A little bit of the dependency information is stored in @file{.dep}
-and @file{.dv} files which are more expensive to recompute.
-The @samp{mmake @var{main-module}.depend} command which recreates the
-@file{@var{main-module}.dep} and @file{@var{main-module}.dv} files needs
-to be repeated only when you add or remove a module from your program,
-and there is no danger of getting an inconsistent executable if you forget
-this step --- instead you will get a compile or link error.
+A little bit of the dependency information
+is stored in @file{.dep} and @file{.dv} files
+which are more expensive to recompute.
+The @samp{mmake @var{main-module}.depend} command which recreates
+the @file{@var{main-module}.dep} and @file{@var{main-module}.dv} files
+needs to be repeated only when you either
+add a module to your program or remove a module from it.
+There is no danger of getting an inconsistent executable
+if you forget this step ---
+instead you will get a compile or link error.
 
-The @samp{mmc -f} step above is only required if there are any source
-files for which the file name does not match the module name.
-@samp{mmc -f} generates a file @file{Mercury.modules} containing
-a mapping from module name to source file.  The @file{Mercury.modules}
-file must be updated when a source file for which the file name does
-not match the module name is added to or removed from the directory.
+The @samp{mmc -f} step above is only required if there are any source files
+for which the file name does not match the module name.
+@samp{mmc -f} generates a file named @file{Mercury.modules}
+containing a mapping from module name to source file.
+The @file{Mercury.modules} file must be updated
+when a source file for which the file name does not match the module name
+is added to or removed from the directory.
 
 @samp{mmake} allows you to build more than one program in the same directory.
 Each program must have its own @file{.dep} and @file{.dv} files,
-and therefore you must run @samp{mmake @var{program}.depend}
-for each program.  The @samp{Mercury.modules} file is used for
-all programs in the directory.
+and therefore you must run @samp{mmake @var{program}.depend} for each program.
+The @samp{Mercury.modules} file is used for all programs in the directory.
 
-If there is a file called @file{Mmake} or @file{Mmakefile} in the
-current directory,
+If there is a file called @file{Mmake} or @file{Mmakefile}
+in the current directory,
 Mmake will include that file in its automatically generated Makefile.
-The @samp{Mmake} file can override the default values of
-various variables used by Mmake's builtin rules,
+The @samp{Mmake} file can override
+the default values of various variables used by Mmake's builtin rules,
 or it can add additional rules, dependencies, and actions.
 
 Mmake's builtin rules are defined by the file
@@ -951,7 +952,7 @@ and, on many platforms, it supports shared object libraries.
 @section Writing libraries
 
 A Mercury library is identified by a top-level module,
-which should contain all of the modules in that library as sub-modules.
+which should contain all of the modules in that library as submodules.
 It may be as simple as this @file{mypackage.m} file:
 
 @example
@@ -963,7 +964,7 @@ It may be as simple as this @file{mypackage.m} file:
 @end example
 
 @noindent
-This defines a module @samp{mypackage} containing sub-modules
+This defines a module @samp{mypackage} containing submodules
 @samp{mypackage.foo}, @samp{mypackage.bar}, and @samp{mypackage.baz}.
 
 It is also possible to build libraries of unrelated modules,
@@ -990,7 +991,7 @@ Alternatively, the library could of course just export something,
 such as a predicate that returns its version number.
 
 Generally it is better style for each library
-to consist of a single module which encapsulates its sub-modules,
+to consist of a single module which encapsulates its submodules,
 as in the first example,
 rather than just a group of unrelated modules,
 as in the second example.
@@ -4792,7 +4793,7 @@ so there are some limitations in the implementation.
 * Oracle questions::
 * Declarative debugging commands::
 * Diagnoses::
-* Search Modes::
+* Search modes::
 * Improving the search::
 @end menu
 
@@ -5187,8 +5188,8 @@ or they may be asked entirely new questions.
 If the user aborts the diagnosis,
 they are returned to the event at which the @samp{dd} command was given.
 
-@node Search Modes
-@subsection Search Modes
+@node Search modes
+@subsection Search modes
 
 The declarative debugger can operate in one of several modes when
 searching for a bug.
@@ -5199,7 +5200,7 @@ The user can specify which mode to use by giving the
 @ref{Declarative debugging mdb commands}) or with the @samp{mode} declarative
 debugger command (see @ref{Declarative debugging commands}).
 
-@subsubsection Top-down Mode
+@subsubsection Top-down mode
 
 Using this mode the declarative debugger will ask about the children of the
 last question the user answered @samp{no} to.  The child calls will be asked
@@ -5211,7 +5212,7 @@ recursive programs.
 
 This search mode is used by default when no other mode is specified.
 
-@subsubsection Divide and Query Mode
+@subsubsection Divide and query mode
 
 With this search mode the declarative debugger attempts to halve the size
 of the search space with each question.  In many cases this will result in the
@@ -5222,7 +5223,7 @@ where top-down search would require an unreasonably large number of questions
 to be answered.  However, the questions may appear to come from unrelated parts
 of the program which can make them harder to answer.
 
-@subsubsection Suspicion Divide and Query Mode
+@subsubsection Suspicion divide and query mode
 
 In this search mode the declarative debugger assigns a suspicion level to
 each event based on which parts of the program were executed in failing
@@ -5231,7 +5232,7 @@ search space into two areas of equal suspicion with each question.  This tends
 to result in questions about parts of the program executed in a failing test
 case, but not in passing test cases.
 
-@subsubsection Binary Search Mode
+@subsubsection Binary search mode
 
 The user may ask the declarative debugger to do a binary search along the
 path in the call tree between the current question and the question that the
@@ -5442,7 +5443,7 @@ Trace count files
 can be manipulated with the @samp{mtc_union} and @samp{mtc_diff} tools,
 and they can be analysed by the @samp{mslice} and @samp{mdice} tools.
 They can also be used to help direct a declarative debugging search
-(see @ref{Search Modes}).
+(see @ref{Search modes}).
 
 @sp 1
 
@@ -6503,6 +6504,14 @@ if it finds any syntax errors in the program.
 @c an auto-parallelization requested by a feedback file.
 
 @sp 1
+@item --print-errors-warnings-when-generating-interface
+@findex --no-print-errors-warnings-when-generating-interface
+@findex --print-errors-warnings-when-generating-interface
+Print error and/or warning messages about problems with a module
+not just when the module is compiled, but also when its
+interface files are generated, if the problem is visible then.
+
+@sp 1
 @item --no-warn-accumulator-swaps
 @findex --no-warn-accumulator-swaps
 @findex --warn-accumulator-swaps
@@ -7133,7 +7142,7 @@ Effective only if @samp{--generate-dependencies} is also specified.
 @findex --generate-standalone-interface @var{basename}
 Output a stand-alone interface.  @var{basename} is used as
 the basename of any files generated for the stand-alone interface.
-(See @pxref{Stand-alone Interfaces} for further details.)
+(See @pxref{Stand-alone interfaces} for further details.)
 
 @sp 1
 @item --generate-mmc-deps
@@ -7168,7 +7177,7 @@ Write the unqualified version of the short interface to
 @itemx --make-private-interface
 @findex --make-priv-int
 @findex --make-private-interface
-Write the module's private interface (used for compiling nested sub-modules)
+Write the module's private interface (used for compiling nested submodules)
 to @file{@var{module}.int0}.
 
 @sp 1
@@ -7488,6 +7497,17 @@ typeclasses and instances defined in the module to @file{@var{module}.defns}.
 Write out a list of the predicates and functions defined in the module,
 together with the names of the files containing them
 and their approximate line counts, to @file{@var{module}.defn_line_counts}.
+The list will be ordered on the names and arities of the
+predicates and functions.
+
+@sp 1
+@item --show-definition-extents
+@findex --show-definition-extents
+Write out a list of the predicates and functions defined in
+the module, together with the approximate line numbers of their
+first and last lines, to @file{@var{module}.defn_extents}.
+The list will be ordered on the starting line numbers
+of the predicates and functions.
 
 @sp 1
 @item --show-local-type-representations
@@ -7908,92 +7928,204 @@ them in @samp{MCFLAGS}, @samp{MGNUCFLAGS} and @samp{MLFLAGS}.
 @findex -s
 @findex --grade
 Select the compilation model.
-The @var{grade} should be a @samp{.} separated list of the
-grade options to set. The grade options may be given in any order.
-The available options each belong to a set of mutually
-exclusive alternatives governing a single aspect of the compilation model.
-The set of aspects and their alternatives are:
+The @var{grade} should be a @samp{.} separated list
+in which the first element is a @samp{base grade},
+and each following element (if any) is a @samp{grade modifier}.
 
+@cindex csharp (compilation grade)
+@cindex erlang (compilation grade)
+@cindex java (compilation grade)
+
+@cindex hlc (compilation grade)
+
+@cindex asm_fast (compilation grade)
 @cindex none (compilation grade)
 @cindex reg (compilation grade)
-@c @cindex jump (compilation grade)
+
+The base grade specifies
+what target language to compile the Mercury program to,
+and if the compiler can do this in several different ways,
+selects one of those ways.
+The available base grades are the following.
+
+@c What target language to use (C, C#, Java or Erlang),
+@c for C, whether to generate idiomatic C or assembly-like code,
+@c and if the latter, what combination of GNU C extensions to use.
+@c The options are 
+@c which each specify the named language as the target,
+@c and @samp{none}, @samp{reg}, and @samp{asm_fast},
+@c which call for assembly-like C code,
+@c with @samp{reg} and @samp{asm_fast} both calling for
+@c the use of GNU C's extension for storing global variables in registers,
+@c and @samp{asm_fast} calling for the use of two GNU C extensions
+@c that together allow direct gotos to labels in other functions,
+@c even in other modules.
+
+@table @asis
+
+@item @samp{hlc}
+This base grade calls for generating idiomatic C,
+which we call high-level C.
+
+@item @samp{none}, @samp{reg}, and @samp{asm_fast}
+These base grades calls for generating assembly-like C code,
+which we call low-level C.
+@samp{none} calls for generating standard C without using any GNU C extensions.
+@samp{reg} and @samp{asm_fast} both call for
+the use of GNU C's extension for storing global variables in registers,
+while @samp{asm_fast} also calls for the use of two GNU C extensions
+that together allow direct gotos to labels in other functions,
+even in other modules.
+In general, the more GNU C extensions are used,
+the faster the program will be,
+but some platforms, compilers or compiler versions
+do not support specific extensions.
+
+@item @samp{csharp}
+This base grade calls for generating C#.
+
+@item @samp{java}
+This base grade calls for generating Java.
+
+@item @samp{erlang}
+This base grade calls for generating Erlang.
+Note that support for generating Erlang is experimental.
+@end table
+
+The default base grade is system dependent,
+but will be either @samp{hlc} or @samp{asm_fast},
+as these are the two fastest.
+
 @c @cindex asm_jump (compilation grade)
 @c @cindex fast (compilation grade)
-@c @cindex asm_fast (compilation grade)
-@c @cindex hl (compilation grade)
-@cindex hlc (compilation grade)
-@cindex csharp (compilation grade)
-@cindex java (compilation grade)
-@cindex erlang (compilation grade)
-@cindex .prof (grade modifier)
-@cindex .memprof (grade modifier)
-@cindex .profdeep (grade modifier)
-@cindex .tr (grade modifier)
-@cindex .trseg (grade modifier)
-@cindex .gc (grade modifier)
-@cindex .agc (grade modifier)
-@cindex .spf (grade modifier)
-@cindex .stseg (grade modifier)
-@cindex .debug (grade modifier)
-@cindex .decldebug (grade modifier)
-@c @cindex .ssdebug (grade modifier)
-@cindex .par (grade modifier)
-@cindex .threadscope (grade modifier)
-@cindex .prof (grade modifier)
-@cindex .memprof (grade modifier)
-@cindex .profdeep (grade modifier)
-@cindex .tr (grade modifier)
-@cindex .trseg (grade modifier)
-@cindex .gc (grade modifier)
+@c @cindex jump (compilation grade)
+
 @c @cindex .agc (grade modifier)
-@cindex .spf (grade modifier)
-@cindex .stseg (grade modifier)
+@c @cindex .ssdebug (grade modifier)
 @cindex .debug (grade modifier)
 @cindex .decldebug (grade modifier)
-@c @cindex .ssdebug (grade modifier)
-@cindex .par (grade modifier)
-@cindex .threadscope (grade modifier)
+@cindex .gc (grade modifier)
+@cindex .memprof (grade modifier)
 @cindex .mm (grade modifier)
+@cindex .par (grade modifier)
+@cindex .prof (grade modifier)
+@cindex .profdeep (grade modifier)
+@cindex .spf (grade modifier)
+@cindex .stseg (grade modifier)
+@cindex .threadscope (grade modifier)
+@cindex .tr (grade modifier)
+@cindex .trseg (grade modifier)
+
+The grade modifiers may be given in any order.
+Each grade modifier sets one or more compilation model options.
+The available options each belong to a set of mutually exclusive alternatives
+governing a single aspect of the compilation model.
+The set of aspects and their alternatives are as follows.
+Note that not all grade modifiers are applicable to all grades
+(most apply only when targeting C),
+and not all grade modifiers are compatible with each other.
+
 @table @asis
-@item What target language to use, what data representation to use, and (for C) what combination of GNU C extensions to use:
-@samp{none}, @samp{reg}, @samp{jump}, @samp{asm_jump},
-@samp{fast}, @samp{asm_fast}, @samp{hl}, @samp{hlc}, @samp{csharp},
-@samp{java} and
-@samp{erlang}
-(the default is system dependent).
+@item garbage collection
+The default is no garbage collection beyond what the target language provides.
+C#, Java and Erlang have their own builtin garbage collectors, but C does not.
+Since garbage collection is essential for all programs
+other than those with @emph{very} short runtimes,
+base grades that target C
+are usually followed by the @samp{.gc} grade modifier, which calls for
+the use of the Boehm-Demers-Weiser conservative collector for C.
+@c @samp{.agc}
 
-@item What garbage collection strategy to use:
-@c @samp{agc}
-@samp{gc} (the default is no garbage collection).
+@item profiling
+The default is no profiling.
+The grade modifier @samp{.prof} calls for gprof-style profiling;
+the grade modifier @samp{.memprof} calls for profiling of memory usage;
+while the grade modifier @samp{.profdeep} calls for deep profiling.
+See @ref{Profiling} for an explanation
+of the differences between these forms of profiling.
 
-@item What kind of profiling to use:
-@samp{prof},
-@c @samp{proftime}, @samp{profcalls},
-@samp{memprof}, and @samp{profdeep}
-(the default is no profiling).
+@item trailing
+The default is no trailing.
+Applications that need trailing should specify the grade modifier @samp{.tr}.
+@samp{.trseg} is currently accepted as synonym for @samp{.tr}.
 
-@item Whether to enable the trail:
-@samp{tr} and @samp{trseg} (the default is no trailing).
+@item floating point precision
+By default when targeting C, the Mercury @samp{float} type is implemented as an
+IEEE 754 double-precision floating point number, which occupies 64 bits of
+space.
+On platforms whose word size is 32 bits, users whose programs do not require
+double precision may improve memory consumption and speed by specifying the
+grade modifier @samp{.spf} (short for single-precision float), which calls for
+implementing all Mercury floats as IEEE 754 single-precision floating point
+numbers.
+Note that on 64 bit platforms, using single-precision floats definitely will
+@emph{not} improve memory consumption, and will probably not improve speed.
+On the other hand, it may simplify the use of C APIs that exclusively use
+single precision floats.
+For target languages other than C, the Mercury @samp{float} type is always
+implemented as a double-precision floating point number and the
+@samp{.spf} modifier is not supported.
 
-@item Whether to use single-precision representation of floating point values:
-@samp{spf} (the default is to use double-precision floats)
+@item stack size
+When generating low-level C,
+Mercury implements its own stacks (two of them).
+The default is to make each stack a fixed size
+(usually a relatively large size,
+though the size of each stack can be controlled using runtime options).
+We make the page(s) at the tops of the stacks inaccessible,
+so that a stack overflow,
+instead of accessing and overwriting memory effectively randomly,
+causes the operating system to send a signal to the program.
+If not caught and handled, this signal will abort the program,
+minimizing the damage.
 
-@item Whether to use dynamically sized stacks that are composed of
-small segments: @samp{stseg} (the default is to used fixed size stacks)
+However, for programs for which this is not acceptable,
+users can specify the @samp{.stseg} grade component.
+This calls for each stack to be composed of
+small memory segments chained together in a list.
+When there is no room in the current segment for a new stack frame,
+we simply allocate a new segment and add it to the list.
+This approach has higher overhead,
+since calls to, and returns from, procedures must execute more code,
+but it avoids imposing any limit on stack size
+other than the size of available memory.
 
-@item What debugging features to enable:
-@samp{debug} and @samp{decldebug} (the default is no debugging features).
-@c XXX and @samp{ssdebug}
+@item debugging
+The default is to generate executables that do not support debugging.
+However, when generating low-level C code,
+specifying one of the grade modifiers @samp{.debug} and @samp{.decldebug}
+will cause the compiler to generate executables
+that can be debugged using the Mercury debugger @samp{mdb}.
+The difference between them is that
+the declarative debugging aspects of @samp{mdb}
+will work only with @samp{.decldebug}.
+The price of this is that @samp{.decldebug} results
+in significantly larger executable files.
+@c @samp{.ssdebug}
 
-@item Whether to use a thread-safe version of the runtime environment:
-@samp{par} (the default is a non-thread-safe environment).
+@item threads
+The default is whatever thread support is provided by the target language.
+When targeting C,
+thread support can be enabled by specifying the grade modifier @samp{.par}.
+When targeting low-level C,
+this also enables the use of the parallel conjunction operator @samp{&}.
+Since Mercury implements parallel conjunctions
+only in low-level C grades with the @samp{.par} grade modifier,
+in every other situation, the compiler silently converts
+every occurrence of @samp{&} to a comma,
+the usual @emph{sequential} conjunctions operator.
 
-@item Whether to include support for profiling of parallel programs:
-@samp{threadscope} (the default is no support for profiling parallel programs).
-@c See also the @samp{--profile-parallel-execution} runtime option.
+@item thread profiling
+In low-level C grades with the grade modifier @samp{.par},
+users can enable support for ThreadScope-style thread profiling
+by also specifying the grade module @samp{.threadscope}.
+The default is no support for profiling.
+Note that support for this form of profiling is experimental.
 
-@item Whether to include support for minimal model evaluation of procedures:
-@samp{mm} (the default is no support for minimal model evaluation).
+@item minimal model tabling
+The default is no support for minimal model evaluation.
+When targeting low-level C, users can specify the grade modifier @samp{.mm},
+which enables support for minimal model tabled evaluation of procedures.
 
 @end table
 
@@ -8038,6 +8170,9 @@ and grade modifier; they are followed by descriptions of those options.
 @findex --single-prec-float
 @findex --stack-segments
 
+@item @samp{hlc}
+@code{--target c --high-level-code}.
+
 @item @samp{none}
 @code{--target c --no-gcc-global-registers --no-gcc-nonlocal-gotos --no-asm-labels}.
 
@@ -8056,17 +8191,11 @@ and grade modifier; they are followed by descriptions of those options.
 @item @samp{asm_fast}
 @code{--target c --gcc-global-registers --gcc-nonlocal-gotos --asm-labels}.
 
-@item @samp{hlc}
-@code{--target c --high-level-code}.
-
-@c @item @samp{hl}
-@c @code{--target c --high-level-code --high-level-data}.
-
 @item @samp{csharp}
-@code{--target csharp --high-level-code --high-level-data}.
+@code{--target csharp --high-level-code}.
 
 @item @samp{java}
-@code{--target java --high-level-code --high-level-data}.
+@code{--target java --high-level-code}.
 
 @item @samp{erlang}
 @code{--target erlang}.
@@ -8244,12 +8373,6 @@ This option is not supported by the @samp{--high-level-code} back-ends.
 Use an alternative back-end that generates high-level code
 rather than the very low-level code that is generated by our
 original back-end.
-
-@c @item @code{--high-level-data} (grades: hl, csharp, java)
-@item @code{--high-level-data} (grades: csharp, java)
-@findex --high-level-data
-Use an alternative, higher-level data representation that uses structs
-or classes, rather than treating all objects as arrays.
 
 @end table
 
@@ -8470,10 +8593,8 @@ This option is only supported by the C back-ends.
 @cindex Constraint solving
 @cindex Backtrackable destructive update
 @cindex Destructive update, backtrackable
-Enable the use of a dynamically sized trail that is composed of small segments.
-This can help to avoid trail exhaustion at the cost of increased execution
-time.
-This option is only supported by the C back-ends.
+This option is deprecated as trailing now always uses trail segments.
+The @samp{.trseg} grade modifier is a synonym for @samp{.tr}.
 
 @sp 1
 @item @code{--parallel}
@@ -8542,51 +8663,19 @@ ordinary Mercury programmers.
 
 @table @asis
 @sp 1
-@item @code{--tags @{none, low, high@}}
-@findex --tags
-@cindex Tags
-@cindex Data representation
-(This option is not intended for general use.)@*
-Specify whether to use the low bits or the high bits of
-each word as tag bits (default: low).
-
-@sp 1
-@item @code{--num-tag-bits @var{n}}
+@item @code{--num-ptag-bits @var{n}}
+@itemx @code{--num-tag-bits @var{n}}
+@findex --num-ptag-bits
 @findex --num-tag-bits
 @cindex Tags
 @cindex Data representation
 (This option is not intended for general use.)@*
-Use @var{n} tag bits.  This option is required if you specify
-@samp{--tags high}.
-With @samp{--tags low}, the default number of tag bits to use
-is determined by the auto-configuration script.
-
-@sp 1
-@item @code{--num-reserved-addresses @var{n}}
-@findex --reserved-addresses
-@cindex Reserved addresses
-@cindex Addresses, reserved
-@cindex Data representation
-(This option is not intended for general use.)@*
-Treat the integer values from 0 up to @var{n} @minus{} 1 as reserved
-addresses that can be used to represent nullary constructors
-(constants) of discriminated union types.
-
-@sp 1
-@item @code{--num-reserved-objects @var{n}}
-@findex --reserved-addresses
-@cindex Reserved addresses
-@cindex Reserved objects
-@cindex Addresses, reserved
-@cindex Objects, reserved
-@cindex Data representation
-(This option is not intended for general use.)@*
-Allocate up to @var{n} @minus{} 1 global objects for representing nullary
-constructors (constants) of discriminated union types.
-
-Note that reserved objects will only be used if reserved addresses
-(see @code{--num-reserved-addresses}) are not available, since the
-latter are more efficient.
+Use @var{n} primary tag bits.
+The default number of primary tag bits to use
+is determined by the auto-configuration script;
+the only valid reason for overriding this default
+is cross-compilation to an architecture
+where auto-configuration would yield a different value.
 
 @sp 1
 @item @code{--no-type-layout}
@@ -8594,11 +8683,11 @@ latter are more efficient.
 @findex --type-layout
 (This option is not intended for general use.)@*
 Don't output base_type_layout structures or references to them.
-This option will generate smaller executables, but will not allow the
-use of code that uses the layout information (e.g.@: @samp{functor},
-@samp{arg}). Using such code will result in undefined behaviour at
-runtime.  The C code also needs to be compiled with
-@samp{-DNO_TYPE_LAYOUT}.
+This option will generate smaller executables,
+but will not allow the use of code that uses the layout information
+(e.g.@: @samp{functor}, @samp{arg}).
+Using such code will result in undefined behaviour at runtime.
+The C code also needs to be compiled with @samp{-DNO_TYPE_LAYOUT}.
 
 @end table
 
@@ -8628,7 +8717,6 @@ before going on the next phase on all predicates.
 @c @sp 1
 @c @item --parallel-liveness
 @c @item --no-parallel-liveness
-@c @item --parallel-liveness
 @c Use multiple threads when computing liveness.
 @c At the moment this option implies @samp{--no-trad-passes},
 @c and requires the compiler to be built in a
@@ -8637,7 +8725,6 @@ before going on the next phase on all predicates.
 @c @sp 1
 @c @item --parallel-code-gen
 @c @item --no-parallel-code-gen
-@c @item --parallel-code-gen
 @c Use multiple threads when generating code.
 @c At the moment this option implies @samp{--no-trad-passes},
 @c and requires the compiler to be built in a
@@ -10566,7 +10653,7 @@ grade.
 @c @findex --profile-parallel-execution
 @c Tells the runtime to collect and write out parallel execution profiling
 @c information to a file named @file{parallel_execution_profile.txt}.
-@c This only has an effect if the executable was built in a low level c,
+@c This only has an effect if the executable was built in a low-level C,
 @c parallel, threadscope grade.
 @c
 @c @sp 1
@@ -10701,27 +10788,30 @@ Sets the size of the solutions heap to @var{size} kilobytes.
 Sets the size of the solutions heap to @var{size} kilobytes
 multiplied by the word size in bytes.
 
-@sp 1
-@item --trail-size @var{size}
-@findex --trail-size (runtime option)
-@cindex Trail size
-Sets the size of the trail to @var{size} kilobytes.
-This option is ignored in grades that use trail segments.
+@c These two options are commented out as we support a fixed size tail ONLY
+@c for developers.
+@c
+@c @sp 1
+@c @item --trail-size @var{size}
+@c @findex --trail-size (runtime option)
+@c @cindex Trail size
+@c Sets the size of the trail to @var{size} kilobytes.
+@c This option is ignored in grades that use trail segments.
 
-@sp 1
-@item --trail-size-kwords @var{size}
-@findex --trail-size-kwords (runtime option)
-@cindex Trail size
-Sets the size of the trail to @var{size} kilobytes
-multiplied by the word size in bytes.
-This option is ignored in grades that use trail segments.
+@c @sp 1
+@c @item --trail-size-kwords @var{size}
+@c @findex --trail-size-kwords (runtime option)
+@c @cindex Trail size
+@c Sets the size of the trail to @var{size} kilobytes
+@c multiplied by the word size in bytes.
+@c This option is ignored in grades that use trail segments.
 
 @sp 1
 @item --trail-segment-size @var{size}
 @findex --trail-segment-size (runtime option)
 @cindex Trail size
 Sets the size of each trail segment to be @var{size} kilobytes.
-This option is ignored in grades that do not use trail segments.
+This option is ignored in grades that do not use a trail.
 
 @sp 1
 @item --trail-segment-size-kwords @var{size}
@@ -10729,7 +10819,7 @@ This option is ignored in grades that do not use trail segments.
 @cindex Trail size
 Set the size of each trail segment to be @var{size} kilobytes multiplied by the
 words size in bytes.
-This option is ignored in grades that do not use trail segments.
+This option is ignored in grades that do not use trail.
 
 @sp 1
 @item --genstack-size @var{size}
@@ -11115,38 +11205,40 @@ This is the only foreign language for back-ends which compile to Java.
 
 @c ----------------------------------------------------------------------------
 
-@node Stand-alone Interfaces
-@chapter Stand-alone Interfaces
+@node Stand-alone interfaces
+@chapter Stand-alone interfaces
 
-Programs written in a language other than Mercury should not make calls
-to foreign exported Mercury procedures unless the Mercury runtime has been
-initialised.
-(In the case where the Mercury runtime has not been initialised the
-behaviour of these calls is undefined.)
-Such programs must also ensure that any module specific initialisation is
-performed before calling foreign exported procedures in Mercury modules.
-Likewise, module specific finalisation may need to be performed after
-all calls to Mercury procedures have been made.
+Programs written in a language other than Mercury
+should not make calls to foreign exported Mercury procedures
+unless the Mercury runtime has been initialised.
+(In the case where the Mercury runtime has not been initialised,
+the behaviour of these calls is undefined.)
+Such programs must also ensure that
+any module specific initialisation is performed
+before calling foreign exported procedures in Mercury modules.
+Likewise, module specific finalisation may need to be performed
+after all calls to Mercury procedures have been made.
 
-A stand-alone interface provides a mechanism by which non-Mercury programs
-may initialise (and shut down) the Mercury runtime plus a specified set
-of Mercury libraries.
+A stand-alone interface provides a mechanism by which
+non-Mercury programs may initialise (and shut down)
+the Mercury runtime plus a specified set of Mercury libraries.
 
-A stand-alone interface is created by invoking the compiler with the
-@samp{--generate-standalone-interface} option.
+A stand-alone interface is created by invoking the compiler
+with the @samp{--generate-standalone-interface} option.
 The set of Mercury libraries to be included in the stand-alone interface
-is given via one of the usual mechanisms for specifying what libraries to link
-against, e.g. the @samp{--ml} and @samp{--mld} options.
-(@pxref{Libraries}).
+is given via one of the usual mechanisms
+for specifying what libraries to link against,
+e.g. the @samp{--ml} and @samp{--mld} options. (@pxref{Libraries}).
 The Mercury standard library is always included in this set.
 
-In C grades, the @samp{--generate-standalone-interface} option causes
-the compiler to generate an object file that should be linked into
-the executable.
+In C grades,
+the @samp{--generate-standalone-interface} option
+causes the compiler to generate
+an object file that should be linked into the executable.
 This object file contains two functions:
 @code{mercury_init()} and @code{mercury_terminate()}.
-The compiler also generates a C header file that contains
-the prototypes of these functions.
+The compiler also generates a C header file
+that contains the prototypes of these functions.
 (This header file may be included in C++ programs.)
 The roles of the two functions are described below.
 

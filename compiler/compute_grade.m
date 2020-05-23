@@ -190,10 +190,10 @@ check_grade_component_compatibility(Globals, Target, GC_Method, !Specs) :-
             ; Target = target_csharp
             ; Target = target_erlang
             ),
-            Trailpec =
+            TrailSpec =
                 [words("Trailing is incompatible with"),
                 words("target language"), words(TargetStr), suffix("."), nl],
-            add_error(phase_options, Trailpec, !Specs)
+            add_error(phase_options, TrailSpec, !Specs)
         ;
             Target = target_c
         )
@@ -537,78 +537,61 @@ grade_component_table("none", comp_gcc_ext, [
         asm_labels              - bool(no),
         gcc_non_local_gotos     - bool(no),
         gcc_global_registers    - bool(no),
-        highlevel_code          - bool(no),
-        highlevel_data          - bool(no)],
+        highlevel_code          - bool(no) ],
         yes([string("c")]), yes).
 grade_component_table("reg", comp_gcc_ext, [
         asm_labels              - bool(no),
         gcc_non_local_gotos     - bool(no),
         gcc_global_registers    - bool(yes),
-        highlevel_code          - bool(no),
-        highlevel_data          - bool(no)],
+        highlevel_code          - bool(no)],
         yes([string("c")]), yes).
 grade_component_table("jump", comp_gcc_ext, [
         asm_labels              - bool(no),
         gcc_non_local_gotos     - bool(yes),
         gcc_global_registers    - bool(no),
-        highlevel_code          - bool(no),
-        highlevel_data          - bool(no)],
+        highlevel_code          - bool(no)],
         yes([string("c")]), yes).
 grade_component_table("asm_jump", comp_gcc_ext, [
         asm_labels              - bool(yes),
         gcc_non_local_gotos     - bool(yes),
         gcc_global_registers    - bool(no),
-        highlevel_code          - bool(no),
-        highlevel_data          - bool(no)],
+        highlevel_code          - bool(no)],
         yes([string("c")]), yes).
 grade_component_table("fast", comp_gcc_ext, [
         asm_labels              - bool(no),
         gcc_non_local_gotos     - bool(yes),
         gcc_global_registers    - bool(yes),
-        highlevel_code          - bool(no),
-        highlevel_data          - bool(no)],
+        highlevel_code          - bool(no)],
         yes([string("c")]), yes).
 grade_component_table("asm_fast", comp_gcc_ext, [
         asm_labels              - bool(yes),
         gcc_non_local_gotos     - bool(yes),
         gcc_global_registers    - bool(yes),
-        highlevel_code          - bool(no),
-        highlevel_data          - bool(no)],
-        yes([string("c")]), yes).
-grade_component_table("hl", comp_gcc_ext, [
-        asm_labels              - bool(no),
-        gcc_non_local_gotos     - bool(no),
-        gcc_global_registers    - bool(no),
-        highlevel_code          - bool(yes),
-        highlevel_data          - bool(yes)],
+        highlevel_code          - bool(no)],
         yes([string("c")]), yes).
 grade_component_table("hlc", comp_gcc_ext, [
         asm_labels              - bool(no),
         gcc_non_local_gotos     - bool(no),
         gcc_global_registers    - bool(no),
-        highlevel_code          - bool(yes),
-        highlevel_data          - bool(no)],
+        highlevel_code          - bool(yes)],
         yes([string("c")]), yes).
 grade_component_table("java", comp_gcc_ext, [
         asm_labels              - bool(no),
         gcc_non_local_gotos     - bool(no),
         gcc_global_registers    - bool(no),
-        highlevel_code          - bool(yes),
-        highlevel_data          - bool(yes)],
+        highlevel_code          - bool(yes)],
         yes([string("java")]), yes).
 grade_component_table("csharp", comp_gcc_ext, [
         asm_labels              - bool(no),
         gcc_non_local_gotos     - bool(no),
         gcc_global_registers    - bool(no),
-        highlevel_code          - bool(yes),
-        highlevel_data          - bool(yes)],
+        highlevel_code          - bool(yes)],
         yes([string("csharp")]), yes).
 grade_component_table("erlang", comp_gcc_ext, [
         asm_labels              - bool(no),
         gcc_non_local_gotos     - bool(no),
         gcc_global_registers    - bool(no),
-        highlevel_code          - bool(no),
-        highlevel_data          - bool(no)],
+        highlevel_code          - bool(no)],
         yes([string("erlang")]), yes).
 
     % Parallelism/multithreading components.
@@ -654,9 +637,11 @@ grade_component_table("tsc", comp_term_size,
 
     % Trailing components.
 grade_component_table("tr", comp_trail,
-    [use_trail - bool(yes), trail_segments - bool(no)], no, yes).
-grade_component_table("trseg", comp_trail,
     [use_trail - bool(yes), trail_segments - bool(yes)], no, yes).
+    % NOTE: we do no include `.trseg' in grades strings because it
+    % it is just a synonym for `.tr'.
+grade_component_table("trseg", comp_trail,
+    [use_trail - bool(yes), trail_segments - bool(yes)], no, no).
 
     % Minimal model tabling components.
     % NOTE: we do not include `.mm' and `.dmm' in grade strings
@@ -747,7 +732,6 @@ grade_start_values(asm_labels - bool(no)).
 grade_start_values(gcc_non_local_gotos - bool(no)).
 grade_start_values(gcc_global_registers - bool(no)).
 grade_start_values(highlevel_code - bool(no)).
-grade_start_values(highlevel_data - bool(no)).
 grade_start_values(parallel - bool(no)).
 grade_start_values(threadscope - bool(no)).
 grade_start_values(gc - string("none")).

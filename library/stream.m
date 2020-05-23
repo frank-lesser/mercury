@@ -2,7 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 2006-2007, 2010 The University of Melbourne.
-% Copyright (C) 2014-2018 The Mercury team.
+% Copyright (C) 2014-2020 The Mercury team.
 % This file is distributed under the terms specified in COPYING.LIB.
 %---------------------------------------------------------------------------%
 %
@@ -10,9 +10,9 @@
 % Authors: juliensf, maclarty.
 % Stability: low
 %
-% This module provides a family of typeclasses for defining streams
+% This module provides a family of type classes for defining streams
 % in Mercury. It also provides some generic predicates that operate
-% on instances of these typeclasses.
+% on instances of these type classes.
 %
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
@@ -98,7 +98,7 @@
     %
 :- typeclass input(Stream, State) <= stream(Stream, State) where [].
 
-    % A reader stream is a subclass of specific input stream that can be
+    % A reader stream is a subclass of a specific input stream that can be
     % used to read data of a specific type from that input stream.
     % A single input stream can support multiple reader subclasses.
     %
@@ -110,15 +110,41 @@
     % The get operation should block until the next unit is available,
     % or the end of the stream or an error is detected.
     %
-    % If a call to get/4 returns `eof', all further calls to get/4 or
-    % bulk_get/9 for that stream return `eof'. If a call to get/4
-    % returns `error(...)', all further calls to get/4 or bulk_get/4 for
-    % that stream return an error, although not necessarily the same one.
+    % If a call to get/4 returns `eof', all further calls to get/4,
+    % unboxed_get/5 or bulk_get/9 for that stream return `eof'. If a call to
+    % get/4 returns `error(...)', all further calls to get/4, unboxed_get/5 or
+    % bulk_get/4 for that stream return an error, although not necessarily the
+    % same one.
     %
     % XXX We should provide an interface to allow the user to reset the
     % error status to try again if an error is transient.
     %
     pred get(Stream::in, result(Unit, Error)::out,
+        State::di, State::uo) is det
+].
+
+    % An unboxed_reader stream is like a reader stream except that it provides
+    % an interface that avoids a memory allocation when there is no error.
+    %
+:- typeclass unboxed_reader(Stream, Unit, State, Error)
+    <= (input(Stream, State), error(Error), (Stream, Unit -> Error)) where
+[
+    % Get the next unit from the given stream. On error or eof an arbitrary
+    % value of type Unit is returned.
+    %
+    % The unboxed_get operation should block until the next unit is available,
+    % or the end of the stream or an error is detected.
+    %
+    % If a call to unboxed_get/5 returns `eof', all further calls to get/4,
+    % unboxed_get/5 or bulk_get/9 for that stream return `eof'. If a call to
+    % unboxed_get/5 returns `error(...)', all further calls to get/4,
+    % unboxed_get/5 or bulk_get/4 for that stream return an error, although not
+    % necessarily the same one.
+    %
+    % XXX We should provide an interface to allow the user to reset the
+    % error status to try again if an error is transient.
+    %
+    pred unboxed_get(Stream::in, result(Error)::out, Unit::out,
         State::di, State::uo) is det
 ].
 
@@ -152,10 +178,10 @@
     % starting at Index will not fit in !Store.
     %
     % If a call to bulk_get/4 returns less than NumItems items, all further
-    % calls to get/4 or bulk_get/4 for that stream return no items. If a call
-    % to bulk_get/9 returns `error(...)', all further calls to get/4 or
-    % bulk_get/9 for that stream return an error, although not necessarily
-    % the same one.
+    % calls to get/4, unboxed_get/5 or bulk_get/4 for that stream return no
+    % items. If a call to bulk_get/9 returns `error(...)', all further calls to
+    % get/4, unboxed_get/5 or bulk_get/9 for that stream return an error,
+    % although not necessarily the same one.
     %
     pred bulk_get(Stream::in, Index::in, int::in,
         Store::bulk_get_di, Store::bulk_get_uo,
@@ -194,7 +220,7 @@
     <= output(Stream, State) where
 [
     % Write the next unit to the given stream.
-    % Blocks if the whole unit can't be written to the stream at the time
+    % Blocks if the whole unit cannot be written to the stream at the time
     % of the call (for example because a buffer is full).
     %
     pred put(Stream::in, Unit::in, State::di, State::uo) is det

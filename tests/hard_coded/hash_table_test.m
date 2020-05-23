@@ -38,7 +38,7 @@ main(!IO) :-
     Max = string.det_to_int(A),
     MaxOccupancy = string.det_to_float(B),
     some [!HT] (
-        !:HT = hash_table.init(int_hash, 1, MaxOccupancy),
+        !:HT = hash_table.init(int.hash, 1, MaxOccupancy),
 
         io.write_string("Inserting elements\n", !IO),
         inst_preserving_fold_up(do_insert, 0, Max - 1, !HT),
@@ -53,9 +53,9 @@ main(!IO) :-
         ),
 
         NumOccupants0 = hash_table.num_occupants(!.HT),
-        ( NumOccupants0 = Max ->
+        ( if NumOccupants0 = Max then
             true
-        ;
+        else
             error("num_occupants failed")
         ),
 
@@ -67,26 +67,26 @@ main(!IO) :-
         ),
 
         NumOccupants = hash_table.num_occupants(!.HT),
-        ( NumOccupants = Max - Half ->
+        ( if NumOccupants = Max - Half then
             true
-        ;
+        else
             error("num_occupants failed")
         ),
 
         AL = hash_table.to_assoc_list(!.HT),
-        ( list.length(AL) = NumOccupants ->
+        ( if list.length(AL) = NumOccupants then
             true
-        ;
+        else
             error("to_assoc_list failed")
         ),
 
-        io.write_string("Replacing elements\n", !IO),
-        inst_preserving_fold_up(do_replace_neg, 0, Max - 1, !HT),
+        io.write_string("Setting negative elements\n", !IO),
+        inst_preserving_fold_up(do_set_neg, 0, Max - 1, !HT),
         trace [runtime(env("HASH_TABLE_STATS"))] (
             impure report_stats
         ),
 
-        io.write_string("Looking up elements\n", !IO),
+        io.write_string("Looking up negative elements\n", !IO),
         inst_preserving_fold_up(do_lookup_neg, 0, Max - 1, !HT),
         trace [runtime(env("HASH_TABLE_STATS"))] (
             impure report_stats
@@ -119,9 +119,9 @@ do_insert(I, !HT) :-
 
 do_lookup(I, !HT) :-
     V = hash_table.lookup(!.HT, I),
-    ( I = V ->
+    ( if I = V then
         true
-    ;
+    else
         error("do_lookup failed")
     ).
 
@@ -130,10 +130,10 @@ do_lookup(I, !HT) :-
 
 do_lookup_neg(I, !HT) :-
     V = hash_table.lookup(!.HT, I),
-    ( -I = V ->
+    ( if -I = V then
         true
-    ;
-        error("do_lookup failed")
+    else
+        error("do_lookup_neg failed")
     ).
 
 :- pred do_delete(int::in, hash_table(int, int)::hash_table_di,
@@ -142,8 +142,8 @@ do_lookup_neg(I, !HT) :-
 do_delete(I, !HT) :-
     hash_table.delete(I, !HT).
 
-:- pred do_replace_neg(int::in, hash_table(int, int)::hash_table_di,
+:- pred do_set_neg(int::in, hash_table(int, int)::hash_table_di,
     hash_table(int, int)::hash_table_uo) is det.
 
-do_replace_neg(I, !HT) :-
+do_set_neg(I, !HT) :-
     hash_table.set(I, -I, !HT).

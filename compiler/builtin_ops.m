@@ -51,6 +51,10 @@
     ;       dword_uint64_get_word0
     ;       dword_uint64_get_word1.
 
+:- type shift_by_type
+    --->    shift_by_int
+    ;       shift_by_uint.
+
 :- type binary_op
     --->    int_add(int_type)
     ;       int_sub(int_type)
@@ -58,8 +62,11 @@
     ;       int_div(int_type) % Assumed to truncate toward zero.
     ;       int_mod(int_type) % Remainder (w.r.t. truncating integer division).
                               % XXX `mod' should be renamed `rem'
-    ;       unchecked_left_shift(int_type)
-    ;       unchecked_right_shift(int_type)
+            % For shifts, the first argument specifies the type of
+            % the value being shifted, while the second specifies
+            % the type of the shift amount.
+    ;       unchecked_left_shift(int_type, shift_by_type)
+    ;       unchecked_right_shift(int_type, shift_by_type)
     ;       bitwise_and(int_type)
     ;       bitwise_or(int_type)
     ;       bitwise_xor(int_type)
@@ -73,6 +80,10 @@
     ;       ne(int_type)      % !=
     ;       body
     ;       array_index(array_elem_type)
+            % The element type does not seem to be used. It could probably
+            % be deleted, but it seems wise to not to delete the code
+            % that currently fills in this slot in case some backend ever
+            % *does* start needing to know the element type.
     ;       string_unsafe_index_code_unit
     ;       str_eq  % string comparisons
     ;       str_ne
@@ -92,22 +103,23 @@
             % or equivalent code on backends which support this, and code
             % equivalent to "strcmp(SA, SB) == 0" on backends which don't.
 
-    ;       int_lt(int_type)  % signed integer comparisons
+    ;       int_lt(int_type)  % integer comparisons
     ;       int_gt(int_type)
     ;       int_le(int_type)
     ;       int_ge(int_type)
 
-    ;       unsigned_le % unsigned integer comparison (for signed values)
-            % Note that the arguments to `unsigned_le' are just ordinary
-            % (signed) Mercury ints, but it does the comparison as
-            % if they were first cast to an unsigned type, so e.g.
+    ;       unsigned_lt % less than
+    ;       unsigned_le % less than or equal
+            % The arguments to `unsigned_lt/le' are just ordinary (signed)
+            % Mercury ints, but the comparison is done *after* casting both
+            % arguments to the uint type. This means that e.g. the expression
             % binary(unsigned_le, int_const(1), int_const(-1)) returns true,
             % since (MR_Unsigned) 1 <= (MR_Unsigned) -1.
 
-    ;       float_plus      %  XXX the integer versions use different names.
-    ;       float_minus     %  E.g add instead of plus etc.
-    ;       float_times
-    ;       float_divide
+    ;       float_add
+    ;       float_sub
+    ;       float_mul
+    ;       float_div
     ;       float_eq
     ;       float_ne
     ;       float_lt
@@ -314,6 +326,8 @@ builtin_translation(ModuleName, PredName, ProcNum, Args, Code) :-
             ; PredName = "builtin_uint32_lt", CmpOp = int_lt(int_type_uint32)
             ; PredName = "builtin_uint64_gt", CmpOp = int_gt(int_type_uint64)
             ; PredName = "builtin_uint64_lt", CmpOp = int_lt(int_type_uint64)
+            ; PredName = "unsigned_lt",       CmpOp = unsigned_lt
+            ; PredName = "unsigned_le",       CmpOp = unsigned_le
             ),
             ProcNum = 0, Args = [X, Y],
             Code = test(binary(CmpOp, leaf(X), leaf(Y)))
@@ -418,9 +432,13 @@ builtin_translation(ModuleName, PredName, ProcNum, Args, Code) :-
             ; PredName = "unchecked_quotient", ArithOp = int_div(IntType)
             ; PredName = "unchecked_rem", ArithOp = int_mod(IntType)
             ; PredName = "unchecked_left_shift",
-                ArithOp = unchecked_left_shift(IntType)
+                ArithOp = unchecked_left_shift(IntType, shift_by_int)
+            ; PredName = "unchecked_left_ushift",
+                ArithOp = unchecked_left_shift(IntType, shift_by_uint)
             ; PredName = "unchecked_right_shift",
-                ArithOp = unchecked_right_shift(IntType)
+                ArithOp = unchecked_right_shift(IntType, shift_by_int)
+            ; PredName = "unchecked_right_ushift",
+                ArithOp = unchecked_right_shift(IntType, shift_by_uint)
             ; PredName = "/\\", ArithOp = bitwise_and(IntType)
             ; PredName = "\\/", ArithOp = bitwise_or(IntType)
             ),
@@ -449,7 +467,7 @@ builtin_translation(ModuleName, PredName, ProcNum, Args, Code) :-
             ;
                 Args = [X, Y, Z],
                 ProcNum = 0,
-                Code = assign(Z, binary(float_plus, leaf(X), leaf(Y)))
+                Code = assign(Z, binary(float_add, leaf(X), leaf(Y)))
             )
         ;
             PredName = "-",
@@ -457,15 +475,15 @@ builtin_translation(ModuleName, PredName, ProcNum, Args, Code) :-
                 Args = [X, Y],
                 ProcNum = 0,
                 Code = assign(Y,
-                    binary(float_minus, float_const(0.0), leaf(X)))
+                    binary(float_sub, float_const(0.0), leaf(X)))
             ;
                 Args = [X, Y, Z],
                 ProcNum = 0,
-                Code = assign(Z, binary(float_minus, leaf(X), leaf(Y)))
+                Code = assign(Z, binary(float_sub, leaf(X), leaf(Y)))
             )
         ;
-            ( PredName = "*", ArithOp = float_times
-            ; PredName = "unchecked_quotient", ArithOp = float_divide
+            ( PredName = "*", ArithOp = float_mul
+            ; PredName = "unchecked_quotient", ArithOp = float_div
             ),
             ProcNum = 0, Args = [X, Y, Z],
             Code = assign(Z, binary(ArithOp, leaf(X), leaf(Y)))

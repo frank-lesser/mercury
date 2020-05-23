@@ -7,7 +7,8 @@
 %---------------------------------------------------------------------------%
 %
 % File: module_imports.m.
-% Main author: fjh.
+% Original author: fjh.
+% Author of current version: zs.
 %
 % This module contains the main data structure we use while augmenting
 % a raw compilation unit. It records all the things that are imported,
@@ -31,7 +32,6 @@
 :- import_module parse_tree.prog_data_foreign.
 :- import_module parse_tree.prog_item.
 
-:- import_module cord.
 :- import_module io.
 :- import_module list.
 :- import_module map.
@@ -45,25 +45,40 @@
     % file, or generated .opt/.transopt file) we read, and the modification
     % time of the file.
     %
-    % We also record whether we expected the file we read to be
-    % fully module qualified or not.
+    % We also record whether code in the source module whose compilation
+    % we are concerned with may refer to items in the read-in module
+    % using names that are only partially qualified, or not.
     %
-    % XXX The handling of the map looks wrong to me (zs),
-    % for two separate reasons.
+    % What follows in the next two paragraphs is conjecture by wangp,
+    % but I (zs) agree that it is likely a correct description of
+    % what we use this information for.
     %
-    % The first reason is that the need_qualifier field is set by
-    % the code that *wants to read* a file, and is not a field
-    % whose value should be filled in by *reading* the file.
-    % (The timestamp field is properly filled in by reading
-    % the file.)
+    % Suppose a module msrc gets added to it a :- use_module declaration
+    % for a module m1, when previously it did not import module m1 in any
+    % shape or form. If msrc compiled cleanly until now, then a non-fully-
+    % qualified reference (e.g. f) to a item (type, data constructor,
+    % predicate etc) could not have been a reference to an item in m1,
+    % even if m1 defines an item named f of the relevant kind.
     %
-    % The second reason is that when we read in e.g. mod1.int, we simply
-    % overwrite any existing entry in the module_timestamp_map for mod1.
-    % I see no documented argument anywhere for any of the following
-    % propositions, which could each make the above the right thing to do.
+    % On the other hand, consider a version of the situation above
+    % in which msrc gains access to m1 via an :- import_module declaration.
+    % In that case, if m1 defines an item named f, then a non-fully-qualified
+    % reference to that name *could* refer to that item in m1. If msrc
+    % compiled cleanly before, this f must have been resolved to refer
+    % to an item defined in some other module, but now that msrc imports m1,
+    % the non-fully-qualified reference to f has become ambiguous.
+    % This means that msrc must be recompiled, so that the recompilation
+    % may detect and report any such ambiguities.
+    %
+    % XXX The handling of the map looks wrong to me (zs), because
+    % when we read in e.g. mod1.int, we simply overwrite any existing entry
+    % in the module_timestamp_map for mod1. I see no documented argument
+    % anywhere for any of the following propositions, which could each make
+    % the above the right thing to do.
     %
     % - Proposition 1: when we add an entry for a module, the map
     %   cannot contain any previous entry for that module.
+    %   I (zs) think this is the correct answer, but have no proof.
     %
     % - Proposition 2a: when we add an entry for a module, the map
     %   *can* contain a previous entry for the module, but for
@@ -73,19 +88,68 @@
     %   module).
     %
     % - Proposition 2b: when we add an entry for a module, the map
-    %   *can* contain a previous entry for the module, the need_qualifier
+    %   *can* contain a previous entry for the module, the avail_kind
     %   field in the new entry is at least as restrictive as in
-    %   the old entry. (This means that once we required the file
-    %   we read for a module to be fully module qualified, we shouldn't
-    %   later forget about that requirement.
+    %   the old entry.
     %
 :- type module_timestamp_map == map(module_name, module_timestamp).
 :- type module_timestamp
     --->    module_timestamp(
                 mts_file_kind       :: file_kind,
                 mts_timestamp       :: timestamp,
-                mts_need_qualifier  :: need_qualifier
+                mts_avail_kind      :: recomp_avail
             ).
+
+:- type recomp_avail
+    --->    recomp_avail_src
+            % The module is the souurce module.
+    ;       recomp_avail_int_import
+            % There was an ":- import_module" in the interface section,
+            % or in an ancestor module. In either case, references to
+            % items defined by the read-in module may be made anywhere
+            % in the source module.
+    ;       recomp_avail_imp_import
+            % There was an ":- import_module" in the implementation section,
+            % or in an optimization file. In either case, references to
+            % items defined by the read-in module may be made only in
+            % in the implementation section of the source module.
+    ;       recomp_avail_int_use
+            % There was an ":- use_module" in the interface section,
+            % or in an ancestor module. In either case, references to
+            % items defined by the read-in module may be made anywhere
+            % in the source module.
+    ;       recomp_avail_imp_use
+            % There was an ":- use_module" in the implementation section,
+            % or in an optimization file. In either case, references to
+            % items defined by the read-in module may be made only in
+            % in the implementation section of the source module.
+    ;       recomp_avail_int_use_imp_import.
+            % There was an ":- use_module" in the interface section
+            % and an ":- import_module" in the implementation section.
+
+%---------------------------------------------------------------------------%
+
+:- type grabbed_file
+    --->    gf_src(parse_tree_module_src)
+    ;       gf_int0(parse_tree_int0, read_why_int0)
+    ;       gf_int1(parse_tree_int1, read_why_int1)
+    ;       gf_int2(parse_tree_int2, read_why_int2)
+    ;       gf_int3(parse_tree_int3, read_why_int3).
+
+    % This maps each module to the interface file (or in one case,
+    % the source file) that contains the most information about the module.
+    % So for example, when compiling module A which imports module B,
+    % and module B also imports module A (a circular dependency), then
+    % the presence of a gf_src entry for module A will tell us that there is
+    % no point in reading in A.int2.
+    %
+    % XXX CLEANUP This data structure should be generalized to allow it
+    % to record e.g. both the .m file and the .int file for the module
+    % being compiled. It should also be generalized to record both plain
+    % and transitive optimization files, which will also require the ability
+    % to record more than one file for a single module.
+    %
+:- type grabbed_file_map == map(module_name, grabbed_file).
 
 %---------------------------------------------------------------------------%
 
@@ -115,19 +179,11 @@
     list(error_spec)::in, list(error_spec)::out,
     list(raw_compilation_unit)::out, list(module_and_imports)::out) is det.
 
-    % This predicate is used by deps_map.m for building dependency maps
-    % between modules, in case the reading of a module's source file
-    % encounters a fatal error.
-    %
-:- pred parse_tree_int_to_module_and_imports(globals::in, file_name::in,
-    parse_tree_int::in, read_module_errors::in,
-    module_and_imports::out) is det.
-
 :- pred rebuild_module_and_imports_for_dep_file(globals::in,
     module_and_imports::in, module_and_imports::out) is det.
 
     % make_module_and_imports(Globals, SourceFileName, SourceFileModuleName,
-    %  ModuleName, ModuleNameContext, SrcItemBlocks0,
+    %  ParseTreeModuleSrc,
     %  PublicChildren, NestedChildren, FactDeps, ForeignIncludeFiles,
     %  ForeignExportLangs, HasMain, MaybeTimestampMap,
     %  ModuleAndImports):
@@ -146,8 +202,7 @@
     % module_and_imports structure.
     %
 :- pred make_module_and_imports(globals::in, file_name::in,
-    module_name::in, module_name::in, prog_context::in,
-    list(src_item_block)::in, module_names_contexts::in,
+    module_name::in, parse_tree_module_src::in, module_names_contexts::in,
     set(module_name)::in, list(string)::in, foreign_include_file_infos::in,
     set(foreign_language)::in, has_main::in,
     maybe(module_timestamp_map)::in, module_and_imports::out) is det.
@@ -155,7 +210,8 @@
     % Construct a module_and_imports structure for inclusion in
     % a module dependencies structure, for make.module_dep_file.m.
     % This structure is only partially filled in. I (zs) don't know
-    % what rationale governs what fields need to be filled in, and when.
+    % what rationale governs what fields need to be filled in, and when, but
+    % XXX I think it is unlikely to have a good correctness argument behind it.
     %
 :- pred make_module_dep_module_and_imports(string::in, string::in,
     module_name::in, module_name::in,
@@ -197,8 +253,8 @@
     set(module_name)::out) is det.
 :- pred module_and_imports_get_fact_table_deps(module_and_imports::in,
     list(string)::out) is det.
-:- pred module_and_imports_get_foreign_import_modules(module_and_imports::in,
-    foreign_import_modules::out) is det.
+:- pred module_and_imports_get_c_j_cs_e_fims(module_and_imports::in,
+    c_j_cs_e_fims::out) is det.
 :- pred module_and_imports_get_foreign_include_files(module_and_imports::in,
     foreign_include_file_infos::out) is det.
 :- pred module_and_imports_get_contains_foreign_code(module_and_imports::in,
@@ -207,20 +263,26 @@
     contains_foreign_export::out) is det.
 :- pred module_and_imports_get_has_main(module_and_imports::in,
     has_main::out) is det.
-:- pred module_and_imports_get_src_blocks(module_and_imports::in,
-    list(src_item_block)::out) is det.
-:- pred module_and_imports_get_direct_int_blocks_cord(module_and_imports::in,
-    cord(int_item_block)::out) is det.
-:- pred module_and_imports_get_indirect_int_blocks_cord(module_and_imports::in,
-    cord(int_item_block)::out) is det.
-:- pred module_and_imports_get_opt_blocks_cord(module_and_imports::in,
-    cord(opt_item_block)::out) is det.
-:- pred module_and_imports_get_int_for_opt_blocks_cord(module_and_imports::in,
-    cord(int_for_opt_item_block)::out) is det.
+:- pred module_and_imports_get_parse_tree_module_src(module_and_imports::in,
+    parse_tree_module_src::out) is det.
+:- pred module_and_imports_get_ancestor_int_specs(module_and_imports::in,
+    map(module_name, ancestor_int_spec)::out) is det.
+:- pred module_and_imports_get_direct_int_specs(module_and_imports::in,
+    map(module_name, direct_int_spec)::out) is det.
+:- pred module_and_imports_get_indirect_int_specs(module_and_imports::in,
+    map(module_name, indirect_int_spec)::out) is det.
+:- pred module_and_imports_get_plain_opts(module_and_imports::in,
+    map(module_name, parse_tree_plain_opt)::out) is det.
+:- pred module_and_imports_get_trans_opts(module_and_imports::in,
+    map(module_name, parse_tree_trans_opt)::out) is det.
+:- pred module_and_imports_get_int_for_opt_specs(module_and_imports::in,
+    map(module_name, int_for_opt_spec)::out) is det.
 :- pred module_and_imports_get_maybe_timestamp_map(module_and_imports::in,
     maybe(module_timestamp_map)::out) is det.
 :- pred module_and_imports_get_errors(module_and_imports::in,
     read_module_errors::out) is det.
+:- pred module_and_imports_get_grabbed_file_map(module_and_imports::in,
+    grabbed_file_map::out) is det.
 
     % XXX It should NOT be necessary to set the ancestors
     % after the module_and_imports structure is initially created.
@@ -232,8 +294,7 @@
     module_and_imports::in, module_and_imports::out) is det.
 :- pred module_and_imports_set_indirect_deps(set(module_name)::in,
     module_and_imports::in, module_and_imports::out) is det.
-:- pred module_and_imports_set_foreign_import_modules(
-    foreign_import_modules::in,
+:- pred module_and_imports_set_c_j_cs_e_fims(c_j_cs_e_fims::in,
     module_and_imports::in, module_and_imports::out) is det.
 :- pred module_and_imports_set_maybe_timestamp_map(
     maybe(module_timestamp_map)::in,
@@ -242,6 +303,8 @@
     % the predicates below that only *add* to the set of errors
     % should be sufficient.
 :- pred module_and_imports_set_errors(read_module_errors::in,
+    module_and_imports::in, module_and_imports::out) is det.
+:- pred module_and_imports_set_grabbed_file_map(grabbed_file_map::in,
     module_and_imports::in, module_and_imports::out) is det.
 
 %---------------------------------------------------------------------------%
@@ -262,6 +325,9 @@
 :- pred module_and_imports_get_imp_deps_set(module_and_imports::in,
     set(module_name)::out) is det.
 
+:- pred module_and_imports_do_we_need_timestamps(module_and_imports::in,
+    maybe_return_timestamp::out) is det.
+
 %---------------------------------------------------------------------------%
 %
 % Predicates for adding information to module_and_imports structures.
@@ -269,22 +335,25 @@
 
 :- pred module_and_imports_add_ancestor(module_name::in,
     module_and_imports::in, module_and_imports::out) is det.
-:- pred module_and_imports_add_imp_dep(module_name::in, prog_context::in,
+:- pred module_and_imports_add_direct_dep(module_name::in, prog_context::in,
     module_and_imports::in, module_and_imports::out) is det.
 :- pred module_and_imports_add_indirect_dep(module_name::in,
     module_and_imports::in, module_and_imports::out) is det.
 
-:- pred module_and_imports_add_direct_int_item_blocks(
-    list(int_item_block)::in,
+:- pred module_and_imports_add_ancestor_int_spec(ancestor_int_spec::in,
     module_and_imports::in, module_and_imports::out) is det.
-:- pred module_and_imports_add_indirect_int_item_blocks(
-    list(int_item_block)::in,
+:- pred module_and_imports_add_direct_int_spec(direct_int_spec::in,
     module_and_imports::in, module_and_imports::out) is det.
-:- pred module_and_imports_add_opt_item_blocks(
-    list(opt_item_block)::in,
+:- pred module_and_imports_add_indirect_int_spec(indirect_int_spec::in,
     module_and_imports::in, module_and_imports::out) is det.
-:- pred module_and_imports_add_int_for_opt_item_blocks(
-    list(int_for_opt_item_block)::in,
+:- pred module_and_imports_add_plain_opt(parse_tree_plain_opt::in,
+    module_and_imports::in, module_and_imports::out) is det.
+:- pred module_and_imports_add_trans_opt(parse_tree_trans_opt::in,
+    module_and_imports::in, module_and_imports::out) is det.
+:- pred module_and_imports_add_int_for_opt_spec(int_for_opt_spec::in,
+    module_and_imports::in, module_and_imports::out) is det.
+
+:- pred module_and_imports_add_grabbed_file(module_name::in, grabbed_file::in,
     module_and_imports::in, module_and_imports::out) is det.
 
 :- pred module_and_imports_maybe_add_module_version_numbers(
@@ -314,10 +383,8 @@
     set(module_name)::out, module_names_contexts::out, set(module_name)::out,
     module_names_contexts::out, module_names_contexts::out,
     set(module_name)::out, list(string)::out,
-    foreign_import_modules::out, foreign_include_file_infos::out,
-    contains_foreign_code::out, list(src_item_block)::out,
-    cord(int_item_block)::out, cord(int_item_block)::out,
-    cord(opt_item_block)::out, cord(int_for_opt_item_block)::out) is det.
+    c_j_cs_e_fims::out, foreign_include_file_infos::out,
+    contains_foreign_code::out, aug_compilation_unit::out) is det.
 
     % Return the results recorded in the module_and_imports structure.
     %
@@ -337,13 +404,16 @@
 
 :- implementation.
 
+:- import_module parse_tree.convert_parse_tree.
 :- import_module parse_tree.get_dependencies.
 :- import_module parse_tree.item_util.
 :- import_module parse_tree.split_parse_tree_src.
 :- import_module recompilation.
 
+:- import_module cord.
 :- import_module dir.
-:- import_module multi_map.
+:- import_module one_or_more.
+:- import_module one_or_more_map.
 :- import_module pair.
 :- import_module require.
 :- import_module string.
@@ -384,18 +454,18 @@
     % as the mai_int_deps and mai_imp_deps fields.
     %
     % For some imports (e.g. implicit imports), there is no valid context
-    % we can record. For those, we record term.context_init instead.
-    % (We can't record no context at all, since multi_map makes no distinction
-    % between a key in the map that has a empty list of associated values,
-    % and a key that is not in the map at all. We *do* want to keep a record
-    % of every imported module, even if we have no context for the import.)
+    % we can record. For those, we record term.dummy_context_init instead.
+    % (We can't record no context at all, since one_or_more_map, and its
+    % predecessor multi_map, both require at least one for each key in the map.
+    % We *do* want to keep a record of every imported module, even if
+    % we have no context for the import.)
     %
 :- type module_and_imports
     --->    module_and_imports(
                 % The name of the source file and directory
                 % containing the module source.
-                mai_source_file_name            :: file_name,
-                mai_module_dir                  :: dir_name,
+                mai_source_file_name    :: file_name,
+                mai_module_dir          :: dir_name,
 
                 % The name of the top-level module in the above source file.
                 mai_source_file_module_name     :: module_name,
@@ -403,77 +473,96 @@
                 % The module that we are compiling. This may be
                 % mai_source_file_module_name, or it may be one of its
                 % descendant modules (child modules, grandchild modules, etc).
-                mai_module_name                 :: module_name,
+                % mai_module_name         :: module_name,
+                % We do not need a separate field for this, as this info
+                % is available in mai_src ^ ptms_module_name.
 
                 % The context of the module declaration of mai_module_name.
-                mai_module_name_context         :: prog_context,
+                % mai_module_name_context :: prog_context,
+                % We do not need a separate field for this, as this info
+                % is available in mai_src ^ ptms_module_name_context.
+
+                % XXX CLEANUP The following fields, up to but not including
+                % mai_src, should not be needed, being available in mai_src.
 
                 % The set of mai_module_name's ancestor modules.
-                mai_ancestors                   :: set(module_name),
+                % XXX CLEANUP This information should be available
+                % as the names of the modules in mai_ancestor_int_specs.
+                mai_ancestors           :: set(module_name),
 
-                mai_children                    :: module_names_contexts,
+                mai_children            :: module_names_contexts,
 
                 % The set of its public children, i.e. child modules that
                 % it includes in the interface section.
-                mai_public_children             :: module_names_contexts,
+                mai_public_children     :: module_names_contexts,
 
                 % The modules included in the same source file. This field
                 % is only set for the top-level module in each file.
-                mai_nested_children             :: set(module_name),
+                mai_nested_children     :: set(module_name),
 
                 % The set of modules it directly imports in the interface
                 % (imports via ancestors count as direct).
-                mai_int_deps_map                :: module_names_contexts,
+                mai_int_deps_map        :: module_names_contexts,
 
                 % The set of modules it directly imports in the
                 % implementation.
-                mai_imp_deps_map                :: module_names_contexts,
+                mai_imp_deps_map        :: module_names_contexts,
 
                 % The set of modules it indirectly imports.
-                mai_indirect_deps               :: set(module_name),
+                mai_indirect_deps       :: set(module_name),
 
                 % The list of filenames for fact tables in this module.
-                mai_fact_table_deps             :: list(string),
+                mai_fact_table_deps     :: list(string),
 
                 % The information from `:- pragma foreign_import_module'
                 % declarations.
-                mai_foreign_import_modules      :: foreign_import_modules,
+                mai_fims                :: c_j_cs_e_fims,
 
                 % The list of filenames referenced by `:- pragma foreign_decl'
                 % or `:- pragma foreign_code' declarations.
-                mai_foreign_include_files       :: foreign_include_file_infos,
+                mai_foreign_incl_files  :: foreign_include_file_infos,
 
                 % Whether or not the module contains foreign code, and if yes,
                 % which languages they use.
-                mai_contains_foreign_code       :: contains_foreign_code,
+                mai_has_foreign_code    :: contains_foreign_code,
 
                 % Does the module contain any `:- pragma foreign_export'
                 % declarations?
-                mai_contains_foreign_export     :: contains_foreign_export,
+                mai_has_foreign_export  :: contains_foreign_export,
 
                 % Does this module contain main/2?
-                mai_has_main                    :: has_main,
+                mai_has_main            :: has_main,
 
                 % The contents of the module and its imports.
-                mai_src_blocks                  :: list(src_item_block),
-                mai_direct_int_blocks_cord      :: cord(int_item_block),
-                mai_indirect_int_blocks_cord    :: cord(int_item_block),
-                mai_opt_blocks_cord             :: cord(opt_item_block),
-                mai_int_for_opt_blocks_cord     :: cord(
-                                                    int_for_opt_item_block),
+                mai_src                 :: parse_tree_module_src,
+                mai_ancestor_int_specs  :: map(module_name, ancestor_int_spec),
+                mai_direct_int_specs    :: map(module_name, direct_int_spec),
+                mai_indirect_int_specs  :: map(module_name, indirect_int_spec),
+                % Implicitly every everything in {plain,trans} opt files
+                % is in single section with section kind
+                % oms_opt_imported(OptModuleName, OptFileKind).
+                mai_plain_opts          :: map(module_name,
+                                            parse_tree_plain_opt),
+                mai_trans_opts          :: map(module_name,
+                                            parse_tree_trans_opt),
+                % Implicitly every everything in int_for_opt interface files,
+                % in both interface and implementation sections, has
+                % section kind ioms_opt_imported(IntModuleName, IntKind).
+                mai_int_for_opt_specs   :: map(module_name, int_for_opt_spec),
 
-                mai_version_numbers_map         :: module_version_numbers_map,
+                mai_version_numbers_map :: module_version_numbers_map,
 
                 % If we are doing smart recompilation, we need to keep
                 % the timestamps of the modules read in.
-                mai_maybe_timestamp_map         :: maybe(module_timestamp_map),
+                mai_maybe_timestamp_map :: maybe(module_timestamp_map),
 
                 % Whether an error has been encountered when reading in
                 % this module.
-                mai_specs                       :: list(error_spec),
-                mai_errors                      :: read_module_errors,
+                mai_specs               :: list(error_spec),
+                mai_errors              :: read_module_errors,
 
-                mai_construction_method         :: mai_construction_method
+                mai_grabbed_file_map    :: grabbed_file_map,
+                mai_construction_method :: mai_construction_method
             ).
 
 :- type mai_construction_method
@@ -498,37 +587,19 @@ parse_tree_src_to_module_and_imports_list(Globals, SourceFileName,
             CompUnitModuleNames, MAISpecs0, ReadModuleErrors),
         RawCompUnits, ModuleAndImportsList).
 
-parse_tree_int_to_module_and_imports(Globals, IntFileName,
-        ParseTreeInt, ReadModuleErrors, ModuleAndImports) :-
-    ParseTreeInt = parse_tree_int(ModuleName, _, ModuleContext,
-        _MaybeVersionNumbers, IntIncl, ImpIncls, IntAvails, ImpAvails,
-        IntFIMs, ImpFIMs, IntItems, ImpItems),
-    int_imp_items_to_item_blocks(ModuleName, ms_interface, ms_implementation,
-        IntIncl, ImpIncls, IntAvails, ImpAvails, IntFIMs, ImpFIMs,
-        IntItems, ImpItems, RawItemBlocks),
-    RawCompUnit =
-        raw_compilation_unit(ModuleName, ModuleContext, RawItemBlocks),
-
-    CompUnitModuleNames = set.make_singleton_set(ModuleName),
-    MAISpecs0 = [],
-    init_module_and_imports(Globals, IntFileName, ModuleName,
-        CompUnitModuleNames, MAISpecs0, ReadModuleErrors,
-        RawCompUnit, ModuleAndImports).
-
 rebuild_module_and_imports_for_dep_file(Globals,
         ModuleAndImports0, ModuleAndImports) :-
     % Make sure all the required fields are filled in.
     % XXX ITEM_LIST Why build a NEW ModuleAndImports? Wouldn't modifying
     % ModuleAndImports0 be easier and clearer?
-    module_and_imports_get_aug_comp_unit(ModuleAndImports0, AugCompUnit,
-        Specs, _Errors),
-    AugCompUnit = aug_compilation_unit(ModuleName, ModuleNameContext,
-        _ModuleVersionNumbers, SrcItemBlocks,
-        _DirectIntItemBlocksCord, _IndirectIntItemBlocksCord,
-        _OptItemBlocksCord, _IntForOptItemBlocksCord),
-    list.map(src_to_raw_item_block, SrcItemBlocks, RawItemBlocks),
-    RawCompUnit = raw_compilation_unit(ModuleName, ModuleNameContext,
-        RawItemBlocks),
+    module_and_imports_get_aug_comp_unit(ModuleAndImports0,
+        AugCompUnit, Specs, _Errors),
+    AugCompUnit = aug_compilation_unit(_ModuleName, _ModuleNameContext,
+        _ModuleVersionNumbers, ParseTreeModuleSrc,
+        _AncestorIntSpecs, _DirectIntSpecs, _IndirectIntSpecs,
+        _PlainOpts, _TransOpts, _IntForOptSpecs),
+    convert_parse_tree_module_src_to_raw_comp_unit(ParseTreeModuleSrc,
+        RawCompUnit),
     module_and_imports_get_source_file_name(ModuleAndImports0,
         SourceFileName),
     module_and_imports_get_source_file_module_name(ModuleAndImports0,
@@ -594,7 +665,7 @@ init_module_and_imports(Globals, FileName, SourceFileModuleName,
     % NOTE There are two predicates that build an initial module_and_imports
     % structure. One is this predicate, init_module_and_imports, which is
     % called by compiler invocations that want to find out the dependencies
-    % between modules.  The other is make_module_and_imports, which is
+    % between modules. The other is make_module_and_imports, which is
     % called by compiler invocations that want to generate target language
     % code.
     %
@@ -610,15 +681,18 @@ init_module_and_imports(Globals, FileName, SourceFileModuleName,
     % XXX However, the two predicates used to use different algorithms
     % to fill in some of the remaining fields as well. These differences
     % are almost certainly bugs, caused by the opacity of this code.
-    % We want to move towards filling in these fields using the *same* code.
+    % We want to move towards filling in these fields using the *same* code
+    % in both use cases.
+    %
     % Unless there is a specific reason against it, the code we want to base
     % the common code on is the code used by (the callers of)
     % make_module_and_imports. This is because the code used by the
     % make_module_and_imports approach is more likely to be correct.
     % The reason for that is that errors during code generation are
     % much more likely to be noticed than errors in the computation
-    % of dependencies (even mmc does not *force* e.g. an interface file to be
-    % up to date, that interface file may *happen* be up-to-date anyway).
+    % of dependencies (because even if mmc does not *force* e.g.
+    % an interface file to be up to date, that interface file may *happen*
+    % be up-to-date anyway).
     %
     % We now compute the values of most fields using the approach used
     % by make_module_and_imports, XXX BUT we exempt the values of
@@ -663,11 +737,9 @@ init_module_and_imports(Globals, FileName, SourceFileModuleName,
     get_raw_components(RawItemBlocks, IntIncls, ImpIncls,
         IntAvails, ImpAvails, _IntFIMs, _ImpFIMs, IntItems, ImpItems),
     list.foldl(get_included_modules_in_item_include_acc, IntIncls,
-        multi_map.init, PublicChildrenMap),
+        one_or_more_map.init, PublicChildrenMap),
     list.foldl(get_included_modules_in_item_include_acc, ImpIncls,
         PublicChildrenMap, ChildrenMap),
-    get_imports_uses_maps(IntAvails, IntImportsMap0, IntUsesMap0),
-    get_imports_uses_maps(ImpAvails, ImpImportsMap0, ImpUsesMap0),
 
     get_implicits_foreigns_fact_tables(IntItems, ImpItems,
         IntImplicitImportNeeds, IntImpImplicitImportNeeds, Contents),
@@ -677,6 +749,7 @@ init_module_and_imports(Globals, FileName, SourceFileModuleName,
     globals.get_backend_foreign_languages(Globals, BackendLangs),
     set.intersect(set.list_to_set(BackendLangs), NewForeignExportLangs,
         NewBackendFELangs),
+    ContainsForeignCode = foreign_code_langs_known(LangSet),
     ( if set.is_empty(NewBackendFELangs) then
         NewContainsForeignExport = contains_no_foreign_export
     else
@@ -685,58 +758,60 @@ init_module_and_imports(Globals, FileName, SourceFileModuleName,
     expect(unify(ContainsForeignExport, NewContainsForeignExport), $pred,
         "bad ContainsForeignExport"),
 
-    compute_implicit_import_needs(Globals, IntImplicitImportNeeds,
+    get_imports_uses_maps(IntAvails, IntImportsMap0, IntUsesMap0),
+    get_imports_uses_maps(ImpAvails, ImpImportsMap0, ImpUsesMap0),
+
+    compute_implicit_avail_needs(Globals, IntImplicitImportNeeds,
         ImplicitIntImports, ImplicitIntUses),
-    compute_implicit_import_needs(Globals, IntImpImplicitImportNeeds,
+    compute_implicit_avail_needs(Globals, IntImpImplicitImportNeeds,
         ImplicitIntImpImports, ImplicitIntImpUses),
     set.difference(ImplicitIntImpImports, ImplicitIntImports,
         ImplicitImpImports),
     set.difference(ImplicitIntImpUses, ImplicitIntUses,
         ImplicitImpUses),
 
-    set.fold(multi_map.reverse_set(term.context_init),
+    set.fold(one_or_more_map.reverse_set(term.dummy_context_init),
         ImplicitIntImports, IntImportsMap0, IntImportsMap),
-    set.fold(multi_map.reverse_set(term.context_init),
+    set.fold(one_or_more_map.reverse_set(term.dummy_context_init),
         ImplicitIntUses, IntUsesMap0, IntUsesMap),
-    set.fold(multi_map.reverse_set(term.context_init),
+    set.fold(one_or_more_map.reverse_set(term.dummy_context_init),
         ImplicitImpImports, ImpImportsMap0, ImpImportsMap),
-    set.fold(multi_map.reverse_set(term.context_init),
+    set.fold(one_or_more_map.reverse_set(term.dummy_context_init),
         ImplicitImpUses, ImpUsesMap0, ImpUsesMap),
 
-    multi_map.merge(IntImportsMap, IntUsesMap, IntDepsMap),
-    multi_map.merge(ImpImportsMap, ImpUsesMap, ImpDepsMap),
-    multi_map.merge(IntDepsMap, ImpDepsMap, IntImpDepsMap),
+    one_or_more_map.merge(IntImportsMap, IntUsesMap, IntDepsMap),
+    one_or_more_map.merge(ImpImportsMap, ImpUsesMap, ImpDepsMap),
+    one_or_more_map.merge(IntDepsMap, ImpDepsMap, IntImpDepsMap),
 
     ForeignIncludeFiles = cord.list(ForeignIncludeFilesCord),
     NewForeignInclFiles = cord.list(NewForeignInclFilesCord),
     expect(unify(ForeignIncludeFiles, NewForeignInclFiles), $pred,
         "bad ForeignIncludeFiles"),
 
-    ( if set.is_empty(LangSet) then
-        ContainsForeignCode = contains_no_foreign_code
-    else
-        ContainsForeignCode = contains_foreign_code(LangSet)
-    ),
-
-    % XXX ITEM_LIST SrcItemBlocks and the item block fields are NOT
-    % stored here, per the documentation above.
-    SrcItemBlocks = [],
-    DirectIntBlocksCord = cord.init,
-    IndirectIntBlocksCord = cord.init,
-    OptBlocksCords = cord.init,
-    IntForOptBlocksCords = cord.init,
+    % XXX ITEM_LIST These fields will be filled in later,
+    % per the documentation above.
+    ParseTreeModuleSrc =
+        init_empty_parse_tree_module_src(ModuleName, ModuleNameContext),
+    map.init(AncestorIntSpecs),
+    map.init(DirectIntSpecs),
+    map.init(IndirectIntSpecs),
+    map.init(PlainOpts),
+    map.init(TransOpts),
+    map.init(IntForOptSpecs),
 
     map.init(VersionNumbers),
     MaybeTimestampMap = no,
+    GrabbedFileMap = map.singleton(ModuleName, gf_src(ParseTreeModuleSrc)),
     ModuleAndImports = module_and_imports(FileName, dir.this_directory,
-        SourceFileModuleName, ModuleName, ModuleNameContext,
+        SourceFileModuleName,
         set.list_to_set(Ancestors), ChildrenMap, PublicChildrenMap,
         NestedDeps, IntDepsMap, IntImpDepsMap, IndirectDeps,
         SortedFactTables, ForeignImports, ForeignIncludeFilesCord,
         ContainsForeignCode, ContainsForeignExport, HasMain,
-        SrcItemBlocks, DirectIntBlocksCord, IndirectIntBlocksCord,
-        OptBlocksCords, IntForOptBlocksCords,
-        VersionNumbers, MaybeTimestampMap, Specs, Errors, mcm_init).
+        ParseTreeModuleSrc, AncestorIntSpecs, DirectIntSpecs, IndirectIntSpecs,
+        PlainOpts, TransOpts, IntForOptSpecs,
+        VersionNumbers, MaybeTimestampMap, Specs, Errors,
+        GrabbedFileMap, mcm_init).
 
     % XXX ITEM_LIST This shouldn't be needed; the representation of the
     % compilation unit should have all this information separate from
@@ -767,9 +842,8 @@ accumulate_foreign_import_langs_in_item(Item, !LangSet) :-
 %---------------------------------------------------------------------------%
 
 make_module_and_imports(Globals, SourceFileName, SourceFileModuleName,
-        ModuleName, ModuleNameContext, SrcItemBlocks,
-        PublicChildrenMap, NestedChildren, FactDeps, ForeignIncludeFiles,
-        ForeignExportLangs, HasMain,
+        ParseTreeModuleSrc, PublicChildrenMap, NestedChildren, FactDeps,
+        ForeignIncludeFiles, ForeignExportLangs, HasMain,
         MaybeTimestampMap, ModuleAndImports) :-
     set.init(Ancestors),
     map.init(IntDeps),
@@ -788,16 +862,26 @@ make_module_and_imports(Globals, SourceFileName, SourceFileModuleName,
     else
         ContainsForeignExport = contains_foreign_export
     ),
+    map.init(AncestorSpecs),
+    map.init(DirectIntSpecs),
+    map.init(IndirectIntSpecs),
+    map.init(PlainOpts),
+    map.init(TransOpts),
+    map.init(IntForOptSpecs),
     Specs = [],
     set.init(Errors),
+    ModuleName = ParseTreeModuleSrc ^ ptms_module_name,
+    GrabbedFileMap = map.singleton(ModuleName, gf_src(ParseTreeModuleSrc)),
     ModuleAndImports = module_and_imports(SourceFileName, dir.this_directory,
-        SourceFileModuleName, ModuleName, ModuleNameContext,
+        SourceFileModuleName,
         Ancestors, ChildrenMap, PublicChildrenMap, NestedChildren,
         IntDeps, ImpDeps, IndirectDeps, FactDeps,
         ForeignImports, ForeignIncludeFiles,
-        contains_foreign_code_unknown, ContainsForeignExport, HasMain,
-        SrcItemBlocks, cord.init, cord.init, cord.init, cord.init,
-        VersionNumbers, MaybeTimestampMap, Specs, Errors, mcm_make).
+        foreign_code_langs_unknown, ContainsForeignExport, HasMain,
+        ParseTreeModuleSrc, AncestorSpecs, DirectIntSpecs, IndirectIntSpecs,
+        PlainOpts, TransOpts, IntForOptSpecs,
+        VersionNumbers, MaybeTimestampMap, Specs, Errors,
+        GrabbedFileMap, mcm_make).
 
 %---------------------------------------------------------------------------%
 
@@ -807,40 +891,45 @@ make_module_dep_module_and_imports(SourceFileName, ModuleDir,
         ForeignImports, ForeignIncludes,
         ContainsForeignCode, ContainsForeignExport, HasMain,
         ModuleAndImports) :-
-    ModuleNameContext = term.context_init,
-    AddDummyContext = ( func(MN) = MN - [term.context_init] ),
-    multi_map.from_assoc_list(list.map(AddDummyContext, IntDeps),
+    ModuleNameContext = term.dummy_context_init,
+    AddDummyContext =
+        ( func(MN) = MN - one_or_more(term.dummy_context_init, []) ),
+    one_or_more_map.from_assoc_list(list.map(AddDummyContext, IntDeps),
         IntDepsContexts),
-    multi_map.from_assoc_list(list.map(AddDummyContext, ImpDeps),
+    one_or_more_map.from_assoc_list(list.map(AddDummyContext, ImpDeps),
         ImpDepsContexts),
     set.init(IndirectDeps),
-    multi_map.from_assoc_list(list.map(AddDummyContext, Children),
+    one_or_more_map.from_assoc_list(list.map(AddDummyContext, Children),
         ChildrenContexts),
     % XXX We do not know which child modules are public, so saying
     % none of them are is likely to be a bug.
-    multi_map.init(PublicChildrenContexts),
+    one_or_more_map.init(PublicChildrenContexts),
     list.foldl(add_fim_spec, ForeignImports,
         init_foreign_import_modules, ForeignImportModules),
-    SrcItemBlocks = [],
-    DirectIntItemBlocksCord = cord.empty,
-    IndirectIntItemBlocksCord = cord.empty,
-    OptItemBlocksCord = cord.empty,
-    IntForOptItemBlocksCord = cord.empty,
+    ParseTreeModuleSrc =
+        init_empty_parse_tree_module_src(ModuleName, ModuleNameContext),
+    map.init(AncestorIntSpecs),
+    map.init(DirectIntSpecs),
+    map.init(IndirectIntSpecs),
+    map.init(PlainOpts),
+    map.init(TransOpts),
+    map.init(IntForOptSpecs),
     map.init(ModuleVersionNumbers),
     Specs = [],
     set.init(Errors),
     MaybeTimestamps = no,
+    map.init(GrabbedFileMap),
     ModuleAndImports = module_and_imports(SourceFileName, ModuleDir,
-        SourceFileModuleName, ModuleName, ModuleNameContext,
+        SourceFileModuleName,
         set.list_to_set(Ancestors), ChildrenContexts, PublicChildrenContexts,
         set.list_to_set(NestedChildren),
-        IntDepsContexts, ImpDepsContexts, IndirectDeps,
-        FactDeps,
+        IntDepsContexts, ImpDepsContexts, IndirectDeps, FactDeps,
         ForeignImportModules, cord.from_list(ForeignIncludes),
         ContainsForeignCode, ContainsForeignExport, HasMain,
-        SrcItemBlocks, DirectIntItemBlocksCord, IndirectIntItemBlocksCord,
-        OptItemBlocksCord, IntForOptItemBlocksCord,
-        ModuleVersionNumbers, MaybeTimestamps, Specs, Errors, mcm_read).
+        ParseTreeModuleSrc, AncestorIntSpecs, DirectIntSpecs, IndirectIntSpecs,
+        PlainOpts, TransOpts, IntForOptSpecs,
+        ModuleVersionNumbers, MaybeTimestamps, Specs, Errors,
+        GrabbedFileMap, mcm_read).
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
@@ -948,7 +1037,7 @@ module_and_imports_get_module_name(ModuleAndImports, X) :-
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_module_name
+        X = ModuleAndImports ^ mai_src ^ ptms_module_name
     ).
 module_and_imports_get_module_name_context(ModuleAndImports, X) :-
     promise_pure (
@@ -973,7 +1062,7 @@ module_and_imports_get_module_name_context(ModuleAndImports, X) :-
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_module_name_context
+        X = ModuleAndImports ^ mai_src ^ ptms_module_name_context
     ).
 module_and_imports_get_ancestors(ModuleAndImports, X) :-
     promise_pure (
@@ -1175,7 +1264,7 @@ module_and_imports_get_fact_table_deps(ModuleAndImports, X) :-
         ),
         X = ModuleAndImports ^ mai_fact_table_deps
     ).
-module_and_imports_get_foreign_import_modules(ModuleAndImports, X) :-
+module_and_imports_get_c_j_cs_e_fims(ModuleAndImports, X) :-
     promise_pure (
         trace [compile_time(flag("mai-stats"))] (
             semipure get_accesses(Accesses0),
@@ -1198,7 +1287,7 @@ module_and_imports_get_foreign_import_modules(ModuleAndImports, X) :-
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_foreign_import_modules
+        X = ModuleAndImports ^ mai_fims
     ).
 module_and_imports_get_foreign_include_files(ModuleAndImports, X) :-
     promise_pure (
@@ -1223,7 +1312,7 @@ module_and_imports_get_foreign_include_files(ModuleAndImports, X) :-
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_foreign_include_files
+        X = ModuleAndImports ^ mai_foreign_incl_files
     ).
 module_and_imports_get_contains_foreign_code(ModuleAndImports, X) :-
     promise_pure (
@@ -1248,7 +1337,7 @@ module_and_imports_get_contains_foreign_code(ModuleAndImports, X) :-
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_contains_foreign_code
+        X = ModuleAndImports ^ mai_has_foreign_code
     ).
 module_and_imports_get_contains_foreign_export(ModuleAndImports, X) :-
     promise_pure (
@@ -1273,7 +1362,7 @@ module_and_imports_get_contains_foreign_export(ModuleAndImports, X) :-
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_contains_foreign_export
+        X = ModuleAndImports ^ mai_has_foreign_export
     ).
 module_and_imports_get_has_main(ModuleAndImports, X) :-
     promise_pure (
@@ -1300,7 +1389,7 @@ module_and_imports_get_has_main(ModuleAndImports, X) :-
         ),
         X = ModuleAndImports ^ mai_has_main
     ).
-module_and_imports_get_src_blocks(ModuleAndImports, X) :-
+module_and_imports_get_parse_tree_module_src(ModuleAndImports, X) :-
     promise_pure (
         trace [compile_time(flag("mai-stats"))] (
             semipure get_accesses(Accesses0),
@@ -1308,24 +1397,24 @@ module_and_imports_get_src_blocks(ModuleAndImports, X) :-
             (
                 Method = mcm_init,
                 Fields0 = Accesses0 ^ mfk_init,
-                Fields = Fields0 ^ mf_src_blocks := accessed,
+                Fields = Fields0 ^ mf_src := accessed,
                 Accesses = Accesses0 ^ mfk_init := Fields
             ;
                 Method = mcm_make,
                 Fields0 = Accesses0 ^ mfk_make,
-                Fields = Fields0 ^ mf_src_blocks := accessed,
+                Fields = Fields0 ^ mf_src := accessed,
                 Accesses = Accesses0 ^ mfk_make := Fields
             ;
                 Method = mcm_read,
                 Fields0 = Accesses0 ^ mfk_read,
-                Fields = Fields0 ^ mf_src_blocks := accessed,
+                Fields = Fields0 ^ mf_src := accessed,
                 Accesses = Accesses0 ^ mfk_read := Fields
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_src_blocks
+        X = ModuleAndImports ^ mai_src
     ).
-module_and_imports_get_direct_int_blocks_cord(ModuleAndImports, X) :-
+module_and_imports_get_ancestor_int_specs(ModuleAndImports, X) :-
     promise_pure (
         trace [compile_time(flag("mai-stats"))] (
             semipure get_accesses(Accesses0),
@@ -1333,24 +1422,24 @@ module_and_imports_get_direct_int_blocks_cord(ModuleAndImports, X) :-
             (
                 Method = mcm_init,
                 Fields0 = Accesses0 ^ mfk_init,
-                Fields = Fields0 ^ mf_direct_int_blocks := accessed,
+                Fields = Fields0 ^ mf_ancestor_int_specs := accessed,
                 Accesses = Accesses0 ^ mfk_init := Fields
             ;
                 Method = mcm_make,
                 Fields0 = Accesses0 ^ mfk_make,
-                Fields = Fields0 ^ mf_direct_int_blocks := accessed,
+                Fields = Fields0 ^ mf_ancestor_int_specs := accessed,
                 Accesses = Accesses0 ^ mfk_make := Fields
             ;
                 Method = mcm_read,
                 Fields0 = Accesses0 ^ mfk_read,
-                Fields = Fields0 ^ mf_direct_int_blocks := accessed,
+                Fields = Fields0 ^ mf_ancestor_int_specs := accessed,
                 Accesses = Accesses0 ^ mfk_read := Fields
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_direct_int_blocks_cord
+        X = ModuleAndImports ^ mai_ancestor_int_specs
     ).
-module_and_imports_get_indirect_int_blocks_cord(ModuleAndImports, X) :-
+module_and_imports_get_direct_int_specs(ModuleAndImports, X) :-
     promise_pure (
         trace [compile_time(flag("mai-stats"))] (
             semipure get_accesses(Accesses0),
@@ -1358,24 +1447,24 @@ module_and_imports_get_indirect_int_blocks_cord(ModuleAndImports, X) :-
             (
                 Method = mcm_init,
                 Fields0 = Accesses0 ^ mfk_init,
-                Fields = Fields0 ^ mf_indirect_int_blocks := accessed,
+                Fields = Fields0 ^ mf_direct_int_specs := accessed,
                 Accesses = Accesses0 ^ mfk_init := Fields
             ;
                 Method = mcm_make,
                 Fields0 = Accesses0 ^ mfk_make,
-                Fields = Fields0 ^ mf_indirect_int_blocks := accessed,
+                Fields = Fields0 ^ mf_direct_int_specs := accessed,
                 Accesses = Accesses0 ^ mfk_make := Fields
             ;
                 Method = mcm_read,
                 Fields0 = Accesses0 ^ mfk_read,
-                Fields = Fields0 ^ mf_indirect_int_blocks := accessed,
+                Fields = Fields0 ^ mf_direct_int_specs := accessed,
                 Accesses = Accesses0 ^ mfk_read := Fields
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_indirect_int_blocks_cord
+        X = ModuleAndImports ^ mai_direct_int_specs
     ).
-module_and_imports_get_opt_blocks_cord(ModuleAndImports, X) :-
+module_and_imports_get_indirect_int_specs(ModuleAndImports, X) :-
     promise_pure (
         trace [compile_time(flag("mai-stats"))] (
             semipure get_accesses(Accesses0),
@@ -1383,24 +1472,24 @@ module_and_imports_get_opt_blocks_cord(ModuleAndImports, X) :-
             (
                 Method = mcm_init,
                 Fields0 = Accesses0 ^ mfk_init,
-                Fields = Fields0 ^ mf_opt_blocks := accessed,
+                Fields = Fields0 ^ mf_indirect_int_specs := accessed,
                 Accesses = Accesses0 ^ mfk_init := Fields
             ;
                 Method = mcm_make,
                 Fields0 = Accesses0 ^ mfk_make,
-                Fields = Fields0 ^ mf_opt_blocks := accessed,
+                Fields = Fields0 ^ mf_indirect_int_specs := accessed,
                 Accesses = Accesses0 ^ mfk_make := Fields
             ;
                 Method = mcm_read,
                 Fields0 = Accesses0 ^ mfk_read,
-                Fields = Fields0 ^ mf_opt_blocks := accessed,
+                Fields = Fields0 ^ mf_indirect_int_specs := accessed,
                 Accesses = Accesses0 ^ mfk_read := Fields
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_opt_blocks_cord
+        X = ModuleAndImports ^ mai_indirect_int_specs
     ).
-module_and_imports_get_int_for_opt_blocks_cord(ModuleAndImports, X) :-
+module_and_imports_get_plain_opts(ModuleAndImports, X) :-
     promise_pure (
         trace [compile_time(flag("mai-stats"))] (
             semipure get_accesses(Accesses0),
@@ -1408,22 +1497,72 @@ module_and_imports_get_int_for_opt_blocks_cord(ModuleAndImports, X) :-
             (
                 Method = mcm_init,
                 Fields0 = Accesses0 ^ mfk_init,
-                Fields = Fields0 ^ mf_int_for_opt_blocks := accessed,
+                Fields = Fields0 ^ mf_plain_opts := accessed,
                 Accesses = Accesses0 ^ mfk_init := Fields
             ;
                 Method = mcm_make,
                 Fields0 = Accesses0 ^ mfk_make,
-                Fields = Fields0 ^ mf_int_for_opt_blocks := accessed,
+                Fields = Fields0 ^ mf_plain_opts := accessed,
                 Accesses = Accesses0 ^ mfk_make := Fields
             ;
                 Method = mcm_read,
                 Fields0 = Accesses0 ^ mfk_read,
-                Fields = Fields0 ^ mf_int_for_opt_blocks := accessed,
+                Fields = Fields0 ^ mf_plain_opts := accessed,
                 Accesses = Accesses0 ^ mfk_read := Fields
             ),
             impure set_accesses(Accesses)
         ),
-        X = ModuleAndImports ^ mai_int_for_opt_blocks_cord
+        X = ModuleAndImports ^ mai_plain_opts
+    ).
+module_and_imports_get_trans_opts(ModuleAndImports, X) :-
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_trans_opts := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_trans_opts := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_trans_opts := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_trans_opts
+    ).
+module_and_imports_get_int_for_opt_specs(ModuleAndImports, X) :-
+    promise_pure (
+        trace [compile_time(flag("mai-stats"))] (
+            semipure get_accesses(Accesses0),
+            Method = ModuleAndImports ^ mai_construction_method,
+            (
+                Method = mcm_init,
+                Fields0 = Accesses0 ^ mfk_init,
+                Fields = Fields0 ^ mf_int_for_opt_specs := accessed,
+                Accesses = Accesses0 ^ mfk_init := Fields
+            ;
+                Method = mcm_make,
+                Fields0 = Accesses0 ^ mfk_make,
+                Fields = Fields0 ^ mf_int_for_opt_specs := accessed,
+                Accesses = Accesses0 ^ mfk_make := Fields
+            ;
+                Method = mcm_read,
+                Fields0 = Accesses0 ^ mfk_read,
+                Fields = Fields0 ^ mf_int_for_opt_specs := accessed,
+                Accesses = Accesses0 ^ mfk_read := Fields
+            ),
+            impure set_accesses(Accesses)
+        ),
+        X = ModuleAndImports ^ mai_int_for_opt_specs
     ).
 module_and_imports_get_version_numbers_map(ModuleAndImports, X) :-
     promise_pure (
@@ -1525,18 +1664,26 @@ module_and_imports_get_errors(ModuleAndImports, X) :-
         ),
         X = ModuleAndImports ^ mai_errors
     ).
+module_and_imports_get_grabbed_file_map(ModuleAndImports, X) :-
+    X = ModuleAndImports ^ mai_grabbed_file_map.
 
-:- pred module_and_imports_set_direct_int_blocks_cord(
-    cord(int_item_block)::in,
+:- pred module_and_imports_set_ancestor_int_specs(
+    map(module_name, ancestor_int_spec)::in,
     module_and_imports::in, module_and_imports::out) is det.
-:- pred module_and_imports_set_indirect_int_blocks_cord(
-    cord(int_item_block)::in,
+:- pred module_and_imports_set_direct_int_specs(
+    map(module_name, direct_int_spec)::in,
     module_and_imports::in, module_and_imports::out) is det.
-:- pred module_and_imports_set_opt_blocks_cord(
-    cord(opt_item_block)::in,
+:- pred module_and_imports_set_indirect_int_specs(
+    map(module_name, indirect_int_spec)::in,
     module_and_imports::in, module_and_imports::out) is det.
-:- pred module_and_imports_set_int_for_opt_blocks_cord(
-    cord(int_for_opt_item_block)::in,
+:- pred module_and_imports_set_plain_opts(
+    map(module_name, parse_tree_plain_opt)::in,
+    module_and_imports::in, module_and_imports::out) is det.
+:- pred module_and_imports_set_trans_opts(
+    map(module_name, parse_tree_trans_opt)::in,
+    module_and_imports::in, module_and_imports::out) is det.
+:- pred module_and_imports_set_int_for_opt_specs(
+    map(module_name, int_for_opt_spec)::in,
     module_and_imports::in, module_and_imports::out) is det.
 :- pred module_and_imports_set_version_numbers_map(
     module_version_numbers_map::in,
@@ -1552,16 +1699,20 @@ module_and_imports_set_imp_deps_map(X, !ModuleAndImports) :-
     !ModuleAndImports ^ mai_imp_deps_map := X.
 module_and_imports_set_indirect_deps(X, !ModuleAndImports) :-
     !ModuleAndImports ^ mai_indirect_deps := X.
-module_and_imports_set_direct_int_blocks_cord(X, !ModuleAndImports) :-
-    !ModuleAndImports ^ mai_direct_int_blocks_cord := X.
-module_and_imports_set_indirect_int_blocks_cord(X, !ModuleAndImports) :-
-    !ModuleAndImports ^ mai_indirect_int_blocks_cord := X.
-module_and_imports_set_opt_blocks_cord(X, !ModuleAndImports) :-
-    !ModuleAndImports ^ mai_opt_blocks_cord := X.
-module_and_imports_set_int_for_opt_blocks_cord(X, !ModuleAndImports) :-
-    !ModuleAndImports ^ mai_int_for_opt_blocks_cord := X.
-module_and_imports_set_foreign_import_modules(X, !ModuleAndImports) :-
-    !ModuleAndImports ^ mai_foreign_import_modules := X.
+module_and_imports_set_c_j_cs_e_fims(X, !ModuleAndImports) :-
+    !ModuleAndImports ^ mai_fims := X.
+module_and_imports_set_ancestor_int_specs(X, !ModuleAndImports) :-
+    !ModuleAndImports ^ mai_ancestor_int_specs := X.
+module_and_imports_set_direct_int_specs(X, !ModuleAndImports) :-
+    !ModuleAndImports ^ mai_direct_int_specs := X.
+module_and_imports_set_indirect_int_specs(X, !ModuleAndImports) :-
+    !ModuleAndImports ^ mai_indirect_int_specs := X.
+module_and_imports_set_plain_opts(X, !ModuleAndImports) :-
+    !ModuleAndImports ^ mai_plain_opts := X.
+module_and_imports_set_trans_opts(X, !ModuleAndImports) :-
+    !ModuleAndImports ^ mai_trans_opts := X.
+module_and_imports_set_int_for_opt_specs(X, !ModuleAndImports) :-
+    !ModuleAndImports ^ mai_int_for_opt_specs := X.
 module_and_imports_set_version_numbers_map(X, !ModuleAndImports) :-
     !ModuleAndImports ^ mai_version_numbers_map := X.
 module_and_imports_set_maybe_timestamp_map(X, !ModuleAndImports) :-
@@ -1570,32 +1721,42 @@ module_and_imports_set_specs(X, !ModuleAndImports) :-
     !ModuleAndImports ^ mai_specs := X.
 module_and_imports_set_errors(X, !ModuleAndImports) :-
     !ModuleAndImports ^ mai_errors := X.
+module_and_imports_set_grabbed_file_map(X, !ModuleAndImports) :-
+    !ModuleAndImports ^ mai_grabbed_file_map := X.
 
 %---------------------------------------------------------------------------%
 
 module_and_imports_get_children(ModuleAndImports, Children) :-
     module_and_imports_get_children_map(ModuleAndImports, ChildrenMap),
-    Children = multi_map.keys(ChildrenMap).
+    Children = one_or_more_map.keys(ChildrenMap).
 
 module_and_imports_get_children_set(ModuleAndImports, Children) :-
     module_and_imports_get_children_map(ModuleAndImports, ChildrenMap),
-    Children = set.sorted_list_to_set(multi_map.keys(ChildrenMap)).
+    Children = one_or_more_map.keys_as_set(ChildrenMap).
 
 module_and_imports_get_int_deps(ModuleAndImports, IntDeps) :-
     module_and_imports_get_int_deps_map(ModuleAndImports, IntDepsMap),
-    IntDeps = multi_map.keys(IntDepsMap).
+    IntDeps = one_or_more_map.keys(IntDepsMap).
 
 module_and_imports_get_int_deps_set(ModuleAndImports, IntDeps) :-
     module_and_imports_get_int_deps_map(ModuleAndImports, IntDepsMap),
-    IntDeps = set.sorted_list_to_set(multi_map.keys(IntDepsMap)).
+    IntDeps = one_or_more_map.keys_as_set(IntDepsMap).
 
 module_and_imports_get_imp_deps(ModuleAndImports, ImpDeps) :-
     module_and_imports_get_imp_deps_map(ModuleAndImports, ImpDepsMap),
-    ImpDeps = multi_map.keys(ImpDepsMap).
+    ImpDeps = one_or_more_map.keys(ImpDepsMap).
 
 module_and_imports_get_imp_deps_set(ModuleAndImports, ImpDeps) :-
     module_and_imports_get_imp_deps_map(ModuleAndImports, ImpDepsMap),
-    ImpDeps = set.sorted_list_to_set(multi_map.keys(ImpDepsMap)).
+    ImpDeps = one_or_more_map.keys_as_set(ImpDepsMap).
+
+module_and_imports_do_we_need_timestamps(ModuleAndImports,
+        MaybeReturnTimestamp) :-
+    module_and_imports_get_maybe_timestamp_map(ModuleAndImports,
+        MaybeTimestampMap),
+    ( MaybeTimestampMap = yes(_), MaybeReturnTimestamp = do_return_timestamp
+    ; MaybeTimestampMap = no,     MaybeReturnTimestamp = dont_return_timestamp
+    ).
 
 %---------------------------------------------------------------------------%
 
@@ -1604,9 +1765,9 @@ module_and_imports_add_ancestor(ModuleName, !ModuleAndImports) :-
     set.insert(ModuleName, Ancestors0, Ancestors),
     module_and_imports_set_ancestors(Ancestors, !ModuleAndImports).
 
-module_and_imports_add_imp_dep(ModuleName, Context, !ModuleAndImports) :-
+module_and_imports_add_direct_dep(ModuleName, Context, !ModuleAndImports) :-
     module_and_imports_get_imp_deps_map(!.ModuleAndImports, ImpDepsMap0),
-    multi_map.add(ModuleName, Context, ImpDepsMap0, ImpDepsMap),
+    one_or_more_map.add(ModuleName, Context, ImpDepsMap0, ImpDepsMap),
     module_and_imports_set_imp_deps_map(ImpDepsMap, !ModuleAndImports).
 
 module_and_imports_add_indirect_dep(ModuleName, !ModuleAndImports) :-
@@ -1616,35 +1777,59 @@ module_and_imports_add_indirect_dep(ModuleName, !ModuleAndImports) :-
 
 %---------------------%
 
-module_and_imports_add_direct_int_item_blocks(NewIntItemBlocks,
-        !ModuleAndImports) :-
-    module_and_imports_get_direct_int_blocks_cord(!.ModuleAndImports,
-        IntItemBlocks0),
-    IntItemBlocks = IntItemBlocks0 ++ cord.from_list(NewIntItemBlocks),
-    module_and_imports_set_direct_int_blocks_cord(IntItemBlocks,
-        !ModuleAndImports).
+module_and_imports_add_ancestor_int_spec(X, !ModuleAndImports) :-
+    module_and_imports_get_ancestor_int_specs(!.ModuleAndImports, Map0),
+    X = ancestor_int0(PT0, _),
+    MN = PT0 ^ pti0_module_name,
+    map.det_insert(MN, X, Map0, Map),
+    module_and_imports_set_ancestor_int_specs(Map, !ModuleAndImports).
 
-module_and_imports_add_indirect_int_item_blocks(NewIntItemBlocks,
-        !ModuleAndImports) :-
-    module_and_imports_get_indirect_int_blocks_cord(!.ModuleAndImports,
-        IntItemBlocks0),
-    IntItemBlocks = IntItemBlocks0 ++ cord.from_list(NewIntItemBlocks),
-    module_and_imports_set_indirect_int_blocks_cord(IntItemBlocks,
-        !ModuleAndImports).
+module_and_imports_add_direct_int_spec(X, !ModuleAndImports) :-
+    module_and_imports_get_direct_int_specs(!.ModuleAndImports, Map0),
+    ( X = direct_int1(PT1, _), MN = PT1 ^ pti1_module_name
+    ; X = direct_int3(PT3, _), MN = PT3 ^ pti3_module_name
+    ),
+    map.det_insert(MN, X, Map0, Map),
+    module_and_imports_set_direct_int_specs(Map, !ModuleAndImports).
 
-module_and_imports_add_opt_item_blocks(NewOptItemBlocks, !ModuleAndImports) :-
-    module_and_imports_get_opt_blocks_cord(!.ModuleAndImports,
-        OptItemBlocks0),
-    OptItemBlocks = OptItemBlocks0 ++ cord.from_list(NewOptItemBlocks),
-    module_and_imports_set_opt_blocks_cord(OptItemBlocks,
-        !ModuleAndImports).
+module_and_imports_add_indirect_int_spec(X, !ModuleAndImports) :-
+    module_and_imports_get_indirect_int_specs(!.ModuleAndImports, Map0),
+    ( X = indirect_int2(PT2, _), MN = PT2 ^ pti2_module_name
+    ; X = indirect_int3(PT3, _), MN = PT3 ^ pti3_module_name
+    ),
+    map.det_insert(MN, X, Map0, Map),
+    module_and_imports_set_indirect_int_specs(Map, !ModuleAndImports).
 
-module_and_imports_add_int_for_opt_item_blocks(NewIntItemBlocks,
-        !ModuleAndImports) :-
-    module_and_imports_get_int_for_opt_blocks_cord(!.ModuleAndImports,
-        IntItemBlocks0),
-    IntItemBlocks = IntItemBlocks0 ++ cord.from_list(NewIntItemBlocks),
-    module_and_imports_set_int_for_opt_blocks_cord(IntItemBlocks,
+module_and_imports_add_plain_opt(X, !ModuleAndImports) :-
+    module_and_imports_get_plain_opts(!.ModuleAndImports, Map0),
+    MN = X ^ ptpo_module_name,
+    map.det_insert(MN, X, Map0, Map),
+    module_and_imports_set_plain_opts(Map, !ModuleAndImports).
+
+module_and_imports_add_trans_opt(X, !ModuleAndImports) :-
+    module_and_imports_get_trans_opts(!.ModuleAndImports, Map0),
+    MN = X ^ ptto_module_name,
+    map.det_insert(MN, X, Map0, Map),
+    module_and_imports_set_trans_opts(Map, !ModuleAndImports).
+
+module_and_imports_add_int_for_opt_spec(X, !ModuleAndImports) :-
+    module_and_imports_get_int_for_opt_specs(!.ModuleAndImports, Map0),
+    ( X = for_opt_int0(PT0, _), MN = PT0 ^ pti0_module_name
+    ; X = for_opt_int1(PT1, _), MN = PT1 ^ pti1_module_name
+    ; X = for_opt_int2(PT2, _), MN = PT2 ^ pti2_module_name
+    ),
+    map.det_insert(MN, X, Map0, Map),
+    module_and_imports_set_int_for_opt_specs(Map, !ModuleAndImports).
+
+%---------------------%
+
+module_and_imports_add_grabbed_file(ModuleName, FileWhy, !ModuleAndImports) :-
+    module_and_imports_get_grabbed_file_map(!.ModuleAndImports,
+        GrabbedFileMap0),
+    % We could be adding a new entry to the map, or overwriting an existing
+    % entry.
+    map.set(ModuleName, FileWhy, GrabbedFileMap0, GrabbedFileMap),
+    module_and_imports_set_grabbed_file_map(GrabbedFileMap,
         !ModuleAndImports).
 
 %---------------------%
@@ -1690,14 +1875,19 @@ module_and_imports_d_file(ModuleAndImports,
         SourceFileName, SourceFileModuleName, ModuleName,
         Ancestors, PublicChildrenMap, NestedChildren,
         IntDepsMap, ImpDepsMap, IndirectDeps, FactDeps,
-        ForeignImportModules, ForeignIncludeFilesCord, ContainsForeignCode,
-        SrcItemBlocks, DirectIntItemBlocksCord, IndirectIntItemBlocksCord,
-        OptItemBlocksCord, IntForOptItemBlocksCord) :-
+        CJCsEFIMs, ForeignIncludeFilesCord, ContainsForeignCode,
+        AugCompUnit) :-
+    % XXX CLEANUP Several of the outputs are part of the parse_tree_module_src
+    % in AugCompUnit.
+    module_and_imports_get_module_name(ModuleAndImports, ModuleName),
+    module_and_imports_get_module_name_context(ModuleAndImports,
+        ModuleNameContext),
+    module_and_imports_get_version_numbers_map(ModuleAndImports,
+        ModuleVersionNumbers),
     module_and_imports_get_source_file_name(ModuleAndImports,
         SourceFileName),
     module_and_imports_get_source_file_module_name(ModuleAndImports,
         SourceFileModuleName),
-    module_and_imports_get_module_name(ModuleAndImports, ModuleName),
     module_and_imports_get_ancestors(ModuleAndImports, Ancestors),
     module_and_imports_get_public_children_map(ModuleAndImports,
         PublicChildrenMap),
@@ -1706,44 +1896,49 @@ module_and_imports_d_file(ModuleAndImports,
     module_and_imports_get_imp_deps_map(ModuleAndImports, ImpDepsMap),
     module_and_imports_get_indirect_deps(ModuleAndImports, IndirectDeps),
     module_and_imports_get_fact_table_deps(ModuleAndImports, FactDeps),
-    module_and_imports_get_foreign_import_modules(ModuleAndImports,
-        ForeignImportModules),
+    module_and_imports_get_c_j_cs_e_fims(ModuleAndImports, CJCsEFIMs),
     module_and_imports_get_foreign_include_files(ModuleAndImports,
         ForeignIncludeFilesCord),
     module_and_imports_get_contains_foreign_code(ModuleAndImports,
         ContainsForeignCode),
-    module_and_imports_get_src_blocks(ModuleAndImports, SrcItemBlocks),
-    module_and_imports_get_direct_int_blocks_cord(ModuleAndImports,
-        DirectIntItemBlocksCord),
-    module_and_imports_get_indirect_int_blocks_cord(ModuleAndImports,
-        IndirectIntItemBlocksCord),
-    module_and_imports_get_opt_blocks_cord(ModuleAndImports,
-        OptItemBlocksCord),
-    module_and_imports_get_int_for_opt_blocks_cord(ModuleAndImports,
-        IntForOptItemBlocksCord).
+    module_and_imports_get_parse_tree_module_src(ModuleAndImports,
+        ParseTreeModuleSrc),
+    module_and_imports_get_ancestor_int_specs(ModuleAndImports,
+        AncestorIntSpecs),
+    module_and_imports_get_direct_int_specs(ModuleAndImports, DirectIntSpecs),
+    module_and_imports_get_indirect_int_specs(ModuleAndImports,
+        IndirectIntSpecs),
+    module_and_imports_get_plain_opts(ModuleAndImports, PlainOpts),
+    module_and_imports_get_trans_opts(ModuleAndImports, TransOpts),
+    module_and_imports_get_int_for_opt_specs(ModuleAndImports, IntForOptSpecs),
+    AugCompUnit = aug_compilation_unit(ModuleName, ModuleNameContext,
+        ModuleVersionNumbers, ParseTreeModuleSrc,
+        AncestorIntSpecs, DirectIntSpecs, IndirectIntSpecs,
+        PlainOpts, TransOpts, IntForOptSpecs).
 
-module_and_imports_get_aug_comp_unit(ModuleAndImports, AugCompUnit,
-        Specs, Errors) :-
+module_and_imports_get_aug_comp_unit(ModuleAndImports,
+        AugCompUnit, Specs, Errors) :-
     module_and_imports_get_module_name(ModuleAndImports, ModuleName),
     module_and_imports_get_module_name_context(ModuleAndImports,
         ModuleNameContext),
     module_and_imports_get_version_numbers_map(ModuleAndImports,
         ModuleVersionNumbers),
-    module_and_imports_get_src_blocks(ModuleAndImports, SrcItemBlocks),
-    module_and_imports_get_direct_int_blocks_cord(ModuleAndImports,
-        DirectIntItemBlocksCord),
-    module_and_imports_get_indirect_int_blocks_cord(ModuleAndImports,
-        IndirectIntItemBlocksCord),
-    module_and_imports_get_opt_blocks_cord(ModuleAndImports,
-        OptItemBlocksCord),
-    module_and_imports_get_int_for_opt_blocks_cord(ModuleAndImports,
-        IntForOptItemBlocksCord),
+    module_and_imports_get_parse_tree_module_src(ModuleAndImports,
+        ParseTreeModuleSrc),
+    module_and_imports_get_ancestor_int_specs(ModuleAndImports,
+        AncestorIntSpecs),
+    module_and_imports_get_direct_int_specs(ModuleAndImports,
+        DirectIntSpecs),
+    module_and_imports_get_indirect_int_specs(ModuleAndImports,
+        IndirectIntSpecs),
+    module_and_imports_get_plain_opts(ModuleAndImports, PlainOpts),
+    module_and_imports_get_trans_opts(ModuleAndImports, TransOpts),
+    module_and_imports_get_int_for_opt_specs(ModuleAndImports,
+        IntForOptSpecs),
     AugCompUnit = aug_compilation_unit(ModuleName, ModuleNameContext,
-        ModuleVersionNumbers, SrcItemBlocks,
-        cord.list(DirectIntItemBlocksCord),
-        cord.list(IndirectIntItemBlocksCord),
-        cord.list(OptItemBlocksCord),
-        cord.list(IntForOptItemBlocksCord)),
+        ModuleVersionNumbers, ParseTreeModuleSrc,
+        AncestorIntSpecs, DirectIntSpecs, IndirectIntSpecs,
+        PlainOpts, TransOpts, IntForOptSpecs),
     module_and_imports_get_specs(ModuleAndImports, Specs),
     module_and_imports_get_errors(ModuleAndImports, Errors).
 
@@ -1778,11 +1973,13 @@ module_and_imports_get_aug_comp_unit(ModuleAndImports, AugCompUnit,
                 mf_contains_foreign_export      :: maybe_accessed,
                 mf_has_main                     :: maybe_accessed,
 
-                mf_src_blocks                   :: maybe_accessed,
-                mf_direct_int_blocks            :: maybe_accessed,
-                mf_indirect_int_blocks          :: maybe_accessed,
-                mf_opt_blocks                   :: maybe_accessed,
-                mf_int_for_opt_blocks           :: maybe_accessed,
+                mf_src                          :: maybe_accessed,
+                mf_ancestor_int_specs           :: maybe_accessed,
+                mf_direct_int_specs             :: maybe_accessed,
+                mf_indirect_int_specs           :: maybe_accessed,
+                mf_plain_opts                   :: maybe_accessed,
+                mf_trans_opts                   :: maybe_accessed,
+                mf_int_for_opt_specs            :: maybe_accessed,
 
                 mf_version_numbers_map          :: maybe_accessed,
                 mf_maybe_timestamp_map          :: maybe_accessed,
@@ -1803,10 +2000,16 @@ module_and_imports_get_aug_comp_unit(ModuleAndImports, AugCompUnit,
 init_mai_fields =
     mai_fields(not_accessed, not_accessed,
         not_accessed, not_accessed, not_accessed,
+
         not_accessed, not_accessed, not_accessed, not_accessed,
+
         not_accessed, not_accessed, not_accessed, not_accessed,
+
         not_accessed, not_accessed, not_accessed, not_accessed, not_accessed,
-        not_accessed, not_accessed, not_accessed, not_accessed, not_accessed,
+
+        not_accessed, not_accessed, not_accessed, not_accessed,
+        not_accessed, not_accessed, not_accessed,
+
         not_accessed, not_accessed, not_accessed, not_accessed).
 
 :- func init_mai_fields_kinds = mai_fields_kinds.
@@ -1835,12 +2038,12 @@ write_mai_fields_stats(Stream, Kind, Fields, !IO) :-
         Ancestors, Children, PublicChildren, NestedChildren,
         IntDepsMap, ImpDepsMap, IndirectDeps, FactTableDeps,
         FIMs, ForeignIncludeFiles, HasForeignCode, HasForeignExport, HasMain,
-        SrcBlocks, DirectIntBlocks, IndirectIntBlocks,
-        OptBlocks, IntForOptBlocks,
+        ParseTreeModuleSrc, AncestorSpecs, DirectIntSpecs, IndirectIntSpecs,
+        PlainOpts, TransOpts, IntForOptSpecs,
         VersionNumbersMap, MaybeTimestamMap, Specs, Errors),
     io.format(Stream,
-        "%s %s %s %s %s %s %s %s %s %s %s %s %s %s " ++
-        "%s %s %s %s %s %s %s %s %s %s %s %s %s %s\n",
+        "%s %s %s %s %s %s %s %s %s %s %s %s %s %s %s " ++
+        "%s %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n",
         [s(Kind),
         s(acc_str(SrcFileName)),
         s(acc_str(ModuleDir)),
@@ -1860,11 +2063,13 @@ write_mai_fields_stats(Stream, Kind, Fields, !IO) :-
         s(acc_str(HasForeignCode)),
         s(acc_str(HasForeignExport)),
         s(acc_str(HasMain)),
-        s(acc_str(SrcBlocks)),
-        s(acc_str(DirectIntBlocks)),
-        s(acc_str(IndirectIntBlocks)),
-        s(acc_str(OptBlocks)),
-        s(acc_str(IntForOptBlocks)),
+        s(acc_str(ParseTreeModuleSrc)),
+        s(acc_str(AncestorSpecs)),
+        s(acc_str(DirectIntSpecs)),
+        s(acc_str(IndirectIntSpecs)),
+        s(acc_str(PlainOpts)),
+        s(acc_str(TransOpts)),
+        s(acc_str(IntForOptSpecs)),
         s(acc_str(VersionNumbersMap)),
         s(acc_str(MaybeTimestamMap)),
         s(acc_str(Specs)),

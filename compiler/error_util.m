@@ -68,28 +68,66 @@
 % this fact in the duplicate declaration's context, while printing another
 % message giving the original declaration's context.
 %
-% simplest_spec(Severity, Phase, Context, Pieces) is a shorthand for
-% (and equivalent in every respect to) error_spec(Severity, Phase,
+% simplest_spec(Id, Severity, Phase, Context, Pieces) is a shorthand for
+% (and equivalent in every respect to) error_spec(Id, Severity, Phase,
 % [simple_msg(Context, always(Pieces)])]).
+%
+% conditional_spec(Id, Option, MatchValue, Severity, Phase, Msgs) is intended
+% to represent the error specification given by its last three fields
+% *iff* Option has the value MatchValue. If Option is *not* MatchValue,
+% it asks for nothing to be printed, and for the exit status to be left alone.
+%
+% The id field, which is present in all three alternatives, is totally
+% ignored when printing error_specs. Its job is something completely different:
+% helping developers track down where in the source code each error_spec
+% was constructed. Without the id fields, if developers wants to know this,
+% e.g. because they do not want the message printed, or because there is
+% a problem with its wording, they have to grep for some words in the message.
+% However, grepping for a single word will usually get many false hits,
+% while grepping for two or more consecutive words in the message may miss
+% the code generating the message, because in that code, some of those
+% consecutive words are on different lines. On the other hand, if every
+% place that constructs an error_spec, of any of these three varieties,
+% fills in the id field with $pred, then finding the right place is easy:
+% just specify the developer-only option --print-error-spec-id, and
+% the identity of the predicate or function that generated each error_spec
+% will be output just after the messages in that error_spec. Even if the
+% predicate or function that this identifies has several pieces of code
+% that construct specs, the scope in which you have to search for it
+% will be easily manageable.
 
 :- type error_spec
     --->    error_spec(
+                error_id                :: string,
                 error_severity          :: error_severity,
                 error_phase             :: error_phase,
                 error_msgs              :: list(error_msg)
             )
     ;       simplest_spec(
+                simp_id                 :: string,
                 simp_spec_severity      :: error_severity,
                 simp_spec_phase         :: error_phase,
                 simp_spec_context       :: prog_context,
                 simp_spec_pieces        :: list(format_component)
+            )
+    ;       conditional_spec(
+                cond_id                 :: string,
+                cond_spec_option        :: option,
+                cond_spec_value         :: bool,
+
+                cond_spec_severity      :: error_severity,
+                cond_spec_phase         :: error_phase,
+                cond_spec_msgs          :: list(error_msg)
             ).
 
-:- inst full_spec for error_spec/0
-    --->    error_spec(ground, ground, ground).
+:- pred extract_spec_msgs(globals::in, error_spec::in,
+    list(error_msg)::out) is det.
 
-:- pred expand_simplest_spec(error_spec::in, error_spec::out(full_spec))
-    is det.
+%---------------------------------------------------------------------------%
+
+    % An error_spec that is *intended* to contain a warning,
+    %
+:- type warning_spec == error_spec.
 
 %---------------------------------------------------------------------------%
 
@@ -258,6 +296,11 @@
 :- func actual_error_severity(globals, error_severity)
     = maybe(actual_severity).
 
+    % Compute the actual severity of an error_spec
+    % (if it actually prints anything).
+    %
+:- func actual_spec_severity(globals, error_spec) = maybe(actual_severity).
+
     % Compute the worst actual severity (if any) occurring in a list of
     % error_specs.
     %
@@ -289,6 +332,18 @@
 :- pred sort_error_msgs(list(error_msg)::in, list(error_msg)::out) is det.
 
 %---------------------------------------------------------------------------%
+
+    % Delete all the given error_specs, which are supposed to have been
+    % gathered during the process that generates the contents of an interface
+    % file, if two conditions are both satisfied:
+    %
+    % - print_errors_warnings_when_generating_interface is NOT set, and
+    % - the exit status has NOT been set to indicate an error.
+    %
+:- pred filter_interface_generation_specs(globals::in,
+    list(error_spec)::in, list(error_spec)::out, io::di, io::uo) is det.
+
+%---------------------------------------------------------------------------%
 %
 % The error_spec_accumulator type can be used to accumulate errors for
 % multiple modes of a predicate. accumulate_error_specs_for_proc will
@@ -307,9 +362,9 @@
 
 %---------------------------------------------------------------------------%
 
-:- pred maybe_write_out_errors_no_module(bool::in, globals::in,
+:- pred pre_hlds_maybe_write_out_errors(bool::in, globals::in,
     list(error_spec)::in, list(error_spec)::out, io::di, io::uo) is det.
-:- pred maybe_write_out_errors_no_module(io.text_output_stream::in,
+:- pred pre_hlds_maybe_write_out_errors(io.text_output_stream::in,
     bool::in, globals::in,
     list(error_spec)::in, list(error_spec)::out, io::di, io::uo) is det.
 
@@ -428,10 +483,18 @@
             % The output should contain the string form of the sym_name,
             % surrounded by `' quotes.
 
-    ;       qual_sym_name_and_arity(sym_name_and_arity)
-    ;       unqual_sym_name_and_arity(sym_name_and_arity)
+    ;       qual_sym_name_arity(sym_name_arity)
+    ;       unqual_sym_name_arity(sym_name_arity)
             % The output should contain the string form of the sym_name,
             % surrounded by `' quotes, followed by '/' and the arity.
+
+    ;       qual_pf_sym_name_orig_arity(pf_sym_name_arity)
+    ;       unqual_pf_sym_name_orig_arity(pf_sym_name_arity)
+            % The output should contain the string form of the sym_name,
+            % surrounded by `' quotes, followed by '/' and the arity, but
+            % - precede them with either "predicate" or "function", and
+            % - for functions, use their *original* arity, which does not
+            %   count the function result.
 
     ;       qual_type_ctor(type_ctor)
     ;       unqual_type_ctor(type_ctor)
@@ -451,9 +514,6 @@
 
     ;       p_or_f(pred_or_func)
             % Output the string "predicate" or "function" as appropriate.
-
-    ;       simple_call(simple_call_id)
-            % Output the identity of the given call.
 
     ;       decl(string)
             % Prefix the string with ":- ", surround with single quotes
@@ -597,9 +657,7 @@
 
 :- func describe_sym_name(sym_name) = string.
 
-:- func describe_sym_name_and_arity(sym_name_and_arity) = string.
-
-:- func pred_or_func_to_string(pred_or_func) = string.
+:- func describe_sym_name_arity(sym_name_arity) = string.
 
     % Put `' quotes around the given string.
     %
@@ -644,14 +702,21 @@
 
 %---------------------------------------------------------------------------%
 
-expand_simplest_spec(Spec0, Spec) :-
+extract_spec_msgs(Globals, Spec, Msgs) :-
     (
-        Spec0 = error_spec(Severity, Phase, Msgs),
-        Spec = error_spec(Severity, Phase, Msgs)
+        Spec = error_spec(_Id, _Severity, _Phase, Msgs)
     ;
-        Spec0 = simplest_spec(Severity, Phase, Context, Pieces),
-        Spec = error_spec(Severity, Phase,
-            [simple_msg(Context, [always(Pieces)])])
+        Spec = simplest_spec(_Id, _Severity, _Phase, Context, Pieces),
+        Msgs = [simplest_msg(Context, Pieces)]
+    ;
+        Spec = conditional_spec(_Id, Option, MatchValue, _Severity, _Phase,
+            Msgs0),
+        globals.lookup_bool_option(Globals, Option, Value),
+        ( if Value = MatchValue then
+            Msgs = Msgs0
+        else
+            Msgs = []
+        )
     ).
 
 %---------------------------------------------------------------------------%
@@ -702,6 +767,22 @@ actual_error_severity(Globals, Severity) = MaybeActual :-
         )
     ).
 
+actual_spec_severity(Globals, Spec) = MaybeSeverity :-
+    (
+        ( Spec = error_spec(_, Severity, _, _)
+        ; Spec = simplest_spec(_, Severity, _, _, _)
+        ),
+        MaybeSeverity = actual_error_severity(Globals, Severity)
+    ;
+        Spec = conditional_spec(_, Option, MatchValue, Severity, _, _),
+        globals.lookup_bool_option(Globals, Option, OptionValue),
+        ( if OptionValue = MatchValue then
+            MaybeSeverity = actual_error_severity(Globals, Severity)
+        else
+            MaybeSeverity = no
+        )
+    ).
+
 worst_severity_in_specs(Globals, Specs) = MaybeWorst :-
     worst_severity_in_specs_2(Globals, Specs, no, MaybeWorst).
 
@@ -710,20 +791,18 @@ worst_severity_in_specs(Globals, Specs) = MaybeWorst :-
 
 worst_severity_in_specs_2(_Globals, [], !MaybeWorst).
 worst_severity_in_specs_2(Globals, [Spec | Specs], !MaybeWorst) :-
-    ( Spec = error_spec(Severity, _, _)
-    ; Spec = simplest_spec(Severity, _, _, _)
-    ),
-    MaybeThis = actual_error_severity(Globals, Severity),
+    MaybeThis = actual_spec_severity(Globals, Spec),
     (
         !.MaybeWorst = no,
         !:MaybeWorst = MaybeThis
     ;
-        !.MaybeWorst = yes(_Worst),
-        MaybeThis = no
-    ;
         !.MaybeWorst = yes(Worst),
-        MaybeThis = yes(This),
-        !:MaybeWorst = yes(worst_severity(Worst, This))
+        (
+            MaybeThis = no
+        ;
+            MaybeThis = yes(This),
+            !:MaybeWorst = yes(worst_severity(Worst, This))
+        )
     ),
     worst_severity_in_specs_2(Globals, Specs, !MaybeWorst).
 
@@ -817,7 +896,7 @@ sort_error_specs(Globals, !Specs) :-
     % since the cost of doing so is trivial.)
     %
     list.filter_map(remove_conditionals_in_spec(Globals), !Specs),
-    list.sort_and_remove_dups(compare_error_specs, !Specs).
+    list.sort_and_remove_dups(compare_error_specs(Globals), !Specs).
 
 :- pred remove_conditionals_in_spec(globals::in,
     error_spec::in, error_spec::out) is semidet.
@@ -825,13 +904,26 @@ sort_error_specs(Globals, !Specs) :-
 remove_conditionals_in_spec(Globals, Spec0, Spec) :-
     require_det (
         (
-            Spec0 = error_spec(Severity0, Phase, Msgs0)
+            Spec0 = error_spec(Id, Severity0, Phase, Msgs0),
+            MaybeActualSeverity = actual_error_severity(Globals, Severity0),
+            list.filter_map(remove_conditionals_in_msg(Globals), Msgs0, Msgs)
         ;
-            Spec0 = simplest_spec(Severity0, Phase, Context0, Pieces0),
-            Msgs0 = [simplest_msg(Context0, Pieces0)]
-        ),
-        MaybeActualSeverity = actual_error_severity(Globals, Severity0),
-        list.filter_map(remove_conditionals_in_msg(Globals), Msgs0, Msgs)
+            Spec0 = simplest_spec(Id, Severity0, Phase, Context0, Pieces0),
+            MaybeActualSeverity = actual_error_severity(Globals, Severity0),
+            Msgs = [simplest_msg(Context0, Pieces0)]
+        ;
+            Spec0 = conditional_spec(Id, Option, MatchValue,
+                Severity0, Phase, Msgs0),
+            globals.lookup_bool_option(Globals, Option, OptionValue),
+            ( if OptionValue = MatchValue then
+                MaybeActualSeverity =
+                    actual_error_severity(Globals, Severity0),
+                Msgs = Msgs0
+            else
+                MaybeActualSeverity = no,
+                Msgs = []
+            )
+        )
     ),
     ( if
         MaybeActualSeverity = yes(ActualSeverity),
@@ -848,7 +940,7 @@ remove_conditionals_in_spec(Globals, Spec0, Spec) :-
                 ActualSeverity = actual_severity_informational,
                 Severity = severity_informational
             ),
-            Spec = error_spec(Severity, Phase, Msgs)
+            Spec = error_spec(Id, Severity, Phase, Msgs)
         )
     else
         % Spec0 would result in nothing being printed.
@@ -889,13 +981,13 @@ remove_conditionals_in_msg(Globals, Msg0, Msg) :-
 
 remove_conditionals_in_msg_component(Globals, Component, !ComponentCord) :-
     (
-        Component = option_is_set(Option, RequiredValue, EmbeddedComponents),
+        Component = option_is_set(Option, MatchValue, EmbeddedComponents),
         % We could recurse down into EmbeddedComponents, but we currently
         % have any places in the compiler that can generate two error messages
         % that differ only in nested option settings, so there would be
         % no point.
         globals.lookup_bool_option(Globals, Option, OptionValue),
-        ( if OptionValue = RequiredValue then
+        ( if OptionValue = MatchValue then
             !:ComponentCord =
                 !.ComponentCord ++ cord.from_list(EmbeddedComponents)
         else
@@ -920,14 +1012,12 @@ remove_conditionals_in_msg_component(Globals, Component, !ComponentCord) :-
 
 %---------------------------------------------------------------------------%
 
-:- pred compare_error_specs(error_spec::in, error_spec::in,
+:- pred compare_error_specs(globals::in, error_spec::in, error_spec::in,
     comparison_result::out) is det.
 
-compare_error_specs(SpecA0, SpecB0, Result) :-
-    expand_simplest_spec(SpecA0, SpecA),
-    expand_simplest_spec(SpecB0, SpecB),
-    SpecA = error_spec(_, _, MsgsA),
-    SpecB = error_spec(_, _, MsgsB),
+compare_error_specs(Globals, SpecA, SpecB, Result) :-
+    extract_spec_msgs(Globals, SpecA, MsgsA),
+    extract_spec_msgs(Globals, SpecB, MsgsB),
     compare_error_msg_lists(MsgsA, MsgsB, MsgsResult),
     (
         MsgsResult = (=),
@@ -1032,13 +1122,32 @@ project_msg_components(Msg) = Components :-
 
 %---------------------------------------------------------------------------%
 
+filter_interface_generation_specs(Globals, Specs, SpecsToPrint, !IO) :-
+    globals.lookup_bool_option(Globals,
+        print_errors_warnings_when_generating_interface, PrintErrors),
+    (
+        PrintErrors = yes,
+        SpecsToPrint = Specs
+    ;
+        PrintErrors = no,
+        io.get_exit_status(Status, !IO),
+        ( if Status = 0 then
+            SpecsToPrint = []
+        else
+            SpecsToPrint = Specs
+        )
+    ).
+
+%---------------------------------------------------------------------------%
+
 :- type error_spec_accumulator == maybe(pair(set(error_spec))).
 
 init_error_spec_accumulator = no.
 
 accumulate_error_specs_for_proc(ProcSpecs, !MaybeSpecs) :-
     list.filter(
-        ( pred(error_spec(_, Phase, _)::in) is semidet :-
+        ( pred(Spec::in) is semidet :-
+            Phase = project_spec_phase(Spec),
             ModeReportControl = get_maybe_mode_report_control(Phase),
             ModeReportControl = yes(report_only_if_in_all_modes)
         ), ProcSpecs, ProcAllModeSpecs, ProcAnyModeSpecs),
@@ -1052,6 +1161,17 @@ accumulate_error_specs_for_proc(ProcSpecs, !MaybeSpecs) :-
     ;
         !.MaybeSpecs = no,
         !:MaybeSpecs = yes(ProcAnyModeSpecSet - ProcAllModeSpecSet)
+    ).
+
+:- func project_spec_phase(error_spec) = error_phase.
+
+project_spec_phase(Spec) = Phase :-
+    (
+        Spec = error_spec(_, _, Phase, _)
+    ;
+        Spec = simplest_spec(_, _, Phase, _, _)
+    ;
+        Spec = conditional_spec(_, _, _, _, Phase, _)
     ).
 
 error_spec_accumulator_to_list(no) = [].
@@ -1085,11 +1205,11 @@ get_maybe_mode_report_control(phase_code_gen) = no.
 
 %---------------------------------------------------------------------------%
 
-maybe_write_out_errors_no_module(Verbose, Globals, !Specs, !IO) :-
+pre_hlds_maybe_write_out_errors(Verbose, Globals, !Specs, !IO) :-
     io.output_stream(Stream, !IO),
-    maybe_write_out_errors_no_module(Stream, Verbose, Globals, !Specs, !IO).
+    pre_hlds_maybe_write_out_errors(Stream, Verbose, Globals, !Specs, !IO).
 
-maybe_write_out_errors_no_module(Stream, Verbose, Globals, !Specs, !IO) :-
+pre_hlds_maybe_write_out_errors(Stream, Verbose, Globals, !Specs, !IO) :-
     % maybe_write_out_errors in hlds_error_util.m is a HLDS version
     % of this predicate. The documentation is in that file.
     (
@@ -1154,13 +1274,55 @@ write_error_specs(Stream, Specs0, Globals, !NumWarnings, !NumErrors, !IO) :-
     already_printed_verbose::in, already_printed_verbose::out,
     io::di, io::uo) is det.
 
-do_write_error_spec(Stream, Globals, Spec0, !NumWarnings, !NumErrors,
+do_write_error_spec(Stream, Globals, Spec, !NumWarnings, !NumErrors,
         !AlreadyPrintedVerbose, !IO) :-
-    expand_simplest_spec(Spec0, Spec),
-    Spec = error_spec(Severity, _, Msgs),
+    (
+        Spec = error_spec(Id, Severity, _Phase, Msgs1),
+        MaybeActual = actual_error_severity(Globals, Severity)
+    ;
+        Spec = simplest_spec(Id, Severity, _Phase, Context, Pieces),
+        MaybeActual = actual_error_severity(Globals, Severity),
+        Msgs1 = [simplest_msg(Context, Pieces)]
+    ;
+        Spec = conditional_spec(Id, Option, MatchValue,
+            Severity, _Phase, Msgs0),
+        globals.lookup_bool_option(Globals, Option, Value),
+        ( if Value = MatchValue then
+            MaybeActual = actual_error_severity(Globals, Severity),
+            Msgs1 = Msgs0
+        else
+            MaybeActual = no,
+            Msgs1 = []
+        )
+    ),
+    globals.lookup_bool_option(Globals, print_error_spec_id, PrintId),
+    (
+        PrintId = no,
+        Msgs = Msgs1
+    ;
+        PrintId = yes,
+        (
+            Msgs1 = [],
+            % Don't add a pred id message to an empty list of messages,
+            % since there is nothing to identify.
+            Msgs = Msgs1
+        ;
+            Msgs1 = [HeadMsg | _],
+            (
+                ( HeadMsg = simplest_msg(HeadContext, _Pieces)
+                ; HeadMsg = simple_msg(HeadContext, _)
+                ),
+                MaybeHeadContext = yes(HeadContext)
+            ;
+                HeadMsg = error_msg(MaybeHeadContext, _, _, _)
+            ),
+            IdMsg = error_msg(MaybeHeadContext, do_not_treat_as_first, 0,
+                [always([words("error_spec id:"), fixed(Id), nl])]),
+            Msgs = Msgs1 ++ [IdMsg]
+        )
+    ),
     do_write_error_msgs(Stream, Msgs, Globals, treat_as_first,
         have_not_printed_anything, PrintedSome, !AlreadyPrintedVerbose, !IO),
-    MaybeActual = actual_error_severity(Globals, Severity),
     (
         PrintedSome = have_not_printed_anything
         % XXX The following assertion is commented out because the compiler
@@ -1187,7 +1349,7 @@ do_write_error_spec(Stream, Globals, Spec0, !NumWarnings, !NumErrors,
             )
         ;
             MaybeActual = no,
-            unexpected($pred, "MaybeActual is no")
+            unexpected($pred, "printed_something but MaybeActual = no")
         )
     ).
 
@@ -1257,9 +1419,9 @@ write_msg_components(Stream, [Component | Components], MaybeContext, Indent,
         !:First = do_not_treat_as_first,
         !:PrintedSome = printed_something
     ;
-        Component = option_is_set(Option, RequiredValue, EmbeddedComponents),
+        Component = option_is_set(Option, MatchValue, EmbeddedComponents),
         globals.lookup_bool_option(Globals, Option, OptionValue),
-        ( if OptionValue = RequiredValue then
+        ( if OptionValue = MatchValue then
             write_msg_components(Stream, EmbeddedComponents, MaybeContext,
                 Indent, Globals, !First, !PrintedSome,
                 !AlreadyPrintedVerbose, !IO)
@@ -1661,14 +1823,25 @@ error_pieces_to_string_2(FirstInMsg, [Component | Components]) = Str :-
         Str = join_string_and_tail(Word, Components, TailStr)
     ;
         (
-            Component = qual_sym_name_and_arity(SymNameAndArity)
+            Component = qual_sym_name_arity(SymNameAndArity)
         ;
-            Component = unqual_sym_name_and_arity(SymNameAndArity0),
+            Component = unqual_sym_name_arity(SymNameAndArity0),
             SymNameAndArity0 = sym_name_arity(SymName0, Arity),
             SymName = unqualified(unqualify_name(SymName0)),
             SymNameAndArity = sym_name_arity(SymName, Arity)
         ),
-        Word = sym_name_and_arity_to_word(SymNameAndArity),
+        Word = sym_name_arity_to_word(SymNameAndArity),
+        Str = join_string_and_tail(Word, Components, TailStr)
+    ;
+        (
+            Component = qual_pf_sym_name_orig_arity(PFSymNameArity)
+        ;
+            Component = unqual_pf_sym_name_orig_arity(PFSymNameArity0),
+            PFSymNameArity0 = pf_sym_name_arity(PF, SymName0, Arity),
+            SymName = unqualified(unqualify_name(SymName0)),
+            PFSymNameArity = pf_sym_name_arity(PF, SymName, Arity)
+        ),
+        Word = pf_sym_name_orig_arity_to_string(PFSymNameArity),
         Str = join_string_and_tail(Word, Components, TailStr)
     ;
         (
@@ -1690,22 +1863,18 @@ error_pieces_to_string_2(FirstInMsg, [Component | Components]) = Str :-
             TypeCtorSymName = unqualified(unqualify_name(TypeCtorSymName0))
         ),
         SymNameAndArity = sym_name_arity(TypeCtorSymName, TypeCtorArity),
-        Word = sym_name_and_arity_to_word(SymNameAndArity),
+        Word = sym_name_arity_to_word(SymNameAndArity),
         Str = join_string_and_tail(Word, Components, TailStr)
     ;
         Component = qual_top_ctor_of_type(Type),
         type_to_ctor_det(Type, TypeCtor),
         TypeCtor = type_ctor(TypeCtorSymName, TypeCtorArity),
         SymNameArity = sym_name_arity(TypeCtorSymName, TypeCtorArity),
-        Word = sym_name_and_arity_to_word(SymNameArity),
+        Word = sym_name_arity_to_word(SymNameArity),
         Str = join_string_and_tail(Word, Components, TailStr)
     ;
         Component = p_or_f(PredOrFunc),
         Word = pred_or_func_to_string(PredOrFunc),
-        Str = join_string_and_tail(Word, Components, TailStr)
-    ;
-        Component = simple_call(SimpleCallId),
-        Word = simple_call_id_to_string(SimpleCallId),
         Str = join_string_and_tail(Word, Components, TailStr)
     ;
         Component = decl(Decl),
@@ -1858,15 +2027,26 @@ convert_components_to_paragraphs_acc(FirstInMsg, [Component | Components],
         RevWords1 = [plain_word(sym_name_to_word(SymName)) | RevWords0]
     ;
         (
-            Component = qual_sym_name_and_arity(SymNameAndArity)
+            Component = qual_sym_name_arity(SymNameAndArity)
         ;
-            Component = unqual_sym_name_and_arity(SymNameAndArity0),
+            Component = unqual_sym_name_arity(SymNameAndArity0),
             SymNameAndArity0 = sym_name_arity(SymName0, Arity),
             SymName = unqualified(unqualify_name(SymName0)),
             SymNameAndArity = sym_name_arity(SymName, Arity)
         ),
-        Word = sym_name_and_arity_to_word(SymNameAndArity),
+        Word = sym_name_arity_to_word(SymNameAndArity),
         RevWords1 = [plain_word(Word) | RevWords0]
+    ;
+        (
+            Component = qual_pf_sym_name_orig_arity(PFSymNameArity)
+        ;
+            Component = unqual_pf_sym_name_orig_arity(PFSymNameArity0),
+            PFSymNameArity0 = pf_sym_name_arity(PF, SymName0, Arity),
+            SymName = unqualified(unqualify_name(SymName0)),
+            PFSymNameArity = pf_sym_name_arity(PF, SymName, Arity)
+        ),
+        WordsStr = pf_sym_name_orig_arity_to_string(PFSymNameArity),
+        break_into_words(WordsStr, RevWords0, RevWords1)
     ;
         (
             Component = qual_cons_id_and_maybe_arity(ConsId0),
@@ -1887,23 +2067,19 @@ convert_components_to_paragraphs_acc(FirstInMsg, [Component | Components],
             TypeCtorSymName = unqualified(unqualify_name(TypeCtorSymName0))
         ),
         SymNameAndArity = sym_name_arity(TypeCtorSymName, TypeCtorArity),
-        Word = sym_name_and_arity_to_word(SymNameAndArity),
+        Word = sym_name_arity_to_word(SymNameAndArity),
         RevWords1 = [plain_word(Word) | RevWords0]
     ;
         Component = qual_top_ctor_of_type(Type),
         type_to_ctor_det(Type, TypeCtor),
         TypeCtor = type_ctor(TypeCtorName, TypeCtorArity),
         SymNameArity = sym_name_arity(TypeCtorName, TypeCtorArity),
-        NewWord = plain_word(sym_name_and_arity_to_word(SymNameArity)),
+        NewWord = plain_word(sym_name_arity_to_word(SymNameArity)),
         RevWords1 = [NewWord | RevWords0]
     ;
         Component = p_or_f(PredOrFunc),
         Word = pred_or_func_to_string(PredOrFunc),
         RevWords1 = [plain_word(Word) | RevWords0]
-    ;
-        Component = simple_call(SimpleCallId),
-        WordsStr = simple_call_id_to_string(SimpleCallId),
-        break_into_words(WordsStr, RevWords0, RevWords1)
     ;
         Component = decl(DeclName),
         Word = add_quotes(":- " ++ DeclName),
@@ -2025,9 +2201,9 @@ join_prefixes([Head | Tail]) = Strings :-
 sym_name_to_word(SymName) =
     add_quotes(sym_name_to_string(SymName)).
 
-:- func sym_name_and_arity_to_word(sym_name_and_arity) = string.
+:- func sym_name_arity_to_word(sym_name_arity) = string.
 
-sym_name_and_arity_to_word(sym_name_arity(SymName, Arity)) =
+sym_name_arity_to_word(sym_name_arity(SymName, Arity)) =
     add_quotes(sym_name_to_string(SymName)) ++ "/" ++ int_to_string(Arity).
 
 :- pred break_into_words(string::in, list(word)::in, list(word)::out) is det.
@@ -2183,12 +2359,9 @@ get_later_words([Word | Words], OldLen, Avail, Line0, Line, RestWords) :-
 describe_sym_name(SymName) =
     string.append_list(["`", sym_name_to_string(SymName), "'"]).
 
-describe_sym_name_and_arity(sym_name_arity(SymName, Arity)) =
+describe_sym_name_arity(sym_name_arity(SymName, Arity)) =
     string.append_list(["`", sym_name_to_string(SymName), "/",
         string.int_to_string(Arity), "'"]).
-
-pred_or_func_to_string(pf_predicate) = "predicate".
-pred_or_func_to_string(pf_function) = "function".
 
 add_quotes(Str) = "`" ++ Str ++ "'".
 

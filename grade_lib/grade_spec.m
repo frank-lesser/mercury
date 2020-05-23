@@ -40,13 +40,11 @@
     ;       svar_ac_merc_file
 
     ;       svar_backend
-    ;       svar_datarep
     ;       svar_target
     ;       svar_gcc_conf
     ;       svar_low_tag_bits_use
     ;       svar_stack_len
     ;       svar_trail
-    ;       svar_trail_segments
     ;       svar_minmodel
     ;       svar_thread_safe
     ;       svar_gc
@@ -100,10 +98,6 @@
     ;       svalue_backend_llds
     ;       svalue_backend_elds
 
-    ;       svalue_datarep_heap_cells
-    ;       svalue_datarep_classes
-    ;       svalue_datarep_erlang
-
     ;       svalue_target_c
     ;       svalue_target_csharp
     ;       svalue_target_java
@@ -137,9 +131,6 @@
 
     ;       svalue_trail_no
     ;       svalue_trail_yes
-
-    ;       svalue_trail_segments_no
-    ;       svalue_trail_segments_yes
 
     ;       svalue_minmodel_no
     ;       svalue_minmodel_stack_copy
@@ -336,9 +327,6 @@ init_solver_var_specs(SpecsVersion) = Specs :-
 
         solver_var_spec(svar_backend,
             [svalue_backend_mlds, svalue_backend_llds, svalue_backend_elds]),
-        solver_var_spec(svar_datarep,
-            [svalue_datarep_heap_cells, svalue_datarep_classes,
-            svalue_datarep_erlang]),
         solver_var_spec(svar_target,
             [svalue_target_c, svalue_target_csharp,
             svalue_target_java, svalue_target_erlang]),
@@ -363,8 +351,6 @@ init_solver_var_specs(SpecsVersion) = Specs :-
             StackLenPrefOrder),
         solver_var_spec(svar_trail,
             [svalue_trail_no, svalue_trail_yes]),
-        solver_var_spec(svar_trail_segments,
-            [svalue_trail_segments_yes, svalue_trail_segments_no]),
 
         solver_var_spec(svar_minmodel,
             [svalue_minmodel_no,
@@ -450,11 +436,6 @@ init_requirement_specs = [
         (svar_target `is_one_of` [svalue_target_c])
     ),
     requirement_spec(
-        "Using the LLDS backend requires storing data in heap cells.",
-        (svar_backend `being` svalue_backend_llds) `implies_that`
-        (svar_datarep `is_one_of` [svalue_datarep_heap_cells])
-    ),
-    requirement_spec(
         "Using the ELDS backend requires targeting Erlang.",
         (svar_backend `being` svalue_backend_elds) `implies_that`
         (svar_target `is_one_of` [svalue_target_erlang])
@@ -469,13 +450,6 @@ init_requirement_specs = [
         "The use of gcc extensions makes sense only for the LLDS backend.",
         (svar_backend `being` svalue_backend_elds) `implies_that`
         (svar_gcc_conf `is_one_of` [svalue_gcc_conf_none])
-    ),
-
-% Requirements of values of svar_datarep.
-    requirement_spec(
-        "Representing data using classes requires the MLDS backend.",
-        (svar_datarep `being` svalue_datarep_classes) `implies_that`
-        (svar_backend `is_one_of` [svalue_backend_mlds])
     ),
 
 % Requirements of values of svar_target.
@@ -493,22 +467,6 @@ init_requirement_specs = [
         "Targeting Erlang requires the ELDS backend.",
         (svar_target `being` svalue_target_erlang) `implies_that`
         (svar_backend `is_one_of` [svalue_backend_elds])
-    ),
-
-    requirement_spec(
-        "Targeting C# requires representing data using classes.",
-        (svar_target `being` svalue_target_csharp) `implies_that`
-        (svar_datarep `is_one_of` [svalue_datarep_classes])
-    ),
-    requirement_spec(
-        "Targeting Java requires representing data using classes.",
-        (svar_target `being` svalue_target_java) `implies_that`
-        (svar_datarep `is_one_of` [svalue_datarep_classes])
-    ),
-    requirement_spec(
-        "Targeting Erlang requires using Erlang terms.",
-        (svar_target `being` svalue_target_erlang) `implies_that`
-        (svar_datarep `is_one_of` [svalue_datarep_erlang])
     ),
 
     requirement_spec(
@@ -729,13 +687,6 @@ init_requirement_specs = [
         "Trailing interferes with minimal model tabling.",
         (svar_trail `being` svalue_trail_yes) `implies_that`
         (svar_minmodel `is_one_of` [svalue_minmodel_no])
-    ),
-
-% Requirements of values of svar_trail_segments.
-    requirement_spec(
-        "Trail segments require trailing.",
-        (svar_trail_segments `being` svalue_trail_segments_yes) `implies_that`
-        (svar_trail `is_one_of` [svalue_trail_yes])
     ),
 
 % Requirements of values of svar_minmodel.

@@ -44,13 +44,11 @@ solver_var_name("size_of_double",               svar_ac_size_of_double).
 solver_var_name("mercuryfile",                  svar_ac_merc_file).
 
 solver_var_name("backend",                      svar_backend).
-solver_var_name("datarep",                      svar_datarep).
 solver_var_name("target",                       svar_target).
 solver_var_name("gcc_conf",                     svar_gcc_conf).
 solver_var_name("low_tag_bits_use",             svar_low_tag_bits_use).
 solver_var_name("stack_len",                    svar_stack_len).
 solver_var_name("trail",                        svar_trail).
-solver_var_name("trail_segments",               svar_trail_segments).
 solver_var_name("minmodel",                     svar_minmodel).
 solver_var_name("thread_safe",                  svar_thread_safe).
 solver_var_name("gc",                           svar_gc).
@@ -93,10 +91,6 @@ solver_var_value_name("mlds",                   svalue_backend_mlds).
 solver_var_value_name("llds",                   svalue_backend_llds).
 solver_var_value_name("elds",                   svalue_backend_elds).
 
-solver_var_value_name("heap_cells",             svalue_datarep_heap_cells).
-solver_var_value_name("classes",                svalue_datarep_classes).
-solver_var_value_name("erlangdata",             svalue_datarep_erlang).
-
 solver_var_value_name("c",                      svalue_target_c).
 solver_var_value_name("csharp",                 svalue_target_csharp).
 solver_var_value_name("java",                   svalue_target_java).
@@ -119,9 +113,6 @@ solver_var_value_name("exts",                   svalue_stack_len_extend).
 
 solver_var_value_name("no_trail",               svalue_trail_no).
 solver_var_value_name("trail",                  svalue_trail_yes).
-
-solver_var_value_name("trfix",                  svalue_trail_segments_no).
-solver_var_value_name("trseg",                  svalue_trail_segments_yes).
 
 solver_var_value_name("no_mm",                  svalue_minmodel_no).
 solver_var_value_name("mm_stack_copy",      

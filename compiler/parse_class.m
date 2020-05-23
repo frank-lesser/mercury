@@ -2,6 +2,7 @@
 % vim: ft=mercury ts=4 sw=4 et
 %---------------------------------------------------------------------------%
 % Copyright (C) 1997-2011 University of Melbourne.
+% Copyright (C) 2016-2019 The Mercury team.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
 %---------------------------------------------------------------------------%
@@ -74,6 +75,7 @@
 :- import_module cord.
 :- import_module map.
 :- import_module maybe.
+:- import_module one_or_more.
 :- import_module require.
 
 %---------------------------------------------------------------------------%
@@ -105,7 +107,7 @@ parse_typeclass_item(ModuleName, VarSet, ArgTerms, Context, SeqNum,
             words("optionally followed by"),
             quote("where [method_signature_1, ... method_signature_m]"),
             suffix("."), nl],
-        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
             Context, Pieces),
         MaybeIOM = error1([Spec])
     ).
@@ -176,9 +178,9 @@ parse_constrained_class(ModuleName, VarSet, NameTerm, ConstraintsTerm,
             list.sort_and_remove_dups(FunDepVars, SortedFunDepVars),
 
             Params = ItemTypeClass0 ^ tc_class_params,
-            list.filter(is_in_list(Params), SortedConstraintVars,
+            list.filter(list.contains(Params), SortedConstraintVars,
                 _ConstraintInParams, ConstraintNotInParams),
-            list.filter(is_in_list(Params), SortedFunDepVars,
+            list.filter(list.contains(Params), SortedFunDepVars,
                 _FunDepInParams, FunDepNotInParams),
             (
                 ConstraintNotInParams = [_ | _],
@@ -256,8 +258,8 @@ parse_constrained_class(ModuleName, VarSet, NameTerm, ConstraintsTerm,
                         FunDepNotInParamsPieces ++ FunDepErrorContext
                 ),
                 Pieces = Prefix ++ Middle ++ Suffix ++ [nl],
-                Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
-                    Context, Pieces),
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree, Context, Pieces),
                 MaybeItemTypeClass = error1([Spec])
             )
         )
@@ -292,7 +294,8 @@ parse_superclass_constraints(_ModuleName, VarSet, ConstraintsTerm, Result) :-
             Pieces = [words("Error: constraints on class declarations"),
                 words("may only constrain type variables and ground types."),
                 nl],
-            Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+            Spec = simplest_spec($pred, severity_error,
+                phase_term_to_parse_tree,
                 get_term_context(ConstraintsTerm), Pieces),
             Result = error2([Spec])
         )
@@ -330,44 +333,52 @@ parse_unconstrained_class(ModuleName, TVarSet, NameTerm, Context, SeqNum,
         MaybeTypeClassInfo) :-
     ContextPieces = cord.singleton(words("In typeclass declaration:")),
     varset.coerce(TVarSet, VarSet),
-    parse_implicitly_qualified_sym_name_and_args(ModuleName, NameTerm,
-        VarSet, ContextPieces, MaybeClassName),
-    (
-        MaybeClassName = ok2(ClassName, TermVars0),
-        list.map(term.coerce, TermVars0, TermVars),
+    ( if is_the_name_a_variable(VarSet, vtk_class_decl, NameTerm, Spec) then
+        MaybeTypeClassInfo = error1([Spec])
+    else
+        parse_implicitly_qualified_sym_name_and_args(ModuleName, NameTerm,
+            VarSet, ContextPieces, MaybeClassName),
         (
-            TermVars = [],
-            Pieces = [words("Error: typeclass declarations require"),
-                words("at least one class parameter."), nl],
-            Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
-                get_term_context(NameTerm), Pieces),
-            MaybeTypeClassInfo = error1([Spec])
-        ;
-            TermVars = [_ | _],
-            ( if
-                term.term_list_to_var_list(TermVars, Vars),
-                list.sort_and_remove_dups(TermVars, SortedTermVars),
-                list.length(SortedTermVars, NumSortedTermVars),
-                list.length(TermVars, NumTermVars),
-                NumSortedTermVars = NumTermVars
-            then
-                % XXX Would this be a better context?
-                % Context = get_term_context(NameTerm),
-                TypeClassInfo = item_typeclass_info(ClassName, Vars, [], [],
-                    class_interface_abstract, TVarSet, Context, SeqNum),
-                MaybeTypeClassInfo = ok1(TypeClassInfo)
-            else
-                Pieces = [words("Error: expected distinct variables"),
-                    words("as class parameters."), nl],
-                % XXX Would Context be better than get_term_context(NameTerm)?
-                Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+            MaybeClassName = ok2(ClassName, TermVars0),
+            list.map(term.coerce, TermVars0, TermVars),
+            (
+                TermVars = [],
+                Pieces = [words("Error: typeclass declarations require"),
+                    words("at least one class parameter."), nl],
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree,
                     get_term_context(NameTerm), Pieces),
                 MaybeTypeClassInfo = error1([Spec])
+            ;
+                TermVars = [_ | _],
+                ( if
+                    term.term_list_to_var_list(TermVars, Vars),
+                    list.sort_and_remove_dups(TermVars, SortedTermVars),
+                    list.length(SortedTermVars, NumSortedTermVars),
+                    list.length(TermVars, NumTermVars),
+                    NumSortedTermVars = NumTermVars
+                then
+                    % XXX Would this be a better context?
+                    % Context = get_term_context(NameTerm),
+                    TypeClassInfo = item_typeclass_info(ClassName, Vars, [],
+                        [], class_interface_abstract, TVarSet, Context,
+                        SeqNum),
+                    MaybeTypeClassInfo = ok1(TypeClassInfo)
+                else
+                    Pieces = [words("Error: expected distinct variables"),
+                        words("as class parameters."), nl],
+                    % XXX Would Context be better than
+                    % get_term_context(NameTerm)?
+                    Spec = simplest_spec($pred, severity_error,
+                        phase_term_to_parse_tree,
+                        get_term_context(NameTerm), Pieces),
+                    MaybeTypeClassInfo = error1([Spec])
+                )
             )
+        ;
+            MaybeClassName = error2(Specs),
+            MaybeTypeClassInfo = error1(Specs)
         )
-    ;
-        MaybeClassName = error2(Specs),
-        MaybeTypeClassInfo = error1(Specs)
     ).
 
 :- pred parse_class_decls(module_name::in, varset::in, term::in,
@@ -379,7 +390,7 @@ parse_class_decls(ModuleName, VarSet, DeclsTerm, MaybeClassDecls) :-
         find_errors(MaybeDecls, MaybeClassDecls)
     else
         Pieces = [words("Error: expected a list of class methods."), nl],
-        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
             get_term_context(DeclsTerm), Pieces),
         MaybeClassDecls = error1([Spec])
     ).
@@ -444,7 +455,7 @@ parse_instance_item(ModuleName, VarSet, ArgTerms, Context, SeqNum,
             words("optionally followed by"),
             quote("where [method_spec_1, ... method_spec_m]"),
             suffix("."), nl],
-        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
             Context, Pieces),
         MaybeIOM = error1([Spec])
     ).
@@ -506,25 +517,30 @@ parse_underived_instance(ModuleName, TVarSet, NameTerm, Context, SeqNum,
     % could well be for a typeclass defined in another module.
     NameContextPieces = cord.singleton(words("In instance declaration:")),
     varset.coerce(TVarSet, VarSet),
-    parse_sym_name_and_args(VarSet, NameContextPieces,
-        NameTerm, MaybeClassName),
-    (
-        MaybeClassName = ok2(ClassName, TypeTerms),
-        TypesContextPieces = NameContextPieces,
-        parse_types(no_allow_ho_inst_info(wnhii_class_constraint),
-            VarSet, TypesContextPieces, TypeTerms, MaybeTypes),
+    ( if is_the_name_a_variable(VarSet, vtk_instance_decl, NameTerm, Spec) then
+        MaybeItemInstanceInfo = error1([Spec])
+    else
+        parse_sym_name_and_args(VarSet, NameContextPieces,
+            NameTerm, MaybeClassName),
         (
-            MaybeTypes = ok1(Types),
-            ItemInstanceInfo = item_instance_info(ClassName, Types, Types, [],
-                instance_body_abstract, TVarSet, ModuleName, Context, SeqNum),
-            MaybeItemInstanceInfo = ok1(ItemInstanceInfo)
+            MaybeClassName = ok2(ClassName, TypeTerms),
+            TypesContextPieces = NameContextPieces,
+            parse_types(no_allow_ho_inst_info(wnhii_class_constraint),
+                VarSet, TypesContextPieces, TypeTerms, MaybeTypes),
+            (
+                MaybeTypes = ok1(Types),
+                ItemInstanceInfo = item_instance_info(ClassName, Types, Types,
+                    [], instance_body_abstract, TVarSet, ModuleName, Context,
+                    SeqNum),
+                MaybeItemInstanceInfo = ok1(ItemInstanceInfo)
+            ;
+                MaybeTypes = error1(Specs),
+                MaybeItemInstanceInfo = error1(Specs)
+            )
         ;
-            MaybeTypes = error1(Specs),
+            MaybeClassName = error2(Specs),
             MaybeItemInstanceInfo = error1(Specs)
         )
-    ;
-        MaybeClassName = error2(Specs),
-        MaybeItemInstanceInfo = error1(Specs)
     ).
 
 :- pred parse_non_empty_instance(module_name::in, varset::in, tvarset::in,
@@ -572,7 +588,8 @@ check_tvars_in_instance_constraint(ItemInstanceInfo, NameTerm, MaybeSpec) :-
     ( if
         prog_type.constraint_list_get_tvars(Constraints, TVars),
         type_vars_list(Types, TypesVars),
-        list.filter(is_in_list(TypesVars), TVars, _BoundTVars, UnboundTVars),
+        list.filter(list.contains(TypesVars), TVars, _BoundTVars,
+            UnboundTVars),
         UnboundTVars = [_ | _]
     then
         UnboundTVarStrs = list.map(mercury_var_to_name_only(TVarSet),
@@ -586,7 +603,7 @@ check_tvars_in_instance_constraint(ItemInstanceInfo, NameTerm, MaybeSpec) :-
         Pieces = Prefix ++ UnboundTVarPieces ++
             [words("in constraints on instance declaration."), nl],
         % XXX Would _Context be better than get_term_context(NameTerm)?
-        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
             get_term_context(NameTerm), Pieces),
         MaybeSpec = yes(Spec)
     else
@@ -603,7 +620,7 @@ parse_instance_methods(ModuleName, VarSet, MethodsTerm, Result) :-
         find_errors(Interface, Result)
     else
         Pieces = [words("Error: expected list of instance methods."), nl],
-        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
             get_term_context(MethodsTerm), Pieces),
         Result = error1([Spec])
     ).
@@ -643,7 +660,8 @@ term_to_instance_method(_ModuleName, VarSet, MethodTerm,
                     quote("pred(<Name> / <Arity>) is <InstanceMethod>"),
                     suffix(","),
                     words("not"), words(MethodTermStr), suffix("."), nl],
-                Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree,
                     get_term_context(MethodTerm), Pieces),
                 MaybeInstanceMethod = error1([Spec])
             )
@@ -668,7 +686,8 @@ term_to_instance_method(_ModuleName, VarSet, MethodTerm,
                     quote("func(<Name> / <Arity>) is <InstanceMethod>"),
                     suffix(","),
                     words("not"), words(MethodTermStr), suffix("."), nl],
-                Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree,
                     get_term_context(MethodTerm), Pieces),
                 MaybeInstanceMethod = error1([Spec])
             )
@@ -680,7 +699,8 @@ term_to_instance_method(_ModuleName, VarSet, MethodTerm,
                 quote("func(<Name> / <Arity>) is <InstanceName>"),
                 suffix(","),
                 words("not"), words(MethodTermStr), suffix("."), nl],
-            Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+            Spec = simplest_spec($pred, severity_error,
+                phase_term_to_parse_tree,
                 get_term_context(MethodTerm), Pieces),
             MaybeInstanceMethod = error1([Spec])
         )
@@ -721,7 +741,8 @@ term_to_instance_method(_ModuleName, VarSet, MethodTerm,
                     quote("func(<Name> / <Arity>) is <InstanceName>"),
                     suffix(","),
                     words("not"), words(MethodTermStr), suffix("."), nl],
-                Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+                Spec = simplest_spec($pred, severity_error,
+                    phase_term_to_parse_tree,
                     get_term_context(MethodTerm), Pieces),
                 MaybeInstanceMethod = error1([Spec])
             )
@@ -736,7 +757,7 @@ term_to_instance_method(_ModuleName, VarSet, MethodTerm,
 parse_class_constraints(ModuleName, VarSet, ConstraintsTerm, Result) :-
     Pieces = [words("Sorry, not implemented:"),
         words("constraints may only constrain type variables"),
-        words("and ground types"), nl],
+        words("and ground types."), nl],
     parse_simple_class_constraints(ModuleName, VarSet, ConstraintsTerm, Pieces,
         Result).
 
@@ -758,7 +779,8 @@ parse_simple_class_constraints(_ModuleName, VarSet, ConstraintsTerm, Pieces,
             % to list allows an empty list.
             Result = ok1([HeadConstraint | TailConstraints])
         else
-            Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+            Spec = simplest_spec($pred, severity_error,
+                phase_term_to_parse_tree,
                 get_term_context(ConstraintsTerm), Pieces),
             Result = error1([Spec])
         )
@@ -787,7 +809,8 @@ parse_class_and_inst_constraints(_ModuleName, VarSet, ConstraintsTerm,
             FunDeps = [_ | _],
             Pieces = [words("Error: functional dependencies are only allowed"),
                 words("in typeclass declarations."), nl],
-            Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+            Spec = simplest_spec($pred, severity_error,
+                phase_term_to_parse_tree,
                 get_term_context(ConstraintsTerm), Pieces),
             Result = error2([Spec])
         )
@@ -868,7 +891,7 @@ parse_arbitrary_constraint_list(VarSet, HeadTerm, TailTerms, Result) :-
             HeadResult = ok1(HeadConstraint),
             TailResult = ok1(TailConstraints)
         then
-            Result = ok1(one_or_more_cons(HeadConstraint, TailConstraints))
+            Result = ok1(one_or_more.cons(HeadConstraint, TailConstraints))
         else
             Result = error1(get_any_errors1(HeadResult) ++
                 get_any_errors1(TailResult))
@@ -892,8 +915,8 @@ parse_arbitrary_constraint(VarSet, ConstraintTerm, Result) :-
             LHSPieces = [words("Error: a non-variable inst such as"),
                 quote(LHSTermStr), words("may not be the subject"),
                 words("of an inst constraint."), nl],
-            LHSSpec = simplest_spec(severity_error, phase_term_to_parse_tree,
-                LHSContext, LHSPieces),
+            LHSSpec = simplest_spec($pred, severity_error,
+                phase_term_to_parse_tree, LHSContext, LHSPieces),
             MaybeInstVar = error1([LHSSpec])
         ),
         ContextPieces = cord.from_list([words("In the constraining inst"),
@@ -936,7 +959,7 @@ parse_arbitrary_constraint(VarSet, ConstraintTerm, Result) :-
     else
         Pieces = [words("Error: expected atom"),
             words("as class name or inst constraint."), nl],
-        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
             get_term_context(ConstraintTerm), Pieces),
         Result = error1([Spec])
     ).
@@ -954,7 +977,7 @@ parse_fundep(Term, Result) :-
         Pieces = [words("Error: the domain and range"),
             words("of a functional dependency"),
             words("must be comma-separated lists of variables."), nl],
-        Spec = simplest_spec(severity_error, phase_term_to_parse_tree,
+        Spec = simplest_spec($pred, severity_error, phase_term_to_parse_tree,
             get_term_context(Term), Pieces),
         Result = error1([Spec])
     ).
@@ -976,13 +999,6 @@ constraint_is_not_simple(constraint(_ClassName, ArgTypes)) :-
         type_is_nonvar(ArgType),
         type_is_nonground(ArgType)
     ).
-
-%---------------------------------------------------------------------------%
-
-:- pred is_in_list(list(T)::in, T::in) is semidet.
-
-is_in_list(List, Element) :-
-    list.member(Element, List).
 
 %---------------------------------------------------------------------------%
 :- end_module parse_tree.parse_class.

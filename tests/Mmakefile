@@ -1,5 +1,5 @@
 #-----------------------------------------------------------------------------#
-# vim: ts=8 sw=8 noexpandtab
+# vim: ts=8 sw=8 noexpandtab ft=make
 #-----------------------------------------------------------------------------#
 
 THIS_DIR=tests
@@ -27,6 +27,7 @@ SUBDIRS = \
 	grade_subdirs \
 	hard_coded \
 	invalid \
+	invalid_make_int \
 	invalid_purity \
 	invalid_submodules \
 	misc_tests \
@@ -42,11 +43,11 @@ SUBDIRS = \
 	trailing \
 	typeclasses \
 	valid \
+	valid_make_int \
 	valid_seq \
 	warnings
 
 NOT_YET_READY_SUBDIRS = \
 	stm
 
-TESTS_DIR=.
-include $(TESTS_DIR)/Mmake.common
+include Mmake.common

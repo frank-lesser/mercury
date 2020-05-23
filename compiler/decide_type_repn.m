@@ -21,7 +21,19 @@
 % The task of this module differs from that of the (current) du_type_layout.m
 % not just in that it does its work earlier, on the parse tree instead of
 % on the HLDS, but also in that the information it puts into interface files
-% must be grade-independent.
+% must be grade-independent, since interface files are supposed to be
+% grade-independent. This means that while du_type_layout.m computes
+% what type representation *this* compiler invocation should use for each type,
+% this module computes what type representation *every* compiler invocation
+% that generates target language code should use for each type, and puts
+% that information into the .int file of the module defining the type
+% in the form of type_repn items. (The algorithm that does this does bake
+% into those type_repn items the effects of the developer-only options
+% such as --allow-packing-local-sectags that are in effect parameters
+% of that algorithm.) Then, compiler invocations that generate target
+% language code decide which of these representations is applicable
+% to their circumstances, specifically: what the target language is,
+% and how many bits there are in a word on the target.
 %
 %---------------------------------------------------------------------------%
 %
@@ -29,27 +41,29 @@
 % kinds of interface files, in terms of inputs and outputs:
 %
 % .int3 now:
-%   output: type_repns for simple types in interface and all? eqv types
 %   input:  type_defns in source module
+%   output: type_repns for simple types in interface and all? eqv types
 %
 % .int2 now:
-%   output: type_repns for simple types in interface and all? eqv types
 %   input:  type_defns in source module
+%   output: type_repns for simple types in interface and all? eqv types
 %
 % .int2 later:
-%   output: type_repns for simple types in interface and all? eqv types
 %   input:  type_defns in source module
-%   input:  type_repns for simple/eqv types in direct/indirect imported .int3s
+%           type_repns for simple/eqv types in direct/indirect imported .int3s
+%   output: type_repns for simple types in interface and all? eqv types
 %
 % .int1 later:
-%   output: type_repns for all types that appear in interface
 %   input:  type_defns in source module
-%   input:  type_repns for simple/eqv types in direct/indirect imported .int3s
+%           type_repns for simple/eqv types in direct/indirect imported .int3s 
+%   output: type_repns for all types that appear in interface
+%           (possibly for all types, in the interface or not, since
+%           .opt files may expose private types)
 %
 % .int0 later:
-%   output: type_repns for all types
 %   input:  type_defns in source module
-%   input:  type_repns for simple/eqv types in direct/indirect imported .int3s
+%           type_repns for simple/eqv types in direct/indirect imported .int3s
+%   output: type_repns for all types
 %
 %---------------------------------------------------------------------------%
 %
@@ -84,8 +98,6 @@
 :- import_module parse_tree.check_parse_tree_type_defns.
 :- import_module parse_tree.prog_item.
 
-:- import_module list.
-
     % decide_repns_for_simple_types_for_int3(ModuleName, TypeCtorCheckedMap,
     %   IntTypeRepnItems):
     %
@@ -98,7 +110,7 @@
     %   in the interfac
     %
 :- pred decide_repns_for_simple_types_for_int3(module_name::in,
-    type_ctor_checked_map::in, list(item_type_repn_info)::out) is det.
+    type_ctor_checked_map::in, type_ctor_repn_map::out) is det.
 
 %---------------------------------------------------------------------------%
 %---------------------------------------------------------------------------%
@@ -107,9 +119,10 @@
 
 :- import_module parse_tree.prog_data.
 
-:- import_module cord.
+:- import_module list.
 :- import_module map.
 :- import_module maybe.
+:- import_module one_or_more.
 :- import_module set_tree234.
 :- import_module term.
 :- import_module varset.
@@ -121,7 +134,7 @@
 %
 
 decide_repns_for_simple_types_for_int3(_ModuleName, TypeCtorCheckedMap,
-        IntRepns) :-
+        !:IntRepnMap) :-
     map.init(RepnMap0),
     map.init(EqvMap0),
     map.init(WordAlignedMap0),
@@ -131,19 +144,13 @@ decide_repns_for_simple_types_for_int3(_ModuleName, TypeCtorCheckedMap,
         WordAlignedMap0, WordAlignedMap, ExportedTypesSet0, ExportedTypesSet),
 
     set_tree234.to_sorted_list(ExportedTypesSet, ExportedTypes),
-    map.select_sorted_list(RepnMap, ExportedTypes, IntRepnMap),
+    map.select_sorted_list(RepnMap, ExportedTypes, !:IntRepnMap),
+
     map.select_sorted_list(WordAlignedMap, ExportedTypes, IntWordAlignedMap),
-
-    IntRepnsCord0 = cord.init,
-    map.foldl_values(add_type_repn_item, IntRepnMap,
-        IntRepnsCord0, IntRepnsCord1),
     map.foldl(maybe_add_word_aligned_repn_item, IntWordAlignedMap,
-        IntRepnsCord1, IntRepnsCord2),
+        !IntRepnMap),
 
-    map.foldl_values(add_eqv_repn_item, EqvMap,
-        IntRepnsCord2, IntRepnsCord),
-
-    IntRepns = cord.list(IntRepnsCord).
+    map.foldl_values(add_eqv_repn_item, EqvMap, !IntRepnMap).
 
 :- type eqv_map == map(type_ctor, item_type_defn_info_eqv).
 
@@ -414,17 +421,11 @@ add_du_repn_to_type_map(TypeCtor, TypeParams, TVarSet, DuRepn, !TypeRepnMap) :-
 
 %---------------------------------------------------------------------------%
 
-:- pred add_type_repn_item(item_type_repn_info::in,
-    cord(item_type_repn_info)::in, cord(item_type_repn_info)::out) is det.
-
-add_type_repn_item(RepnItem, !Items) :-
-    !:Items = cord.snoc(!.Items, RepnItem).
-
 :- pred maybe_add_word_aligned_repn_item(type_ctor::in,
     maybe_word_alignment::in,
-    cord(item_type_repn_info)::in, cord(item_type_repn_info)::out) is det.
+    type_ctor_repn_map::in, type_ctor_repn_map::out) is det.
 
-maybe_add_word_aligned_repn_item(TypeCtor, WordAligned, !Items) :-
+maybe_add_word_aligned_repn_item(TypeCtor, WordAligned, !RepnMap) :-
     (
         WordAligned = need_not_be_word_aligned
     ;
@@ -434,18 +435,19 @@ maybe_add_word_aligned_repn_item(TypeCtor, WordAligned, !Items) :-
         varset.new_vars(TypeCtorArity, TypeParams, TVarSet0, TVarSet),
         Item = item_type_repn_info(TypeCtorSymName, TypeParams,
             tcrepn_is_word_aligned_ptr, TVarSet, term.context_init, -1),
-        !:Items = cord.snoc(!.Items, Item)
+        map.det_insert(TypeCtor, Item, !RepnMap)
     ).
 
 :- pred add_eqv_repn_item(item_type_defn_info_eqv::in,
-    cord(item_type_repn_info)::in, cord(item_type_repn_info)::out) is det.
+    type_ctor_repn_map::in, type_ctor_repn_map::out) is det.
 
-add_eqv_repn_item(DefnItem, !Items) :-
+add_eqv_repn_item(DefnItem, !RepnMap) :-
     DefnItem = item_type_defn_info(TypeCtorSymName, TypeParams,
         type_details_eqv(EqvType), TVarSet, Context, SeqNum),
+    TypeCtor = type_ctor(TypeCtorSymName, list.length(TypeParams)),
     RepnItem = item_type_repn_info(TypeCtorSymName, TypeParams,
         tcrepn_is_eqv_to(EqvType), TVarSet, Context, SeqNum),
-    !:Items = cord.snoc(!.Items, RepnItem).
+    map.det_insert(TypeCtor, RepnItem, !RepnMap).
 
 %---------------------------------------------------------------------------%
 :- end_module parse_tree.decide_type_repn.

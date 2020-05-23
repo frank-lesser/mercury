@@ -196,10 +196,10 @@ describe_one_pred_info_name(ShouldModuleQualify, PredInfo) = Pieces :-
         PredSymNameAndArity = sym_name_arity(PredSymName, OrigArity),
         (
             ShouldModuleQualify = should_module_qualify,
-            PredSymNamePiece = qual_sym_name_and_arity(PredSymNameAndArity)
+            PredSymNamePiece = qual_sym_name_arity(PredSymNameAndArity)
         ;
             ShouldModuleQualify = should_not_module_qualify,
-            PredSymNamePiece = unqual_sym_name_and_arity(PredSymNameAndArity)
+            PredSymNamePiece = unqual_sym_name_arity(PredSymNameAndArity)
         ),
         Pieces = Prefix ++ [PredSymNamePiece]
     ).
@@ -336,7 +336,7 @@ definitely_write_out_errors(Globals, !HLDS, Specs, !IO) :-
     module_info_incr_num_errors(NumErrors, !HLDS).
 
 maybe_write_out_errors(Verbose, Globals, !HLDS, !Specs, !IO) :-
-    % maybe_write_out_errors_no_module in error_util.m is a pre-HLDS version
+    % pre_hlds_maybe_write_out_errors in error_util.m is a pre-HLDS version
     % of this predicate.
     (
         Verbose = no

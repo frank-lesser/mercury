@@ -3,15 +3,13 @@
 #-----------------------------------------------------------------------------#
 
 THIS_DIR = valid
-SUBDIRS =
-TESTS_DIR = ..
 MAYBE_J1 =
 
 #-----------------------------------------------------------------------------#
 
 # Please keep these lists sorted.
 # The documentation of what tests each list should contain (what little
-# there is of it) is in $(TESTS_DIR)/valid/Mmake.valid.common.
+# there is of it) is in ../valid/Mmake.valid.common.
 
 AGC_PROGS = \
 	agc_graph \
@@ -91,6 +89,7 @@ OTHER_PROGS = \
 	bug481 \
 	bug483 \
 	bug486 \
+	bug493 \
 	bug51 \
 	bug85 \
 	builtin_false \
@@ -136,6 +135,7 @@ OTHER_PROGS = \
 	func_default_modes \
 	func_in_head \
 	gh65 \
+	gh89 \
 	github_50 \
 	hawkins_switch_bug \
 	headvar_not_found \
@@ -259,6 +259,7 @@ OTHER_PROGS = \
 	unify_dummy \
 	uniq_mode_inf_bug \
 	uniq_unify \
+	unknown_warning \
 	unreachable_code \
 	unused_args_test2 \
 	vn_float \
@@ -348,4 +349,4 @@ NON_DECLDEBUG_PROGS = \
 #
 #       solver_type_mutable_bug
 
-include $(TESTS_DIR)/valid/Mmake.valid.common
+include ../valid/Mmake.valid.common

@@ -878,11 +878,12 @@ dump_binop(str_le) = "str<=".
 dump_binop(str_ge) = "str>=".
 dump_binop(str_lt) = "str<".
 dump_binop(str_gt) = "str>".
+dump_binop(unsigned_lt) = "unsigned<".
 dump_binop(unsigned_le) = "unsigned<=".
-dump_binop(float_plus) = "fl+".
-dump_binop(float_minus) = "fl-".
-dump_binop(float_times) = "fl*".
-dump_binop(float_divide) = "fl/".
+dump_binop(float_add) = "fl+".
+dump_binop(float_sub) = "fl-".
+dump_binop(float_mul) = "fl*".
+dump_binop(float_div) = "fl/".
 dump_binop(float_eq) = "fl==".
 dump_binop(float_ne) = "fl!=".
 dump_binop(float_le) = "fl<=".
@@ -896,8 +897,10 @@ dump_binop(int_add(_)) = "+".
 dump_binop(int_sub(_)) = "-".
 dump_binop(int_mul(_)) = "*".
 dump_binop(int_div(_)) = "/".
-dump_binop(unchecked_left_shift(_)) = "unchecked<<".
-dump_binop(unchecked_right_shift(_)) = "unchecked>>".
+dump_binop(unchecked_left_shift(_, shift_by_int)) = "unchecked<<".
+dump_binop(unchecked_left_shift(_, shift_by_uint)) = "unchecked<<u".
+dump_binop(unchecked_right_shift(_, shift_by_int)) = "unchecked>>".
+dump_binop(unchecked_right_shift(_, shift_by_uint)) = "unchecked>>u".
 dump_binop(bitwise_and(_)) = "&".
 dump_binop(bitwise_or(_)) = "|".
 dump_binop(bitwise_xor(_)) = "^".

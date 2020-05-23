@@ -188,8 +188,8 @@ check_in_interface_promise_goal(ModuleInfo, PredInfo, Goal, !Specs) :-
             Context = goal_info_get_context(GoalInfo),
             PredOrFunc = pred_info_is_pred_or_func(CallPredInfo),
             Arity = pred_info_orig_arity(CallPredInfo),
-            SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
-            IdPieces = [simple_call(SimpleCallId)],
+            PFSymNameArity = pf_sym_name_arity(PredOrFunc, SymName, Arity),
+            IdPieces = [qual_pf_sym_name_orig_arity(PFSymNameArity)],
             report_assertion_interface_error(ModuleInfo, Context, IdPieces,
                 !Specs)
         ;
@@ -214,8 +214,8 @@ check_in_interface_promise_goal(ModuleInfo, PredInfo, Goal, !Specs) :-
             Name = pred_info_name(PragmaPredInfo),
             SymName = unqualified(Name),
             Arity = pred_info_orig_arity(PragmaPredInfo),
-            SimpleCallId = simple_call_id(PredOrFunc, SymName, Arity),
-            IdPieces = [simple_call(SimpleCallId)],
+            PFSymNameArity = pf_sym_name_arity(PredOrFunc, SymName, Arity),
+            IdPieces = [qual_pf_sym_name_orig_arity(PFSymNameArity)],
             report_assertion_interface_error(ModuleInfo, Context, IdPieces,
                 !Specs)
         ;
@@ -319,7 +319,7 @@ report_assertion_interface_error(ModuleInfo, Context, IdPieces, !Specs) :-
         [words("Either move the promise into the implementation section"),
         words("or move the definition into the interface."), nl],
     Msgs = [always(MainPieces), verbose_only(verbose_always, VerbosePieces)],
-    Spec = error_spec(severity_error, phase_type_check,
+    Spec = error_spec($pred, severity_error, phase_type_check,
         [simple_msg(Context, Msgs)]),
     !:Specs = [Spec | !.Specs].
 
