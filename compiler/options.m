@@ -310,7 +310,6 @@
             % has been done.
 
     ;       generate_mmc_make_module_dependencies
-    ;       assume_gmake
     ;       trace_level
     ;       trace_optimized
     ;       trace_prof
@@ -505,6 +504,7 @@
     ;       unboxed_int64s
     ;       unboxed_no_tag_types
     ;       arg_pack_bits
+    ;       pack_everything
     ;       allow_direct_args
     ;       allow_double_word_fields
     ;       allow_double_word_ints          % XXX bootstrapping option
@@ -1337,7 +1337,6 @@ option_defaults_2(aux_output_option, [
     smart_recompilation                 -   bool(no),
     generate_item_version_numbers       -   bool(no),
     generate_mmc_make_module_dependencies - bool(no),
-    assume_gmake                        -   bool(yes),
     trace_level                         -   string("default"),
     trace_optimized                     -   bool(no),
     trace_prof                          -   bool(no),
@@ -1499,6 +1498,7 @@ option_defaults_2(compilation_model_option, [
     arg_pack_bits                       -   int(-1),
                                         % -1 is a special value which means use
                                         % all word bits for argument packing.
+    pack_everything                     -   bool(no),
     allow_direct_args                   -   bool(yes),
     allow_double_word_fields            -   bool(yes),
     allow_double_word_ints              -   bool(no),
@@ -2296,7 +2296,6 @@ long_option("output-class-dir",         only_opmode_output_class_dir).
 
 % aux output options
 long_option("smart-recompilation",      smart_recompilation).
-long_option("assume-gmake",             assume_gmake).
 long_option("generate-mmc-make-module-dependencies",
                                         generate_mmc_make_module_dependencies).
 long_option("generate-mmc-deps",        generate_mmc_make_module_dependencies).
@@ -2483,6 +2482,7 @@ long_option("unboxed-float",        unboxed_float).
 long_option("unboxed-int64s",       unboxed_int64s).
 long_option("unboxed-no-tag-types", unboxed_no_tag_types).
 long_option("arg-pack-bits",        arg_pack_bits).
+long_option("pack-everything",      pack_everything).
 long_option("allow-direct-args",    allow_direct_args).
 long_option("allow-double-word-fields", allow_double_word_fields).
 long_option("allow-double-word-ints", allow_double_word_ints).
@@ -3141,6 +3141,10 @@ long_option("ushift-2020-04-30",
 long_option("unsigned_lt-2020-05-02",
                                     compiler_sufficiently_recent).
 long_option("format-uint-2020-05-23",
+                                    compiler_sufficiently_recent).
+long_option("mmake-all-2020-05-25",
+                                    compiler_sufficiently_recent).
+long_option("unsigned-lt-2020-05-25",
                                     compiler_sufficiently_recent).
 long_option("experiment",           experiment).
 long_option("experiment1",          experiment1).
@@ -4334,13 +4338,6 @@ options_help_aux_output -->
         "\timported module's interface changes in a way which does",
         "\tnot invalidate the compiled code. `--smart-recompilation'",
         "\tdoes not yet work with `--intermodule-optimization'.",
-        "--no-assume-gmake",
-        "\tWhen generating `.dep' files, generate Makefile",
-        "\tfragments that use only the features of standard make;",
-        "\tdo not assume the availability of GNU Make extensions.",
-        "\tWhen generating `.dep' files, generate dependencies",
-        "\tfor use by `mmc --make' in addition to the dependencies",
-        "\tused by mmake.",
         "--generate-mmc-deps",
         "--generate-mmc-make-module-dependencies",
         "\tGenerate dependencies for use by `mmc --make' even",
@@ -5135,6 +5132,11 @@ options_help_compilation_model -->
 %       "(This option is not for general use.)",
 %       "\tThe number of bits in a word in which to pack constructor"
 %       "arguments.",
+
+        % This is a developer only option.
+%       "--pack-everything",
+%       "(This option is not for general use.)",
+%       "\tTell decide_type_repn.m to pack everything that can be packed.",
 
         % This is a developer only option.
 %       "--allow-direct-args",

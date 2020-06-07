@@ -1,10 +1,10 @@
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 % vim: ft=mercury ts=4 sw=4 et
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 % Copyright (C) 2002-2011 The University of Melbourne.
 % This file may only be copied under the terms of the GNU General
 % Public License - see the file COPYING in the Mercury distribution.
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 %
 % File: options_file.m.
 % Main author: stayl.
@@ -12,7 +12,7 @@
 % Code to deal with options for `mmc --make', including code to parse
 % Mercury.options files.
 %
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
 :- module make.options_file.
 :- interface.
@@ -24,7 +24,7 @@
 :- import_module list.
 :- import_module maybe.
 
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
 :- type options_variables.
 
@@ -32,15 +32,16 @@
 
     % Read all options files specified by `--options-file' options.
     %
-:- pred read_options_files(globals::in, options_variables::in,
+:- pred read_options_files_named_in_options_file_option(globals::in,
     maybe(options_variables)::out, io::di, io::uo) is det.
 
     % Read a single options file, without searching
     % --options-search-directories.
     % This is used to read the configuration file.
     %
-:- pred read_options_file(globals::in, file_name::in, options_variables::in,
-    maybe(options_variables)::out, io::di, io::uo) is det.
+:- pred read_named_options_file(globals::in, file_name::in,
+    options_variables::in, maybe(options_variables)::out,
+    io::di, io::uo) is det.
 
     % Read a single options file. No searching will be done. The result is
     % the value of the variable MCFLAGS obtained from the file, ignoring
@@ -53,7 +54,7 @@
 :- pred read_args_file(globals::in, file_name::in, maybe(list(string))::out,
     io::di, io::uo) is det.
 
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
     % Look up $(MAIN_TARGET).
     %
@@ -81,8 +82,8 @@
 :- pred lookup_mmc_module_options(globals::in, options_variables::in,
     module_name::in, maybe(list(string))::out, io::di, io::uo) is det.
 
-%-----------------------------------------------------------------------------%
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
 :- implementation.
 
@@ -104,7 +105,7 @@
 :- import_module term.
 :- import_module univ.
 
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
 :- type options_variable == string.
 
@@ -130,11 +131,13 @@
 
 options_variables_init = map.init.
 
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
-read_options_files(Globals, Variables0, MaybeVariables, !IO) :-
+read_options_files_named_in_options_file_option(Globals, MaybeVariables,
+        !IO) :-
     promise_equivalent_solutions [OptionsFileResult, !:IO] (
-        try_io(read_options_file_lookup_params(Globals, Variables0),
+        try_io(
+            do_read_options_files_named_in_options_file_option(Globals),
             OptionsFileResult, !IO)
     ),
     (
@@ -149,10 +152,36 @@ read_options_files(Globals, Variables0, MaybeVariables, !IO) :-
         )
     ).
 
-read_options_file(Globals, OptionsFile, Variables0, MaybeVariables, !IO) :-
+:- pred do_read_options_files_named_in_options_file_option(globals::in,
+    options_variables::out, io::di, io::uo) is det.
+
+do_read_options_files_named_in_options_file_option(Globals, Variables, !IO) :-
+    globals.lookup_accumulating_option(Globals, options_files, OptionsFiles),
+    Variables0 = options_variables_init,
+    list.foldl2(read_options_file_set_params(Globals), OptionsFiles,
+        Variables0, Variables, !IO).
+
+:- pred read_options_file_set_params(globals::in, string::in,
+    options_variables::in, options_variables::out, io::di, io::uo) is det.
+
+read_options_file_set_params(Globals, OptionsFile, !Vars, !IO) :-
+    ( if OptionsFile = "Mercury.options" then
+        ErrorIfNotExist = no_error,
+        Search = no_search
+    else
+        ErrorIfNotExist = error,
+        Search = search
+    ),
+    read_options_file_params(Globals, ErrorIfNotExist, Search, no, OptionsFile,
+        !Vars, !IO).
+
+%---------------------%
+
+read_named_options_file(Globals, OptionsFile, Variables0, MaybeVariables,
+        !IO) :-
     promise_equivalent_solutions [OptionsFileResult, !:IO] (
         try_io(
-            ( pred((Variables1)::out, !.IO::di, !:IO::uo) is det :-
+            ( pred(Variables1::out, !.IO::di, !:IO::uo) is det :-
                 read_options_file_params(Globals, error, no_search, no,
                     OptionsFile, Variables0, Variables1, !IO)
             ),
@@ -170,9 +199,11 @@ read_options_file(Globals, OptionsFile, Variables0, MaybeVariables, !IO) :-
         )
     ).
 
+%---------------------%
+
 read_args_file(Globals, OptionsFile, MaybeMCFlags, !IO) :-
-    read_options_file(Globals, OptionsFile, options_variables_init,
-        MaybeVariables, !IO),
+    read_named_options_file(Globals, OptionsFile,
+        options_variables_init, MaybeVariables, !IO),
     (
         MaybeVariables = yes(Variables),
         % Ignore settings in the environment -- the parent mmc process
@@ -190,34 +221,14 @@ read_args_file(Globals, OptionsFile, MaybeMCFlags, !IO) :-
         ;
             FlagsResult = var_result_error(ErrorSpec),
             MaybeMCFlags = no,
-            write_error_spec_ignore(ErrorSpec, Globals, !IO)
+            write_error_spec_ignore(Globals, ErrorSpec, !IO)
         )
     ;
         MaybeVariables = no,
         MaybeMCFlags = no
     ).
 
-:- pred read_options_file_lookup_params(globals::in,
-    options_variables::in, options_variables::out, io::di, io::uo) is det.
-
-read_options_file_lookup_params(Globals, !Variables, !IO) :-
-    globals.lookup_accumulating_option(Globals, options_files, OptionsFiles),
-    list.foldl2(read_options_file_set_params(Globals), OptionsFiles,
-        !Variables, !IO).
-
-:- pred read_options_file_set_params(globals::in, string::in,
-    options_variables::in, options_variables::out, io::di, io::uo) is det.
-
-read_options_file_set_params(Globals, OptionsFile, !Vars, !IO) :-
-    ( if OptionsFile = "Mercury.options" then
-        ErrorIfNotExist = no_error,
-        Search = no_search
-    else
-        ErrorIfNotExist = error,
-        Search = search
-    ),
-    read_options_file_params(Globals, ErrorIfNotExist, Search, no, OptionsFile,
-        !Vars, !IO).
+%---------------------------------------------------------------------------%
 
 :- type error_if_not_exist
     --->    error
@@ -232,14 +243,15 @@ read_options_file_set_params(Globals, OptionsFile, !Vars, !IO) :-
     options_variables::out, io::di, io::uo) is det.
 
 read_options_file_params(Globals, ErrorIfNotExist, Search, MaybeDirName,
-        OptionsFile0, !Variables, !IO) :-
-    ( if OptionsFile0 = "-" then
+        OptionsPathName, !Variables, !IO) :-
+    ( if OptionsPathName = "-" then
         % Read from standard input.
         debug_make_msg(Globals, write_reading_options_file_stdin, !IO),
         read_options_lines(Globals, dir.this_directory, !Variables, !IO),
         debug_make_msg(Globals, write_done, !IO)
     else
-        debug_make_msg(Globals, write_reading_options_file(OptionsFile0), !IO),
+        debug_make_msg(Globals,
+            write_reading_options_file(OptionsPathName), !IO),
         (
             Search = search,
             globals.lookup_accumulating_option(Globals,
@@ -248,7 +260,7 @@ read_options_file_params(Globals, ErrorIfNotExist, Search, MaybeDirName,
             Search = no_search,
             SearchDirs = [dir.this_directory]
         ),
-        ( if dir.split_name(OptionsFile0, OptionsDir, OptionsFile) then
+        ( if dir.split_name(OptionsPathName, OptionsDir, OptionsFile) then
             ( if dir.path_name_is_absolute(OptionsDir) then
                 FileToFind = OptionsFile,
                 Dirs = [OptionsDir]
@@ -260,12 +272,12 @@ read_options_file_params(Globals, ErrorIfNotExist, Search, MaybeDirName,
                 ;
                     MaybeDirName = no,
                     Dirs = SearchDirs,
-                    FileToFind = OptionsFile0
+                    FileToFind = OptionsPathName
                 )
             )
         else
             Dirs = SearchDirs,
-            FileToFind = OptionsFile0
+            FileToFind = OptionsPathName
         ),
         search_for_file_returning_dir_and_stream(Dirs, FileToFind,
             MaybeDirAndStream, !IO),
@@ -282,9 +294,6 @@ read_options_file_params(Globals, ErrorIfNotExist, Search, MaybeDirName,
             % for which it is not at all clear whether they *intend*
             % to read from a current standard input that originates as
             % FoundStream, or they just *happen* to do so.
-            %
-            % XXX The changeover would also be simpler if there was an easy way
-            % to detect calls that read from the current input stream.
 
             io.set_input_stream(FoundStream, OldInputStream, !IO),
             read_options_lines(Globals, FoundDir, !Variables, !IO),
@@ -303,7 +312,7 @@ read_options_file_params(Globals, ErrorIfNotExist, Search, MaybeDirName,
                     [error_msg(no, do_not_treat_as_first, 0,
                         [always([words("Error reading options file"),
                             quote(ErrorFile), suffix(".")])])]),
-                write_error_spec_ignore(ErrorSpec, Globals, !IO)
+                write_error_spec_ignore(Globals, ErrorSpec, !IO)
             ;
                 ErrorIfNotExist = no_error
             )
@@ -319,14 +328,14 @@ write_reading_options_file_stdin(!IO) :-
 :- pred write_reading_options_file(string::in, io::di, io::uo) is det.
 
 write_reading_options_file(FileName, !IO) :-
-    io.write_string("Reading options file ", !IO),
-    io.write_string(FileName, !IO),
-    io.nl(!IO).
+    io.format("Reading options file %s", [s(FileName)], !IO).
 
 :- pred write_done(io::di, io::uo) is det.
 
 write_done(!IO) :-
     io.write_string("done.\n", !IO).
+
+%---------------------------------------------------------------------------%
 
 :- func maybe_add_path_name(dir_name, file_name) = file_name.
 
@@ -355,10 +364,12 @@ read_options_lines(Globals, Dir, !Variables, !IO) :-
         )
     ;
         LineResult = exception(Exception),
-        ( if Exception = univ(options_file_error(Error)) then
+        ( if Exception = univ(options_file_error(ErrorMsg)) then
             io.input_stream_name(FileName, !IO),
             Context = term.context_init(FileName, LineNumber),
-            write_error_pieces(Globals, Context, 0, [words(Error)], !IO),
+            Spec = simplest_spec($pred, severity_error, phase_read_files,
+                Context, [words(ErrorMsg), nl]),
+            write_error_spec_ignore(Globals, Spec, !IO),
 
             % This will be caught by `read_options_files'. The open options
             % files aren't closed on the way up, but we will be exiting
@@ -399,11 +410,18 @@ read_options_lines_3(Globals, Dir, !.Variables, !:Variables - FoundEOF, !IO) :-
             expand_variables(!.Variables,
                 IncludedFilesChars0, IncludedFilesChars, UndefVars, !IO),
             report_undefined_variables(Globals, UndefVars, !IO),
-            IncludedFileNames = split_into_words(IncludedFilesChars),
-            list.foldl2(
-                read_options_file_params(Globals, ErrorIfNotExist, search,
-                    yes(Dir)),
-                IncludedFileNames, !Variables, !IO)
+            split_into_words(IncludedFilesChars, IncludedFileNames,
+                MaybeError0),
+            (
+                MaybeError0 = no,
+                list.foldl2(
+                    read_options_file_params(Globals, ErrorIfNotExist, search,
+                        yes(Dir)),
+                    IncludedFileNames, !Variables, !IO)
+            ;
+                MaybeError0 = yes(Error0),
+                throw(Error0)
+            )
         )
     ).
 
@@ -463,45 +481,58 @@ read_options_line_2(FoundEOF, !Chars, !IO) :-
 update_variable(Globals, VarName, AddToValue, NewValue0, !Variables, !IO) :-
     expand_variables(!.Variables, NewValue0, NewValue1, Undef, !IO),
     report_undefined_variables(Globals, Undef, !IO),
-    Words1 = split_into_words(NewValue1),
-    io.get_environment_var(VarName, MaybeEnvValue, !IO),
+    split_into_words(NewValue1, Words1, MaybeError1),
     (
-        MaybeEnvValue = yes(EnvValue),
-        Value = string.to_char_list(EnvValue),
-        Words = split_into_words(Value),
-        OptVarValue = options_variable_value(string.to_char_list(EnvValue),
-            Words, environment),
-        map.set(VarName, OptVarValue, !Variables)
-    ;
-        MaybeEnvValue = no,
-        ( if
-            map.search(!.Variables, VarName,
-                options_variable_value(OldValue, OldWords, Source))
-        then
+        MaybeError1 = no,
+        io.get_environment_var(VarName, MaybeEnvValue, !IO),
+        (
+            MaybeEnvValue = yes(EnvValue),
+            Value = string.to_char_list(EnvValue),
+            split_into_words(Value, Words, MaybeError),
             (
-                Source = environment
+                MaybeError = no,
+                OptVarValue = options_variable_value(
+                    string.to_char_list(EnvValue),
+                    Words, environment),
+                map.set(VarName, OptVarValue, !Variables)
             ;
-                Source = command_line
-            ;
-                Source = options_file,
+                MaybeError = yes(Error),
+                throw(Error)
+            )
+        ;
+            MaybeEnvValue = no,
+            ( if
+                map.search(!.Variables, VarName,
+                    options_variable_value(OldValue, OldWords, Source))
+            then
                 (
-                    AddToValue = yes,
-                    NewValue = OldValue ++ [' ' |  NewValue1],
-                    Words = OldWords ++ Words1
+                    Source = environment
                 ;
-                    AddToValue = no,
-                    NewValue = NewValue1,
-                    Words = Words1
-                ),
-                OptVarValue = options_variable_value(NewValue, Words,
+                    Source = command_line
+                ;
+                    Source = options_file,
+                    (
+                        AddToValue = yes,
+                        NewValue = OldValue ++ [' ' |  NewValue1],
+                        Words = OldWords ++ Words1
+                    ;
+                        AddToValue = no,
+                        NewValue = NewValue1,
+                        Words = Words1
+                    ),
+                    OptVarValue = options_variable_value(NewValue, Words,
+                        options_file),
+                    map.set(VarName, OptVarValue, !Variables)
+                )
+            else
+                OptVarValue = options_variable_value(NewValue1, Words1,
                     options_file),
                 map.set(VarName, OptVarValue, !Variables)
             )
-        else
-            OptVarValue = options_variable_value(NewValue1, Words1,
-                options_file),
-            map.set(VarName, OptVarValue, !Variables)
         )
+    ;
+        MaybeError1 = yes(Error1),
+        throw(Error1)
     ).
 
 :- pred expand_variables(options_variables::in, list(char)::in,
@@ -602,7 +633,7 @@ report_undefined_variables_2(Globals, [_ | Rest] @ UndefVars, !IO) :-
         Warn = no
     ).
 
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
 :- type options_file_line
     --->    define_variable(
@@ -688,32 +719,6 @@ parse_variable_2(IsFirst, Var0, Var, [Char | Chars0], Chars) :-
         Chars = [Char | Chars0]
     ).
 
-:- pred parse_string_chars(list(char)::in, list(char)::out,
-    list(char)::in, list(char)::out) is det.
-
-parse_string_chars(_, _, [], _) :-
-    throw(options_file_error("unterminated string")).
-parse_string_chars(String0, String, [Char | Chars0], Chars) :-
-    ( if Char = '"' then
-        Chars = Chars0,
-        String = String0
-    else if Char = ('\\') then
-        (
-            Chars0 = [Char2 | Chars1],
-            ( if Char2 = '"' then
-                String1 = [Char2 | String0]
-            else
-                String1 = [Char2, Char | String0]
-            ),
-            parse_string_chars(String1, String, Chars1, Chars)
-        ;
-            Chars0 = [],
-            throw(options_file_error("unterminated string"))
-        )
-    else
-        parse_string_chars([Char | String0], String, Chars0, Chars)
-    ).
-
 :- pred skip_comment_line(bool::out, io::di, io::uo) is det.
 
 skip_comment_line(FoundEOF, !IO) :-
@@ -747,68 +752,100 @@ read_item_or_eof(Pred, MaybeItem, !IO) :-
         throw(options_file_error(io.error_message(Error)))
     ).
 
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
 :- func checked_split_into_words(list(char)) = maybe_error(list(string)).
 
 checked_split_into_words(Chars) = Result :-
-    promise_equivalent_solutions [TryResult] (
-        try(
-            ( pred(Words0::out) is det :-
-                Words0 = split_into_words(Chars)
-            ), TryResult)
-    ),
+    split_into_words(Chars, Words, MaybeError),
     (
-        TryResult = succeeded(Words),
+        MaybeError = no,
         Result = ok(Words)
     ;
-        TryResult = exception(Exception),
-        ( if Exception = univ(options_file_error(Msg)) then
-            Result = error(Msg)
-        else
-            rethrow(TryResult)
-        )
+        MaybeError = yes(options_file_error(Msg)),
+        Result = error(Msg)
     ).
 
-:- func split_into_words(list(char)) = list(string).
+:- pred split_into_words(list(char)::in, list(string)::out,
+    maybe(options_file_error)::out) is det.
 
-split_into_words(Chars) = list.reverse(split_into_words_2(Chars, [])).
+split_into_words(Chars, Words, MaybeError) :-
+    split_into_words_2(Chars, [], RevWords, MaybeError),
+    list.reverse(RevWords, Words).
 
-:- func split_into_words_2(list(char), list(string)) = list(string).
+:- pred split_into_words_2(list(char)::in,
+    list(string)::in, list(string)::out,
+    maybe(options_file_error)::out) is det.
 
-split_into_words_2(Chars0, RevWords0) = RevWords :-
+split_into_words_2(Chars0, RevWords0, RevWords, MaybeError) :-
     list.drop_while(char.is_whitespace, Chars0, Chars1),
     (
         Chars1 = [],
-        RevWords = RevWords0
+        RevWords = RevWords0,
+        MaybeError = no
     ;
         Chars1 = [_ | _],
-        get_word(Word, Chars1, Chars),
-        RevWords = split_into_words_2(Chars, [Word | RevWords0])
+        get_word(Chars1, Chars, Word, MaybeError0),
+        (
+            MaybeError0 = no,
+            split_into_words_2(Chars, [Word | RevWords0], RevWords, MaybeError)
+        ;
+            MaybeError0 = yes(_),
+            RevWords = RevWords0,
+            MaybeError = MaybeError0
+        )
     ).
 
-:- pred get_word(string::out, list(char)::in, list(char)::out) is det.
+%---------------------%
 
-get_word(Word, Chars0, Chars) :-
-    get_word_2([], RevWord, Chars0, Chars),
+    % get_word(Chars0, Chars, Word, MaybeError):
+    %
+    % Read one word from Chars0, returning the remaining characters in Chars
+    % and the word itself in Word, if MaybeError = no. If MaybeError is
+    % yes(Error), then Error will describe the error, abd the none of
+    % the other return values will be meaningful.
+    %
+    % A word is defined as a sequence of either
+    % - non-whitespace characters,
+    % - characters escaped with a backslash (which may be whitespace chars), or
+    % - strings starting and ending with unescaped double quotes (which may
+    %   also contain whitespace chars).
+    %
+:- pred get_word(list(char)::in, list(char)::out,
+    string::out, maybe(options_file_error)::out) is det.
+
+get_word(Chars0, Chars, Word, MaybeError) :-
+    get_word_acc(Chars0, Chars, [], RevWord, MaybeError),
     Word = string.from_rev_char_list(RevWord).
 
-:- pred get_word_2(list(char)::in, list(char)::out,
-    list(char)::in, list(char)::out) is det.
+:- pred get_word_acc(list(char)::in, list(char)::out,
+    list(char)::in, list(char)::out,
+    maybe(options_file_error)::out) is det.
 
-get_word_2(RevWord, RevWord, [], []).
-get_word_2(RevWord0, RevWord, [Char | Chars0], Chars) :-
+get_word_acc([], [], RevWord, RevWord, no).
+get_word_acc([Char | Chars0], Chars, RevWord0, RevWord, MaybeError) :-
     ( if char.is_whitespace(Char) then
         Chars = Chars0,
-        RevWord = RevWord0
+        RevWord = RevWord0,
+        MaybeError = no
     else if Char = '"' then
-        parse_string_chars([], RevStringChars, Chars0, Chars1),
-        get_word_2(RevStringChars ++ RevWord0, RevWord, Chars1, Chars)
+        get_string_acc(Chars0, Chars1, [], RevStringChars, MaybeError0),
+        (
+            MaybeError0 = no,
+            get_word_acc(Chars1, Chars, RevStringChars ++ RevWord0, RevWord,
+                MaybeError)
+        ;
+            MaybeError0 = yes(_),
+            Chars = Chars0,
+            RevWord = RevWord0,
+            MaybeError = MaybeError0
+        )
     else if Char = ('\\') then
         (
             Chars0 = [],
+            Chars = [],
             RevWord = [Char | RevWord0],
-            Chars = []
+            MaybeError = no
         ;
             Chars0 = [Char2 | Chars1],
             ( if
@@ -816,16 +853,56 @@ get_word_2(RevWord0, RevWord, [Char | Chars0], Chars) :-
                 ; Char2 = ('\\')
                 )
             then
-                get_word_2([Char2 | RevWord0], RevWord, Chars1, Chars)
+                RevWord1 = [Char2 | RevWord0]
             else
-                get_word_2([Char2, Char | RevWord0], RevWord, Chars1, Chars)
-            )
+                RevWord1 = [Char2, Char | RevWord0]
+            ),
+            get_word_acc(Chars1, Chars, RevWord1, RevWord, MaybeError)
         )
     else
-        get_word_2([Char | RevWord0], RevWord, Chars0, Chars)
+        get_word_acc(Chars0, Chars, [Char | RevWord0], RevWord, MaybeError)
     ).
 
-%-----------------------------------------------------------------------------%
+    % get_string_acc(Chars0, Chars, RevString0, RevString, MaybeError):
+    %
+    % Read the part of a double-quoted string from Chars0 that occurs
+    % after the initial double quote, returning the remaining characters
+    % in Chars and adding the characters of the string itself in reverse
+    % to RevString0 yielding RevString, if MaybeError = no. If MaybeError is
+    % yes(Error), then Error will describe the error, abd the none of
+    % the other return values will be meaningful.
+    %
+:- pred get_string_acc(list(char)::in, list(char)::out,
+    list(char)::in, list(char)::out, maybe(options_file_error)::out) is det.
+
+get_string_acc([], [], RevString0, RevString0, MaybeError) :-
+    MaybeError = yes(options_file_error("unterminated string")).
+get_string_acc([Char | Chars0], Chars, RevString0, RevString, MaybeError) :-
+    ( if Char = '"' then
+        Chars = Chars0,
+        RevString = RevString0,
+        MaybeError = no
+    else if Char = ('\\') then
+        (
+            Chars0 = [Char2 | Chars1],
+            ( if Char2 = '"' then
+                RevString1 = [Char2 | RevString0]
+            else
+                RevString1 = [Char2, Char | RevString0]
+            ),
+            get_string_acc(Chars1, Chars, RevString1, RevString, MaybeError)
+        ;
+            Chars0 = [],
+            Chars = Chars0,
+            RevString = RevString0,
+            MaybeError = yes(options_file_error("unterminated string"))
+        )
+    else
+        get_string_acc(Chars0, Chars, [Char | RevString0], RevString,
+            MaybeError)
+    ).
+
+%---------------------------------------------------------------------------%
 
 lookup_main_target(Globals, Vars, MaybeMainTarget, !IO) :-
     lookup_variable_words_report_error(Globals, Vars, "MAIN_TARGET",
@@ -841,7 +918,7 @@ lookup_main_target(Globals, Vars, MaybeMainTarget, !IO) :-
         MaybeMainTarget = no
     ).
 
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
 lookup_mercury_stdlib_dir(Globals, Vars, MaybeMerStdlibDir, !IO) :-
     lookup_variable_words_report_error(Globals, Vars, "MERCURY_STDLIB_DIR",
@@ -857,7 +934,7 @@ lookup_mercury_stdlib_dir(Globals, Vars, MaybeMerStdlibDir, !IO) :-
         MaybeMerStdlibDir = no
     ).
 
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
 lookup_default_options(Globals, Vars, Result, !IO) :-
     lookup_mmc_maybe_module_options(Globals, Vars, default, Result, !IO).
@@ -1062,7 +1139,7 @@ mmc_option_type(config_dir) = option([], "--mercury-config-dir").
 mmc_option_type(linkage) = option([], "--linkage").
 mmc_option_type(mercury_linkage) = option([], "--mercury-linkage").
 
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 
 :- type variable_result(T)
     --->    var_result_set(T)
@@ -1145,7 +1222,7 @@ lookup_options_variable(Globals, Vars, OptionsVariableClass, FlagsVar, Result,
                 ErrorSpec = error_spec($pred, severity_error, phase_read_files,
                     [error_msg(no, do_not_treat_as_first, 0,
                         [always(Pieces)])]),
-                write_error_spec_ignore(ErrorSpec, Globals, !IO),
+                write_error_spec_ignore(Globals, ErrorSpec, !IO),
                 Result = var_result_error(ErrorSpec)
             )
         else
@@ -1175,7 +1252,7 @@ lookup_variable_words_report_error(Globals, Vars, VarName, Result, !IO) :-
     lookup_variable_words(Vars, VarName, Result, !IO),
     (
         Result = var_result_error(ErrorSpec),
-        write_error_spec_ignore(ErrorSpec, Globals, !IO)
+        write_error_spec_ignore(Globals, ErrorSpec, !IO)
     ;
         Result = var_result_set(_)
     ;
@@ -1246,6 +1323,6 @@ lookup_variable_chars(Variables, Var, Value, !Undef, !IO) :-
         )
     ).
 
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%
 :- end_module make.options_file.
-%-----------------------------------------------------------------------------%
+%---------------------------------------------------------------------------%

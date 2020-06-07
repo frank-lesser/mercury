@@ -249,10 +249,14 @@ real_main_after_expansion(CmdLineArgs, !IO) :-
                 "extra arguments with --arg-file: " ++ string(ExtraArgs))
         ),
 
-        % Read_args_file may attempt to look up options, so we need
-        % to initialize the globals.
+        % read_args_file may attempt to look up options, so we need to
+        % initialize the globals.
+        % XXX Why would read_args_file, a predicate that is only ever invoked
+        % to *find out* what the user intended the argument vector to be,
+        % trying to look *anything* up in data structure that its output
+        % is intended to construct?
         generate_default_globals(DummyGlobals, !IO),
-        options_file.read_args_file(DummyGlobals, ArgFile, MaybeArgs1, !IO),
+        read_args_file(DummyGlobals, ArgFile, MaybeArgs1, !IO),
         (
             MaybeArgs1 = yes(Args1),
             separate_option_args(Args1, OptionArgs, NonOptionArgs, !IO)
@@ -268,9 +272,14 @@ real_main_after_expansion(CmdLineArgs, !IO) :-
         % Find out which options files to read.
         % Don't report errors yet, as the errors may no longer exist
         % after we have read in options files.
+        %
+        % XXX Doing every task in handle_given_options is wasteful.
+        % in the very likely case of their being an option file.
+        % We should do just enough to find the setting of the --options-file
+        % option.
         handle_given_options(CmdLineArgs, OptionArgs, NonOptionArgs,
             _Errors0, ArgsGlobals, !IO),
-        read_options_files(ArgsGlobals, options_variables_init,
+        read_options_files_named_in_options_file_option(ArgsGlobals,
             MaybeVariables0, !IO),
         (
             MaybeVariables0 = yes(Variables0),
@@ -294,7 +303,7 @@ real_main_after_expansion(CmdLineArgs, !IO) :-
                         config_file, MaybeConfigFile),
                     (
                         MaybeConfigFile = yes(ConfigFile),
-                        read_options_file(FlagsArgsGlobals, ConfigFile,
+                        read_named_options_file(FlagsArgsGlobals, ConfigFile,
                             Variables0, MaybeVariables, !IO),
                         (
                             MaybeVariables = yes(Variables),
@@ -1072,7 +1081,7 @@ do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
         read_module_or_file(Globals0, Globals, FileOrModule, ModuleName, _,
             dont_return_timestamp, _, ParseTreeSrc, Specs, Errors,
             !HaveReadModuleMaps, !IO),
-        write_error_specs_ignore(Specs, Globals, !IO),
+        write_error_specs_ignore(Globals, Specs, !IO),
         ( if halt_at_module_error(Globals, Errors) then
             true
         else
@@ -1084,95 +1093,17 @@ do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
         ExtraObjFiles = []
     ;
         OpModeArgs = opma_make_interface(InterfaceFile),
-        (
-            InterfaceFile = omif_int3,
-            ReturnTimestamp = dont_return_timestamp
-        ;
-            InterfaceFile = omif_int0,
-            globals.lookup_bool_option(Globals0, generate_item_version_numbers,
-                GenerateVersionNumbers),
-            ReturnTimestamp =
-                version_numbers_return_timestamp(GenerateVersionNumbers)
-        ;
-            InterfaceFile = omif_int1_int2,
-            globals.lookup_bool_option(Globals0, generate_item_version_numbers,
-                GenerateVersionNumbers),
-            ReturnTimestamp =
-                version_numbers_return_timestamp(GenerateVersionNumbers)
-        ),
-        read_module_or_file(Globals0, Globals, FileOrModule,
-            ModuleName, FileName, ReturnTimestamp, MaybeTimestamp,
-            ParseTreeSrc, ReadSpecs, ReadErrors, !HaveReadModuleMaps, !IO),
-        ( if halt_at_module_error(Globals, ReadErrors) then
-            write_error_specs_ignore(ReadSpecs, Globals, !IO)
-        else
-            split_into_compilation_units_perform_checks(ParseTreeSrc,
-                RawCompUnits, ReadSpecs, ReadSplitSpecs),
-            filter_interface_generation_specs(Globals,
-                ReadSplitSpecs, Specs, !IO),
-            write_error_specs_ignore(Specs, Globals, !IO),
-            maybe_print_delayed_error_messages(Globals, !IO),
-            (
-                InterfaceFile = omif_int0,
-                list.foldl2(
-                    write_private_interface_file_int0(Globals0,
-                        FileName, ModuleName, MaybeTimestamp),
-                    RawCompUnits, !HaveReadModuleMaps, !IO)
-            ;
-                InterfaceFile = omif_int1_int2,
-                list.foldl2(
-                    write_interface_file_int1_int2(Globals0,
-                        FileName, ModuleName, MaybeTimestamp),
-                    RawCompUnits, !HaveReadModuleMaps, !IO)
-            ;
-                InterfaceFile = omif_int3,
-                list.foldl(
-                    write_short_interface_file_int3(Globals0, FileName),
-                    RawCompUnits, !IO)
-            )
-        ),
+        do_process_compiler_arg_make_interface(Globals0, InterfaceFile,
+            FileOrModule, !HaveReadModuleMaps, !IO),
         ModulesToLink = [],
         ExtraObjFiles = []
     ;
         OpModeArgs = opma_augment(OpModeAugment),
-        globals.lookup_bool_option(Globals0, smart_recompilation, Smart0),
-        io_get_disable_smart_recompilation(DisableSmart, !IO),
-        (
-            DisableSmart = yes,
-            globals.set_option(smart_recompilation, bool(no),
-                Globals0, Globals),
-            Smart = no
-        ;
-            DisableSmart = no,
-            Globals = Globals0,
-            Smart = Smart0
-        ),
-        (
-            Smart = yes,
-            (
-                FileOrModule = fm_module(ModuleName)
-            ;
-                FileOrModule = fm_file(FileName),
-                % XXX This won't work if the module name doesn't match
-                % the file name -- such modules will always be recompiled.
-                %
-                % This problem will be fixed when mmake functionality
-                % is moved into the compiler. The file_name->module_name
-                % mapping will be explicitly recorded.
-                file_name_to_module_name(FileName, ModuleName)
-            ),
-            find_smart_recompilation_target_files(Globals, FindTargetFiles),
-            find_timestamp_files(Globals, FindTimestampFiles),
-            recompilation.check.should_recompile(Globals, ModuleName,
-                FindTargetFiles, FindTimestampFiles, ModulesToRecompile,
-                !HaveReadModuleMaps, !IO)
-        ;
-            Smart = no,
-            ModulesToRecompile = all_modules
-        ),
+        find_modules_to_recompile(Globals0, Globals, FileOrModule,
+            ModulesToRecompile, !HaveReadModuleMaps, !IO),
         ( if ModulesToRecompile = some_modules([]) then
             % XXX Currently smart recompilation is disabled if mmc is linking
-            % the executable because it doesn't know how to check whether
+            % the executable, because it doesn't know how to check whether
             % all the necessary intermediate files are present and up-to-date.
             ModulesToLink = [],
             ExtraObjFiles = []
@@ -1181,6 +1112,103 @@ do_process_compiler_arg(Globals0, OpModeArgs, OptionArgs, FileOrModule,
                 FileOrModule, ModulesToRecompile,
                 ModulesToLink, ExtraObjFiles, !HaveReadModuleMaps, !IO)
         )
+    ).
+
+:- pred do_process_compiler_arg_make_interface(globals::in,
+    op_mode_interface_file::in, file_or_module::in,
+    have_read_module_maps::in, have_read_module_maps::out,
+    io::di, io::uo) is det.
+
+do_process_compiler_arg_make_interface(Globals0, InterfaceFile, FileOrModule,
+        !HaveReadModuleMaps, !IO) :-
+    (
+        InterfaceFile = omif_int3,
+        ReturnTimestamp = dont_return_timestamp
+    ;
+        InterfaceFile = omif_int0,
+        globals.lookup_bool_option(Globals0, generate_item_version_numbers,
+            GenerateVersionNumbers),
+        ReturnTimestamp =
+            version_numbers_return_timestamp(GenerateVersionNumbers)
+    ;
+        InterfaceFile = omif_int1_int2,
+        globals.lookup_bool_option(Globals0, generate_item_version_numbers,
+            GenerateVersionNumbers),
+        ReturnTimestamp =
+            version_numbers_return_timestamp(GenerateVersionNumbers)
+    ),
+    read_module_or_file(Globals0, Globals, FileOrModule,
+        ModuleName, FileName, ReturnTimestamp, MaybeTimestamp,
+        ParseTreeSrc, ReadSpecs, ReadErrors, !HaveReadModuleMaps, !IO),
+    ( if halt_at_module_error(Globals, ReadErrors) then
+        write_error_specs_ignore(Globals, ReadSpecs, !IO)
+    else
+        split_into_compilation_units_perform_checks(ParseTreeSrc,
+            RawCompUnits, ReadSpecs, ReadSplitSpecs),
+        filter_interface_generation_specs(Globals, ReadSplitSpecs, Specs, !IO),
+        write_error_specs_ignore(Globals, Specs, !IO),
+        maybe_print_delayed_error_messages(Globals, !IO),
+        (
+            InterfaceFile = omif_int0,
+            list.foldl2(
+                write_private_interface_file_int0(Globals0,
+                    FileName, ModuleName, MaybeTimestamp),
+                RawCompUnits, !HaveReadModuleMaps, !IO)
+        ;
+            InterfaceFile = omif_int1_int2,
+            list.foldl2(
+                write_interface_file_int1_int2(Globals0,
+                    FileName, ModuleName, MaybeTimestamp),
+                RawCompUnits, !HaveReadModuleMaps, !IO)
+        ;
+            InterfaceFile = omif_int3,
+            list.foldl(
+                write_short_interface_file_int3(Globals0, FileName),
+                RawCompUnits, !IO)
+        )
+    ).
+
+:- pred find_modules_to_recompile(globals::in, globals::out,
+    file_or_module::in, modules_to_recompile::out,
+    have_read_module_maps::in, have_read_module_maps::out,
+    io::di, io::uo) is det.
+
+find_modules_to_recompile(Globals0, Globals, FileOrModule, ModulesToRecompile,
+        !HaveReadModuleMaps, !IO) :-
+    globals.lookup_bool_option(Globals0, smart_recompilation, Smart0),
+    io_get_disable_smart_recompilation(DisableSmart, !IO),
+    (
+        DisableSmart = yes,
+        globals.set_option(smart_recompilation, bool(no),
+            Globals0, Globals),
+        Smart = no
+    ;
+        DisableSmart = no,
+        Globals = Globals0,
+        Smart = Smart0
+    ),
+    (
+        Smart = yes,
+        (
+            FileOrModule = fm_module(ModuleName)
+        ;
+            FileOrModule = fm_file(FileName),
+            % XXX This won't work if the module name doesn't match
+            % the file name -- such modules will always be recompiled.
+            %
+            % This problem will be fixed when mmake functionality
+            % is moved into the compiler. The file_name->module_name
+            % mapping will be explicitly recorded.
+            file_name_to_module_name(FileName, ModuleName)
+        ),
+        find_smart_recompilation_target_files(Globals, FindTargetFiles),
+        find_timestamp_files(Globals, FindTimestampFiles),
+        recompilation.check.should_recompile(Globals, ModuleName,
+            FindTargetFiles, FindTimestampFiles, ModulesToRecompile,
+            !HaveReadModuleMaps, !IO)
+    ;
+        Smart = no,
+        ModulesToRecompile = all_modules
     ).
 
 %---------------------%
@@ -1277,7 +1305,7 @@ read_augment_and_process_module(Globals0, OpModeAugment, OptionArgs,
         !HaveReadModuleMaps, !IO),
 
     ( if halt_at_module_error(Globals, Errors) then
-        write_error_specs_ignore(Specs0, Globals, !IO),
+        write_error_specs_ignore(Globals, Specs0, !IO),
         ModulesToLink = [],
         ExtraObjFiles = []
     else
@@ -1509,7 +1537,7 @@ augment_and_process_all_submodules(Globals, OpModeAugment,
             FileName, SourceFileModuleName, MaybeTimestamp, NestedSubModules,
             FindTimestampFiles),
         RawCompUnits, ExtraObjFileLists, !Specs, !HaveReadModuleMaps, !IO),
-    write_error_specs_ignore(!.Specs, Globals, !IO),
+    write_error_specs_ignore(Globals, !.Specs, !IO),
     list.map(module_to_link, RawCompUnits, ModulesToLink),
     list.condense(ExtraObjFileLists, ExtraObjFiles).
 
@@ -2034,7 +2062,7 @@ maybe_grab_plain_and_trans_opt_files(Globals, OpModeAugment, Verbose,
                     [always(Pieces)]),
                 Spec = error_spec($pred, severity_warning, phase_read_files,
                     [Msg]),
-                write_error_spec_ignore(Spec, Globals, !IO)
+                write_error_spec_ignore(Globals, Spec, !IO)
             ;
                 WarnNoTransOptDeps = no
             )

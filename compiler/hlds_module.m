@@ -635,7 +635,7 @@
                 % The contents of type_repn items read in from the interface
                 % files of other modules, containing information about the
                 % representations of the types defined in those modules.
-                trdd_type_repns         :: list(item_type_repn_info),
+                trdd_type_repns         :: type_ctor_repn_map,
 
                 % The contents of direct_arg clauses in type definitions
                 % read in from the interface files of other modules,
@@ -667,6 +667,7 @@
 :- implementation.
 
 :- import_module libs.op_mode.
+:- import_module mdbcomp.builtin_modules.
 :- import_module parse_tree.file_names.
 :- import_module parse_tree.get_dependencies.
 :- import_module transform_hlds.
@@ -1061,9 +1062,9 @@ module_info_init(AugCompUnit, DumpBaseFileName, Globals, QualifierInfo,
     % the explicit imported was requested, or the implicit import was required.
 
     get_implicit_avail_needs_in_aug_compilation_unit(Globals, AugCompUnit,
-        ImplicitlyImportedModules, ImplicitlyUsedModules),
+        ImplicitlyUsedModules),
     map.init(AvailModuleMap0),
-    set.fold(add_implicit_avail_module(import_decl), ImplicitlyImportedModules,
+    add_implicit_avail_module(import_decl, mercury_public_builtin_module,
         AvailModuleMap0, AvailModuleMap1),
     set.fold(add_implicit_avail_module(use_decl), ImplicitlyUsedModules,
         AvailModuleMap1, AvailModuleMap),
@@ -1092,7 +1093,7 @@ module_info_init(AugCompUnit, DumpBaseFileName, Globals, QualifierInfo,
     set.init(OISUProcs),
     TSStringTableSize = 0,
     TSRevStringTable = [],
-    TypeRepnDecision = type_repn_decision_data([], map.init, [], []),
+    TypeRepnDecision = type_repn_decision_data(map.init, map.init, [], []),
 
     ModuleRareInfo = module_rare_info(
         ModuleName,

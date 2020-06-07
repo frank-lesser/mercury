@@ -188,6 +188,7 @@
     ;       phase_mode_check(mode_report_control)
     ;       phase_purity_check
     ;       phase_detism_check
+    ;       phase_fact_table_check
     ;       phase_oisu_check
     ;       phase_simplify(mode_report_control)
     ;       phase_style
@@ -370,14 +371,14 @@
 
 %---------------------------------------------------------------------------%
 
-    % write_error_spec_ignore(Spec, Globals, !IO):
-    % write_error_spec_ignore(Stream, Spec, Globals, !IO):
-    % write_error_specs_ignore(Specs, Globals, !IO):
-    % write_error_specs_ignore(Stream, Specs, Globals, !IO):
-    % write_error_spec(Spec, Globals, !NumWarnings, !NumErrors, !IO):
-    % write_error_spec(Stream, Spec, Globals, !NumWarnings, !NumErrors, !IO):
-    % write_error_specs(Specs, Globals, !NumWarnings, !NumErrors, !IO):
-    % write_error_specs(Stream, Specs, Globals, !NumWarnings, !NumErrors, !IO):
+    % write_error_spec_ignore(Globals, Spec, !IO):
+    % write_error_spec_ignore(Stream, Globals, Spec, !IO):
+    % write_error_specs_ignore(Globals, Specs !IO):
+    % write_error_specs_ignore(Stream, Globals, Specs !IO):
+    % write_error_spec(Globals, Spec, !NumWarnings, !NumErrors, !IO):
+    % write_error_spec(Stream, Globals, Spec, !NumWarnings, !NumErrors, !IO):
+    % write_error_specs(Globals, Specs !NumWarnings, !NumErrors, !IO):
+    % write_error_specs(Stream, Globals, Specs !NumWarnings, !NumErrors, !IO):
     %
     % Write out the error message(s) specified by Spec or Specs, minus the
     % parts whose conditions are false. In the non-ignore versions,
@@ -404,23 +405,27 @@
     % since we do set the exit status to a nonzero value when we print an
     % error, and the main use of the num_errors field is to do likewise.
     %
-:- pred write_error_spec_ignore(error_spec::in,
-    globals::in, io::di, io::uo) is det.
-:- pred write_error_spec_ignore(io.text_output_stream::in, error_spec::in,
-    globals::in, io::di, io::uo) is det.
-:- pred write_error_specs_ignore(list(error_spec)::in,
-    globals::in, io::di, io::uo) is det.
-:- pred write_error_specs_ignore(io.text_output_stream::in,
-    list(error_spec)::in, globals::in, io::di, io::uo) is det.
+:- pred write_error_spec_ignore(globals::in, error_spec::in,
+    io::di, io::uo) is det.
+:- pred write_error_spec_ignore(io.text_output_stream::in, globals::in,
+    error_spec::in, io::di, io::uo) is det.
+:- pred write_error_specs_ignore(globals::in, list(error_spec)::in,
+    io::di, io::uo) is det.
+:- pred write_error_specs_ignore(io.text_output_stream::in, globals::in,
+    list(error_spec)::in, io::di, io::uo) is det.
 
-:- pred write_error_spec(error_spec::in,
-    globals::in, int::in, int::out, int::in, int::out, io::di, io::uo) is det.
-:- pred write_error_spec(io.text_output_stream::in, error_spec::in,
-    globals::in, int::in, int::out, int::in, int::out, io::di, io::uo) is det.
-:- pred write_error_specs(list(error_spec)::in,
-    globals::in, int::in, int::out, int::in, int::out, io::di, io::uo) is det.
-:- pred write_error_specs(io.text_output_stream::in, list(error_spec)::in,
-    globals::in, int::in, int::out, int::in, int::out, io::di, io::uo) is det.
+:- pred write_error_spec(globals::in,
+    error_spec::in, int::in, int::out, int::in, int::out,
+    io::di, io::uo) is det.
+:- pred write_error_spec(io.text_output_stream::in, globals::in,
+    error_spec::in, int::in, int::out, int::in, int::out,
+    io::di, io::uo) is det.
+:- pred write_error_specs(globals::in,
+    list(error_spec)::in, int::in, int::out, int::in, int::out,
+    io::di, io::uo) is det.
+:- pred write_error_specs(io.text_output_stream::in, globals::in,
+    list(error_spec)::in, int::in, int::out, int::in, int::out,
+    io::di, io::uo) is det.
 
 %---------------------------------------------------------------------------%
 
@@ -1193,6 +1198,7 @@ get_maybe_mode_report_control(phase_polymorphism) = no.
 get_maybe_mode_report_control(phase_mode_check(Control)) = yes(Control).
 get_maybe_mode_report_control(phase_purity_check) = no.
 get_maybe_mode_report_control(phase_detism_check) = no.
+get_maybe_mode_report_control(phase_fact_table_check) = no.
 get_maybe_mode_report_control(phase_oisu_check) = no.
 get_maybe_mode_report_control(phase_simplify(Control)) = yes(Control).
 get_maybe_mode_report_control(phase_style) = no.
@@ -1216,23 +1222,23 @@ pre_hlds_maybe_write_out_errors(Stream, Verbose, Globals, !Specs, !IO) :-
         Verbose = no
     ;
         Verbose = yes,
-        write_error_specs_ignore(Stream, !.Specs, Globals, !IO),
+        write_error_specs_ignore(Stream, Globals, !.Specs, !IO),
         !:Specs = []
     ).
 
 %---------------------------------------------------------------------------%
 
-write_error_spec_ignore(Spec, Globals, !IO) :-
-    write_error_spec(Spec, Globals, 0, _, 0, _, !IO).
+write_error_spec_ignore(Globals, Spec, !IO) :-
+    write_error_spec(Globals, Spec, 0, _, 0, _, !IO).
 
-write_error_spec_ignore(Stream, Spec, Globals, !IO) :-
-    write_error_spec(Stream, Spec, Globals, 0, _, 0, _, !IO).
+write_error_spec_ignore(Stream, Globals, Spec, !IO) :-
+    write_error_spec(Stream, Globals, Spec, 0, _, 0, _, !IO).
 
-write_error_specs_ignore(Specs, Globals, !IO) :-
-    write_error_specs(Specs, Globals, 0, _, 0, _, !IO).
+write_error_specs_ignore(Globals, Specs, !IO) :-
+    write_error_specs(Globals, Specs, 0, _, 0, _, !IO).
 
-write_error_specs_ignore(Stream, Specs, Globals, !IO) :-
-    write_error_specs(Stream, Specs, Globals, 0, _, 0, _, !IO).
+write_error_specs_ignore(Stream, Globals, Specs, !IO) :-
+    write_error_specs(Stream, Globals, Specs, 0, _, 0, _, !IO).
 
 %---------------------------------------------------------------------------%
 %
@@ -1248,21 +1254,21 @@ write_error_specs_ignore(Stream, Specs, Globals, !IO) :-
 % for verbose_once message to be printed by each of several invocations
 % of write_error_specs, in practice it won't happen.
 
-write_error_spec(Spec, Globals, !NumWarnings, !NumErrors, !IO) :-
+write_error_spec(Globals, Spec, !NumWarnings, !NumErrors, !IO) :-
     io.output_stream(Stream, !IO),
-    write_error_spec(Stream, Spec, Globals, !NumWarnings, !NumErrors, !IO).
+    write_error_spec(Stream, Globals, Spec, !NumWarnings, !NumErrors, !IO).
 
-write_error_spec(Stream, Spec, Globals, !NumWarnings, !NumErrors, !IO) :-
+write_error_spec(Stream, Globals, Spec, !NumWarnings, !NumErrors, !IO) :-
     do_write_error_spec(Stream, Globals, Spec, !NumWarnings, !NumErrors,
         set.init, _, !IO).
 
 %---------------------%
 
-write_error_specs(Specs0, Globals, !NumWarnings, !NumErrors, !IO) :-
+write_error_specs(Globals, Specs0, !NumWarnings, !NumErrors, !IO) :-
     io.output_stream(Stream, !IO),
-    write_error_specs(Stream, Specs0, Globals, !NumWarnings, !NumErrors, !IO).
+    write_error_specs(Stream, Globals, Specs0, !NumWarnings, !NumErrors, !IO).
 
-write_error_specs(Stream, Specs0, Globals, !NumWarnings, !NumErrors, !IO) :-
+write_error_specs(Stream, Globals, Specs0, !NumWarnings, !NumErrors, !IO) :-
     sort_error_specs(Globals, Specs0, Specs),
     list.foldl4(do_write_error_spec(Stream, Globals), Specs,
         !NumWarnings, !NumErrors, set.init, _, !IO).

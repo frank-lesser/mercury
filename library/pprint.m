@@ -258,7 +258,7 @@
     % NOTE: since these types are now instances of the doc/1 type class,
     % it is simpler to just apply the doc/1 method to these types.
     %
-:- func poly(string.poly_type) = doc.
+:- func poly(poly_type) = doc.
 
     % Shorthand for doc ++ line ++ doc.
     %
@@ -463,9 +463,7 @@ group(X)                = 'GROUP'(doc(X)).
 poly(s(S))              = text(string.format("%s", [s(S)])).
 poly(c(C))              = text(string.format("%c", [c(C)])).
 poly(i(I))              = text(string.format("%d", [i(I)])).
-% XXX FIXME: replace the following line after the bootstrap compiler
-% understands how to specialise format calls with uints.
-poly(u(U))              = text(uint_to_string(U)).
+poly(u(U))              = text(string.format("%u", [u(U)])).
 poly(f(F))              = text(string.format("%f", [f(F)])).
 
 %---------------------------------------------------------------------------%
