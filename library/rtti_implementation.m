@@ -3777,13 +3777,14 @@ pseudo_type_info_is_variable(_, -1) :-
 ").
 
     % Tests for universal and existentially quantified variables.
-
+    % (The existential version is not used.)
+    %
 :- pred type_variable_is_univ_quant(int::in) is semidet.
-:- pred type_variable_is_exist_quant(int::in) is semidet.
+% :- pred type_variable_is_exist_quant(int::in) is semidet.
 
     % In keeping with mercury_type_info.h.
 type_variable_is_univ_quant(X) :- X =< last_univ_quant_varnum.
-type_variable_is_exist_quant(X) :- X >= first_exist_quant_varnum.
+% type_variable_is_exist_quant(X) :- X >= first_exist_quant_varnum.
 
 :- func last_univ_quant_varnum = int.
 
@@ -4359,6 +4360,7 @@ set_type_info_index(_, _, _, !TypeInfo) :-
 %---------------------%
 
 :- pred semidet_unimplemented(string::in) is semidet.
+:- pragma consider_used(semidet_unimplemented/1).
 
 semidet_unimplemented(S) :-
     ( if semidet_succeed then
@@ -4368,6 +4370,7 @@ semidet_unimplemented(S) :-
     ).
 
 :- pred det_unimplemented(string::in) is det.
+:- pragma consider_used(det_unimplemented/1).
 
 det_unimplemented(S) :-
     ( if semidet_succeed then
@@ -4797,80 +4800,6 @@ du_functor_arity(DuFunctorDesc) = DuFunctorDesc ^ unsafe_index(1).
     Arity = DuFunctorDesc.du_functor_orig_arity;
 ").
 
-:- func du_functor_arg_type_contains_var(du_functor_desc) = uint16.
-
-du_functor_arg_type_contains_var(DuFunctorDesc) =
-    DuFunctorDesc ^ unsafe_index(2).
-
-:- pragma foreign_proc("C#",
-    du_functor_arg_type_contains_var(DuFunctorDesc::in) = (Contains::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Contains = DuFunctorDesc.du_functor_arg_type_contains_var;
-").
-
-:- pragma foreign_proc("Java",
-    du_functor_arg_type_contains_var(DuFunctorDesc::in) = (Contains::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Contains = DuFunctorDesc.du_functor_arg_type_contains_var;
-").
-
-:- func du_functor_sectag_locn(du_functor_desc) = sectag_locn.
-
-du_functor_sectag_locn(DuFunctorDesc) =
-    unsafe_make_enum(DuFunctorDesc ^ unsafe_index(3)).
-
-:- pragma foreign_proc("C#",
-    du_functor_sectag_locn(DuFunctorDesc::in) = (SectagLocn::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    SectagLocn = DuFunctorDesc.du_functor_sectag_locn;
-").
-
-:- pragma foreign_proc("Java",
-    du_functor_sectag_locn(DuFunctorDesc::in) = (SectagLocn::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    SectagLocn = DuFunctorDesc.du_functor_sectag_locn;
-").
-
-:- func du_functor_primary(du_functor_desc) = uint8.
-
-du_functor_primary(DuFunctorDesc) = DuFunctorDesc ^ unsafe_index(4).
-
-:- pragma foreign_proc("C#",
-    du_functor_primary(DuFunctorDesc::in) = (Primary::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Primary = DuFunctorDesc.du_functor_primary;
-").
-
-:- pragma foreign_proc("Java",
-    du_functor_primary(DuFunctorDesc::in) = (Primary::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Primary = DuFunctorDesc.du_functor_primary;
-").
-
-:- func du_functor_secondary(du_functor_desc) = int32.
-
-du_functor_secondary(DuFunctorDesc) = DuFunctorDesc ^ unsafe_index(5).
-
-:- pragma foreign_proc("C#",
-    du_functor_secondary(DuFunctorDesc::in) = (Secondary::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Secondary = DuFunctorDesc.du_functor_secondary;
-").
-
-:- pragma foreign_proc("Java",
-    du_functor_secondary(DuFunctorDesc::in) = (Secondary::out),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    Secondary = DuFunctorDesc.du_functor_secondary;
-").
-
 :- func du_functor_ordinal(du_functor_desc) = int32.
 
 du_functor_ordinal(DuFunctorDesc) = DuFunctorDesc ^ unsafe_index(6).
@@ -5255,6 +5184,7 @@ notag_functor_arg_name(NoTagFunctorDesc) = NoTagFunctorDesc ^ unsafe_index(2).
 
     % XXX get rid of this
 :- func unsafe_index(int, T) = U.
+:- pragma consider_used(unsafe_index/2).
 :- pragma foreign_proc("C#",
     unsafe_index(_Num::in, _Array::in) = (Item::out),
     [will_not_call_mercury, thread_safe, promise_pure],
@@ -5266,20 +5196,9 @@ unsafe_index(_, _) = _ :-
 
 %---------------------------------------------------------------------------%
 
-:- func unsafe_make_enum(int) = T.
-:- pragma foreign_proc("C#",
-    unsafe_make_enum(Num::in) = (Enum::out),
-    [will_not_call_mercury, thread_safe, promise_pure],
-"
-    Enum = mercury.runtime.LowLevelData.make_enum(Num);
-").
-unsafe_make_enum(_) = _ :-
-    private_builtin.sorry("rtti_implementation.unsafe_make_enum").
-
-%---------------------------------------------------------------------------%
-
 :- pred null(T::in) is semidet.
 :- pragma no_determinism_warning(null/1).
+:- pragma consider_used(null/1).
 
 :- pragma foreign_proc("C",
     null(S::in),

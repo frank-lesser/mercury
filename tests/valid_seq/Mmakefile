@@ -2,6 +2,7 @@
 # vim: ts=8 sw=8 noexpandtab ft=make
 #-----------------------------------------------------------------------------#
 
+TESTS_DIR = ..
 THIS_DIR = valid_seq
 MAYBE_J1 = -j1
 
@@ -18,8 +19,6 @@ TRAIL_PROGS =
 TYPECLASS_PROGS = \
 	func_class \
 	tc_map_lookup
-
-NO_SPECIAL_PREDS_PROGS =
 
 C_PROGS =
 
@@ -38,8 +37,6 @@ TABLE_PROGS =
 PAR_CONJ_PROGS =
 
 CTGC_PROGS =
-
-RESERVE_TAG_PROGS =
 
 CONSTRAINT_TYPECHECK_PROGS = \
 	ambig_high_level \

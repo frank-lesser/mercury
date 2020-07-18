@@ -6114,11 +6114,12 @@ read_char_code(input_stream(Stream), ResultCode, Char, Error, !IO) :-
         if (MR_FERROR(*Stream)) {
             ResultCode = ML_RESULT_CODE_ERROR;
             Error = errno;
+            Char = 0;
         } else {
             ResultCode = ML_RESULT_CODE_EOF;
             Error = 0;
+            Char = 0;
         }
-        Char = 0;
     } else {
         if ((uc & 0xE0) == 0xC0) {
             nbytes = 2;
@@ -10125,6 +10126,7 @@ read_file_as_string_2(Stream, String, NumCUs, Error, NullCharError, !IO) :-
 :- pred read_file_as_string_loop(input_stream::in, buffer::buffer_di,
     buffer::buffer_uo, int::in, int::out, int::in, int::out, system_error::out,
     io::di, io::uo) is det.
+:- pragma consider_used(read_file_as_string_loop/10).
 
 read_file_as_string_loop(Stream, !Buffer, BufferSize0, BufferSize,
         !NumCUs, Error, !IO) :-
@@ -10261,6 +10263,7 @@ read_binary_file_as_bitmap_2(Stream, BufferSize, Res, !BMs, !IO) :-
     % XXX FIXME this should return an int64.
 :- pred input_stream_file_size(io.input_stream::in, int::out,
     io::di, io::uo) is det.
+:- pragma consider_used(input_stream_file_size/4).
 
 input_stream_file_size(input_stream(Stream), Size, !IO) :-
     stream_file_size(Stream, Size64, !IO),
@@ -10354,6 +10357,7 @@ binary_input_stream_file_size(binary_input_stream(Stream), Size, !IO) :-
 :- mode buffer_uo == out(uniq_buffer).
 
 :- pred alloc_buffer(int::in, buffer::buffer_uo) is det.
+:- pragma consider_used(alloc_buffer/2).
 
 :- pragma foreign_proc("C",
     alloc_buffer(Size::in, Buffer::buffer_uo),
@@ -10416,6 +10420,7 @@ resize_buffer(_OldSize, NewSize, buffer(Array0), buffer(Array)) :-
     array.resize(NewSize, Char, Array0, Array).
 
 :- pred buffer_to_string(buffer::buffer_di, int::in, string::uo) is semidet.
+:- pragma consider_used(buffer_to_string/3).
 
 :- pragma foreign_proc("C",
     buffer_to_string(Buffer::buffer_di, Len::in, Str::uo),
@@ -10473,6 +10478,7 @@ read_into_buffer(Stream, buffer(Array0), buffer(Array), BufferSize,
 :- pred read_into_array(input_stream::in,
     array(char)::array_di, array(char)::array_uo, int::in, int::in, int::out,
     system_error::out, io::di, io::uo) is det.
+:- pragma consider_used(read_into_array/9).
 
 read_into_array(Stream, !Array, ArraySize, !Pos, Error, !IO) :-
     ( if !.Pos >= ArraySize then
@@ -13798,6 +13804,7 @@ typedef struct {
 
 :- pred compare_file_id(comparison_result::uo, file_id::in, file_id::in)
     is det.
+:- pragma consider_used(compare_file_id/3).
 
 compare_file_id(Result, FileId1, FileId2) :-
     compare_file_id_2(Result0, FileId1, FileId2),
@@ -13843,12 +13850,8 @@ compare_file_id(Result, FileId1, FileId2) :-
     }
 ").
 
-:- pragma foreign_proc("Java",
-    compare_file_id_2(_Res::out, _FileId1::in, _FileId2::in),
-    [will_not_call_mercury, promise_pure, thread_safe],
-"
-    throw new RuntimeException(""File IDs are not supported by Java."");
-").
+compare_file_id_2(_, _, _) :-
+    unexpected($pred, "File IDs are not supported by Java").
 
 :- pragma foreign_proc("Erlang",
     compare_file_id_2(Res::out, FileId1::in, FileId2::in),
@@ -14153,18 +14156,6 @@ get_io_stream_info(StreamDB, Stream) = StreamInfo :-
     ),
     StreamInfo = io.maybe_stream_info(StreamDB, IOStream).
 
-:- func maybe_source_name(maybe(stream_info)) = string.
-
-maybe_source_name(MaybeInfo) = Name :-
-    (
-        MaybeInfo = yes(Info),
-        Info = stream(_, _, _, Source),
-        Name = source_name(Source)
-    ;
-        MaybeInfo = no,
-        Name = "<stream name unavailable>"
-    ).
-
 :- func source_name(stream_source) = string.
 
 source_name(file(Name)) = Name.
@@ -14246,24 +14237,23 @@ decode_system_command_exit_code(Code0) = Status :-
     [will_not_call_mercury, thread_safe, promise_pure,
         does_not_affect_liveness, no_sharing],
 "
+    Exited = MR_NO;
+    Status = 0;
+    Signalled = MR_NO;
+    Signal = 0;
+
     #if defined (WIFEXITED) && defined (WEXITSTATUS) && \
             defined (WIFSIGNALED) && defined (WTERMSIG)
         if (WIFEXITED(Status0)) {
             Exited = MR_YES;
-            Signalled = MR_NO;
             Status = WEXITSTATUS(Status0);
         } else if (WIFSIGNALED(Status0)) {
-            Exited = MR_NO;
             Signalled = MR_YES;
             Signal = -WTERMSIG(Status0);
-        } else {
-            Exited = MR_NO;
-            Signalled = MR_NO;
         }
     #else
         Exited = MR_YES;
         Status = Status0;
-        Signalled = MR_NO;
     #endif
 ").
 
